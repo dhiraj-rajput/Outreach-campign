@@ -41,7 +41,7 @@ Guidelines / Context: "${prompt || "Provide a warm greeting, concise introductio
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: USER_PROMPT },
       ],
-      max_tokens: 1000,
+      max_tokens: 500,
       temperature: 0.5,
     });
 
@@ -76,6 +76,24 @@ Guidelines / Context: "${prompt || "Provide a warm greeting, concise introductio
       finalHtml = `${bannerHtml}\n${finalHtml}`;
     }
 
+    // Pick a dynamic, professional header gradient based on topic or style
+    const getDynamicHeaderGradient = (topicStr: string, styleStr: string) => {
+      const lower = (topicStr + " " + styleStr).toLowerCase();
+      if (lower.includes("eco") || lower.includes("green") || lower.includes("nature") || lower.includes("dolphin") || lower.includes("ocean") || lower.includes("friendly")) {
+        return "linear-gradient(135deg, #064e3b 0%, #0d9488 100%)"; // Emerald Teal
+      }
+      if (lower.includes("tech") || lower.includes("ai") || lower.includes("future") || lower.includes("bold")) {
+        return "linear-gradient(135deg, #09090b 0%, #4338ca 100%)"; // Midnight Indigo
+      }
+      if (lower.includes("finance") || lower.includes("money") || lower.includes("invest") || lower.includes("executive")) {
+        return "linear-gradient(135deg, #4c0519 0%, #881337 100%)"; // Royal Burgundy
+      }
+      // Default: Sleek Corporate Dark Slate
+      return "linear-gradient(135deg, #0f172a 0%, #334155 100%)";
+    };
+
+    const headerGradient = getDynamicHeaderGradient(title, style);
+
     // Wrap in standard responsive card container if not wrapped
     if (!finalHtml.includes("<!DOCTYPE html>")) {
       finalHtml = `<!DOCTYPE html>
@@ -87,17 +105,8 @@ Guidelines / Context: "${prompt || "Provide a warm greeting, concise introductio
     <td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:1px solid #e2e8f0;">
         <tr>
-          <td style="background:linear-gradient(135deg, #0f172a 0%, #2563eb 100%);padding:32px 36px;">
-            <table width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td>
-                  <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;">${parsed.subject || title}</h1>
-                </td>
-                <td align="right" valign="top" style="white-space:nowrap;padding-left:16px;">
-                  <a href="{{unsubscribe_url}}" style="color:#ffffff;font-size:12px;font-weight:600;text-decoration:none;background:rgba(255,255,255,0.2);padding:6px 12px;border-radius:20px;display:inline-block;">Unsubscribe</a>
-                </td>
-              </tr>
-            </table>
+          <td style="background:${headerGradient};padding:32px 36px;">
+            <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;">${parsed.subject || title}</h1>
           </td>
         </tr>
         <tr>
@@ -106,8 +115,8 @@ Guidelines / Context: "${prompt || "Provide a warm greeting, concise introductio
           </td>
         </tr>
         <tr>
-          <td style="padding:20px 36px;background:#f1f5f9;border-top:1px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b;">
-            Sent with Linki · <a href="{{unsubscribe_url}}" style="color:#2563eb;text-decoration:none;font-weight:500;">Unsubscribe</a>
+          <td style="padding:16px 36px;background:#f1f5f9;border-top:1px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b;">
+            <a href="{{unsubscribe_url}}" style="color:#64748b;text-decoration:none;font-weight:500;">Unsubscribe</a>
           </td>
         </tr>
       </table>

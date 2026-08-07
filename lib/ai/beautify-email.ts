@@ -1,25 +1,11 @@
 import { runAICompletion } from "@/lib/ai/client";
 
-// Direct port of PPT-Agent's backend/app/routes/campaigns.py::beautify_email(). PPT-Agent's
-// version calls its own internal AI client (Ollama → Gemini → OpenRouter fallback chain);
-// linki's equivalent multi-provider AI plumbing (premium.ai) lives in the ee/-only build and
-// is not present in this zip (see 01-comparison-report.md §1/§5), so this module goes through
-// the same shared, free-tier AI client (lib/ai/client.ts) that newsletter AI-generate and the
-// LinkedIn reply classifier already use — it reads whichever of Gemini/OpenRouter the user has
-// configured in Settings → Integrations. (An earlier version of this file queried the
-// `integrations` table directly and read its model from `agent_config.default_model`, a column
-// that's only ever written by the ee/-only premium AI writer — in this public build that column
-// is always NULL, so beautify silently fell back to the plain template on every call even with
-// a valid key configured.) If no provider is configured, or the call fails for any reason, this
-// degrades to the same styled fallback template PPT-Agent falls back to — beautify never blocks
-// the user from sending.
-
 export type BeautifyStyle = "professional" | "friendly" | "bold";
 
 const STYLE_DESCRIPTIONS: Record<BeautifyStyle, string> = {
-  professional: "Sleek slate-blue gradient header (#0f172a to #2563eb), crisp corporate typography, white card background (#ffffff), soft shadow border, dark slate text (#1e293b)",
-  friendly: "Warm emerald and teal gradient header (#059669 to #0d9488), approachable layout, rounded cards (#f0fdf4), dark teal text (#064e3b)",
-  bold: "Modern dark theme header (#09090b with vibrant #6366f1 indigo accents), high contrast, bold headlines, crisp typography",
+  professional: "Sleek dark slate gradient header (#0f172a to #334155), crisp corporate typography, white card background (#ffffff), soft shadow border, dark slate text (#1e293b)",
+  friendly: "Warm emerald and teal gradient header (#064e3b to #0d9488), approachable layout, rounded cards (#f0fdf4), dark teal text (#064e3b)",
+  bold: "Modern dark theme header (#09090b with vibrant #4338ca indigo accents), high contrast, bold headlines, crisp typography",
 };
 
 export interface BeautifyResult {
@@ -32,10 +18,10 @@ function fallbackTemplate(subject: string, body: string, style: BeautifyStyle = 
   const escapedBody = body.replace(/\n/g, "<br>");
   const headerBg =
     style === "friendly"
-      ? "linear-gradient(135deg, #059669 0%, #0d9488 100%)"
+      ? "linear-gradient(135deg, #064e3b 0%, #0d9488 100%)"
       : style === "bold"
-      ? "linear-gradient(135deg, #09090b 0%, #4f46e5 100%)"
-      : "linear-gradient(135deg, #0f172a 0%, #2563eb 100%)";
+      ? "linear-gradient(135deg, #09090b 0%, #4338ca 100%)"
+      : "linear-gradient(135deg, #0f172a 0%, #334155 100%)";
 
   return `<!DOCTYPE html>
 <html>
@@ -47,16 +33,7 @@ function fallbackTemplate(subject: string, body: string, style: BeautifyStyle = 
       <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:1px solid #e2e8f0;">
         <tr>
           <td style="background:${headerBg};padding:32px 36px;">
-            <table width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td>
-                  <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;letter-spacing:-0.02em;">${subject || "Important Update"}</h1>
-                </td>
-                <td align="right" valign="top" style="white-space:nowrap;padding-left:16px;">
-                  <a href="{{unsubscribe_url}}" style="color:#ffffff;font-size:12px;font-weight:600;text-decoration:none;background:rgba(255,255,255,0.2);padding:6px 12px;border-radius:20px;display:inline-block;">Unsubscribe</a>
-                </td>
-              </tr>
-            </table>
+            <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;letter-spacing:-0.02em;">${subject || "Important Update"}</h1>
           </td>
         </tr>
         <tr>
@@ -65,8 +42,8 @@ function fallbackTemplate(subject: string, body: string, style: BeautifyStyle = 
           </td>
         </tr>
         <tr>
-          <td style="padding:20px 40px;background:#f1f5f9;border-top:1px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b;">
-            Sent with Linki · <a href="{{unsubscribe_url}}" style="color:#2563eb;text-decoration:none;font-weight:500;">Unsubscribe</a>
+          <td style="padding:16px 40px;background:#f1f5f9;border-top:1px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b;">
+            <a href="{{unsubscribe_url}}" style="color:#64748b;text-decoration:none;font-weight:500;">Unsubscribe</a>
           </td>
         </tr>
       </table>
@@ -100,7 +77,7 @@ Return ONLY valid raw HTML — no markdown, no code fences, no explanation text 
 Design guidelines:
 - Inline CSS styling for maximum email client compatibility (Gmail, Outlook, Apple Mail)
 - Centered container layout max-width 600px with smooth rounded corners (border-radius: 16px)
-- Beautiful gradient header banner reflecting the style theme
+- Beautiful gradient header banner reflecting the style theme (Dark Slate #0f172a, Emerald Teal #064e3b, or Midnight Indigo #09090b — do NOT use static bright blue)
 - Body font stack: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif
 - Paragraph line-height: 1.7, font-size: 15px
 - Style Preset: ${styleDesc}
