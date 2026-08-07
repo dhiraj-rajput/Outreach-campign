@@ -594,7 +594,7 @@ function Wizard({
   const [previewListId, setPreviewListId] = useState("");
   const [previewTargetId, setPreviewTargetId] = useState("");
   const [previewListTargets, setPreviewListTargets] = useState<ListTarget[]>([]);
-  const [previewResult, setPreviewResult] = useState<{ subject?: string; body: string; input_tokens: number; output_tokens: number; cost_usd: number | null } | null>(null);
+  const [previewResult, setPreviewResult] = useState<{ subject?: string; body: string; html?: string; input_tokens: number; output_tokens: number; cost_usd: number | null } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   // Stores last preview cost per wizard step index (for summary cost estimation)
   const [stepPreviewCosts, setStepPreviewCosts] = useState<Record<number, { input_tokens: number; output_tokens: number; cost_usd: number }>>({});
@@ -618,6 +618,7 @@ function Wizard({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Beautify failed");
       updateStep(idx, { emailBodyHtml: data.html as string, emailUseHtml: true });
+      setHtmlModalIdx(idx);
       if (data.usedFallback) setBeautifyError(data.error || "AI unavailable — used a basic styled template instead.");
     } catch (err) {
       setBeautifyError(err instanceof Error ? err.message : "Beautify failed");
@@ -683,7 +684,39 @@ function Wizard({
       });
       const d = await r.json();
       if (!r.ok) { toast.error(d.error ?? "Preview failed"); return; }
+
+      // Automatically generate beautified HTML email for email steps in 1 single step
+      if (ws.type === "email" && d.body) {
+        try {
+          const bRes = await fetch("/api/beautify-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subject: d.subject || "Introduction", body: d.body, style: beautifyStyle }),
+          });
+          if (bRes.ok) {
+            const bData = await bRes.json();
+            d.html = bData.html;
+          }
+        } catch { /* ignore fallback */ }
+      }
+
       setPreviewResult(d);
+      // Auto-apply generated content to the step so it persists even if modal is closed
+      if (previewIdx !== null) {
+        const step = wizardSteps[previewIdx];
+        if (step) {
+          if (step.type === "email") {
+            updateStep(previewIdx, {
+              emailSubject: d.subject ?? (step.emailSubject || ""),
+              emailBody: d.body ?? "",
+              emailBodyHtml: d.html || undefined,
+              emailUseHtml: !!d.html,
+            });
+          } else {
+            updateStep(previewIdx, { messageBody: d.body ?? "" });
+          }
+        }
+      }
       if (d.cost_usd != null && previewIdx !== null) {
         setStepPreviewCosts((prev) => ({
           ...prev,
@@ -1938,7 +1971,30 @@ function Wizard({
                       </div>
                       <button
                         type="button"
-                        onClick={() => updateStep(idx, { aiEnabled: !ws.aiEnabled })}
+                        onClick={() => { (async () => {
+                          const enabling = !ws.aiEnabled;
+                          updateStep(idx, { aiEnabled: enabling });
+                          if (!enabling) return;
+                          // try to auto-generate using first contact from selected list
+                          setPreviewIdx(idx);
+                          setPreviewResult(null);
+                          if (listId) {
+                            try {
+                              const r = await fetch(`/api/lists/${listId}`);
+                              if (r.ok) {
+                                const d = await r.json();
+                                const first = d.targets?.[0]?.id;
+                                if (first) {
+                                  setPreviewListId(listId);
+                                  setPreviewTargetId(first);
+                                  await runPreview();
+                                }
+                              }
+                            } catch (e) {
+                              // ignore and leave modal open
+                            }
+                          }
+                        })(); }}
                         className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${ws.aiEnabled ? "bg-primary" : "bg-base-300"}`}
                       >
                         <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${ws.aiEnabled ? "translate-x-5" : "translate-x-0"}`} />
@@ -1956,14 +2012,21 @@ function Wizard({
                       </a>
                     )}
                     {hasPremium && ws.aiEnabled ? (
-                      <div className="space-y-4">
-                        <ModelPicker models={orModels} value={ws.aiModel} open={orModelOpen === idx} search={orModelSearch} collapsedProviders={collapsedProviders}
-                          onOpen={() => { setOrModelOpen(orModelOpen === idx ? null : idx); setOrModelSearch(""); }}
-                          onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSearch={setOrModelSearch}
-                          onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
-                        />
+                        <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="text-xs text-base-content/60">Model:</div>
+                          <div className="text-sm text-base-content/80 flex-1">{(orModels.find(m => m.id === ws.aiModel)?.name) ?? "Integration default"}</div>
+                          <button type="button" onClick={() => { setOrModelOpen(orModelOpen === idx ? null : idx); setOrModelSearch(""); }} className="btn btn-ghost btn-sm">Change</button>
+                        </div>
+                        {orModelOpen === idx && (
+                          <ModelPicker models={orModels} value={ws.aiModel} open={true} search={orModelSearch} collapsedProviders={collapsedProviders}
+                            onOpen={() => { setOrModelOpen(idx); setOrModelSearch(""); }}
+                            onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
+                            onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
+                            onSearch={setOrModelSearch}
+                            onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
+                          />
+                        )}
                         <div>
                           <label className="text-xs text-base-content/40 mb-1.5 block">Step instruction</label>
                           <textarea rows={3} placeholder="e.g. Reference their recent role change." value={ws.aiPrompt} onChange={(e) => updateStep(idx, { aiPrompt: e.target.value })} className="w-full bg-base-300/50 border border-base-300/50 rounded-xl px-3 py-2.5 text-sm text-base-content placeholder:text-base-content/20 focus:outline-none focus:border-primary/40 resize-none" />
@@ -1978,9 +2041,17 @@ function Wizard({
                             {AI_LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
                           </select>
                         </div>
-                        <button type="button" onClick={() => { setPreviewIdx(idx); setPreviewResult(null); setPreviewListId(""); setPreviewListTargets([]); setPreviewTargetId(""); setConfigIdx(null); }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors">
-                          <RiRobot2Line size={13} /> Preview AI output
-                        </button>
+                        {/* Preview generation now triggers on AI toggle; generated text is shown below and editable */}
+                        
+                        <div>
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {VARIABLES.map(v => (
+                              <button key={v} type="button" onClick={() => updateStep(idx, { messageBody: ws.messageBody + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
+                            ))}
+                          </div>
+                          <textarea className={`textarea textarea-bordered w-full bg-base-300/50 text-sm h-32 resize-none font-mono ${ws.templateIds.length > 0 ? "opacity-40 pointer-events-none" : ""}`} placeholder="Hi {{first_name}}, I noticed..." value={ws.messageBody} onChange={(e) => updateStep(idx, { messageBody: e.target.value })} disabled={ws.templateIds.length > 0} />
+                          <p className="text-xs text-base-content/30 mt-1">{ws.messageBody.length} chars</p>
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -2031,7 +2102,27 @@ function Wizard({
                         <p className="text-sm text-base-content/70">AI writes this email</p>
                         <p className="text-xs text-base-content/30 mt-0.5">Subject + body generated per lead</p>
                       </div>
-                      <button type="button" onClick={() => updateStep(idx, { aiEnabled: !ws.aiEnabled })} className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${ws.aiEnabled ? "bg-primary" : "bg-base-300"}`}>
+                      <button type="button" onClick={() => { (async () => {
+                          const enabling = !ws.aiEnabled;
+                          updateStep(idx, { aiEnabled: enabling });
+                          if (!enabling) return;
+                          setPreviewIdx(idx);
+                          setPreviewResult(null);
+                          if (listId) {
+                            try {
+                              const r = await fetch(`/api/lists/${listId}`);
+                              if (r.ok) {
+                                const d = await r.json();
+                                const first = d.targets?.[0]?.id;
+                                if (first) {
+                                  setPreviewListId(listId);
+                                  setPreviewTargetId(first);
+                                  await runPreview();
+                                }
+                              }
+                            } catch (e) {}
+                          }
+                        })(); }} className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${ws.aiEnabled ? "bg-primary" : "bg-base-300"}`}>
                         <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${ws.aiEnabled ? "translate-x-5" : "translate-x-0"}`} />
                       </button>
                     </div>
@@ -2048,13 +2139,20 @@ function Wizard({
                     )}
                     {hasPremium && ws.aiEnabled ? (
                       <div className="space-y-4">
-                        <ModelPicker models={orModels} value={ws.aiModel} open={orModelOpen === idx} search={orModelSearch} collapsedProviders={collapsedProviders}
-                          onOpen={() => { setOrModelOpen(orModelOpen === idx ? null : idx); setOrModelSearch(""); }}
-                          onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSearch={setOrModelSearch}
-                          onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
-                        />
+                        <div className="flex items-center gap-3">
+                          <div className="text-xs text-base-content/60">Model:</div>
+                          <div className="text-sm text-base-content/80 flex-1">{(orModels.find(m => m.id === ws.aiModel)?.name) ?? "Integration default"}</div>
+                          <button type="button" onClick={() => { setOrModelOpen(orModelOpen === idx ? null : idx); setOrModelSearch(""); }} className="btn btn-ghost btn-sm">Change</button>
+                        </div>
+                        {orModelOpen === idx && (
+                          <ModelPicker models={orModels} value={ws.aiModel} open={true} search={orModelSearch} collapsedProviders={collapsedProviders}
+                            onOpen={() => { setOrModelOpen(idx); setOrModelSearch(""); }}
+                            onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
+                            onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
+                            onSearch={setOrModelSearch}
+                            onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
+                          />
+                        )}
                         <div>
                           <label className="text-xs text-base-content/40 mb-1.5 block">Step instruction</label>
                           <textarea rows={3} placeholder="e.g. Focus on their company's growth." value={ws.aiPrompt} onChange={(e) => updateStep(idx, { aiPrompt: e.target.value })} className="w-full bg-base-300/50 border border-base-300/50 rounded-xl px-3 py-2.5 text-sm text-base-content placeholder:text-base-content/20 focus:outline-none focus:border-primary/40 resize-none" />
@@ -2069,9 +2167,22 @@ function Wizard({
                             {AI_LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
                           </select>
                         </div>
-                        <button type="button" onClick={() => { setPreviewIdx(idx); setPreviewResult(null); setPreviewListId(""); setPreviewListTargets([]); setPreviewTargetId(""); setConfigIdx(null); }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors">
-                          <RiRobot2Line size={13} /> Preview AI output
-                        </button>
+                        {/* Preview generation now triggers on AI toggle; generated subject/body shown below and editable */}
+                        <div>
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {VARIABLES.map(v => (
+                              <button key={v} type="button" onClick={() => updateStep(idx, { emailSubject: ws.emailSubject + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
+                            ))}
+                          </div>
+                          <input className="input input-bordered w-full bg-base-300/50 font-mono text-sm mb-2" placeholder="Hi {{first_name}}, quick question" value={ws.emailSubject} onChange={(e) => updateStep(idx, { emailSubject: e.target.value })} />
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {VARIABLES.map(v => (
+                              <button key={v} type="button" onClick={() => updateStep(idx, { emailBody: ws.emailBody + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
+                            ))}
+                          </div>
+                          <textarea className="textarea textarea-bordered w-full bg-base-300/50 text-sm resize-none font-mono" rows={7} placeholder={"Hi {{first_name}},\n\nI came across your profile..."} value={ws.emailBody} onChange={(e) => updateStep(idx, { emailBody: e.target.value, emailUseHtml: false })} />
+                          <p className="text-xs text-base-content/30 mt-1">{ws.emailBody.length} chars</p>
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-4">
@@ -2129,18 +2240,30 @@ function Wizard({
                           </div>
 
                           {ws.emailBodyHtml && (
-                            <div className="flex items-center gap-3 pt-1">
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" className="checkbox checkbox-xs" checked={ws.emailUseHtml} onChange={(e) => updateStep(idx, { emailUseHtml: e.target.checked })} />
-                                <span className="text-xs text-base-content/50">Send HTML version</span>
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => setHtmlModalIdx(idx)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-base-300 text-base-content/80 hover:bg-base-300/80 transition-colors"
-                              >
-                                Preview HTML Email
-                              </button>
+                            <div className="space-y-2 pt-1 border-t border-base-300/30">
+                              <div className="flex items-center justify-between">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={ws.emailUseHtml} onChange={(e) => updateStep(idx, { emailUseHtml: e.target.checked })} />
+                                  <span className="text-xs font-medium text-base-content/80">Send Beautified HTML Email</span>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => setHtmlModalIdx(idx)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                                >
+                                  Full Screen Preview Modal ↗
+                                </button>
+                              </div>
+                              {ws.emailUseHtml && (
+                                <div className="rounded-lg border border-base-300 bg-white overflow-hidden shadow-sm" style={{ height: 180 }}>
+                                  <iframe
+                                    srcDoc={ws.emailBodyHtml}
+                                    title="HTML Preview"
+                                    className="w-full h-full border-0"
+                                    sandbox="allow-same-origin"
+                                  />
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -2366,13 +2489,35 @@ function Wizard({
                       <div className="bg-base-300/50 rounded-lg px-3 py-2 text-sm font-medium">{previewResult.subject}</div>
                     </div>
                   )}
-                  <div>
-                    <p className="text-xs text-base-content/40 mb-1">
-                      Body
-                      <span className="ml-2 text-base-content/25">{previewResult.body.trim().split(/\s+/).filter(Boolean).length} words</span>
-                    </p>
-                    <div className="bg-base-300/50 rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">{previewResult.body}</div>
-                  </div>
+
+                  {/* Beautified HTML Live Preview for Email Steps */}
+                  {previewResult.html ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs font-medium text-primary flex items-center gap-1.5">
+                          <RiRobot2Line size={13} /> Beautified HTML Email Preview
+                        </p>
+                        <span className="text-[10px] text-base-content/40 font-mono">{previewResult.body.trim().split(/\s+/).filter(Boolean).length} words</span>
+                      </div>
+                      <div className="rounded-lg border border-base-300 bg-white overflow-hidden shadow-md" style={{ height: 240 }}>
+                        <iframe
+                          srcDoc={previewResult.html}
+                          title="HTML Email Preview"
+                          className="w-full h-full border-0"
+                          sandbox="allow-same-origin"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-xs text-base-content/40 mb-1">
+                        Body
+                        <span className="ml-2 text-base-content/25">{previewResult.body.trim().split(/\s+/).filter(Boolean).length} words</span>
+                      </p>
+                      <div className="bg-base-300/50 rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">{previewResult.body}</div>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-4 text-xs text-base-content/30 pt-1">
                     {(previewResult.input_tokens || previewResult.output_tokens) ? (
                       <span>{(previewResult.input_tokens ?? 0) + (previewResult.output_tokens ?? 0)} tokens ({previewResult.input_tokens ?? 0} in / {previewResult.output_tokens ?? 0} out)</span>
@@ -2380,6 +2525,30 @@ function Wizard({
                     {previewResult.cost_usd != null && previewResult.cost_usd > 0 && (
                       <span>${previewResult.cost_usd.toFixed(5)}</span>
                     )}
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button type="button" onClick={() => {
+                      // Apply generated content & beautified HTML to step in 1 single step
+                      if (previewIdx === null) return;
+                      const step = wizardSteps[previewIdx];
+                      if (!step) return;
+                      if (step.type === "email") {
+                        updateStep(previewIdx, {
+                          emailSubject: previewResult.subject ?? (step.emailSubject || ""),
+                          emailBody: previewResult.body ?? "",
+                          emailBodyHtml: previewResult.html || undefined,
+                          emailUseHtml: !!previewResult.html,
+                        });
+                      } else {
+                        updateStep(previewIdx, { messageBody: previewResult.body ?? "" });
+                      }
+                      setPreviewIdx(null);
+                      setPreviewResult(null);
+                    }} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-primary text-white hover:bg-primary/90 transition-colors">
+                      Use generated
+                    </button>
+                    <button type="button" onClick={() => { setPreviewIdx(null); setPreviewResult(null); }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-base-300">Close</button>
                   </div>
                 </div>
               )}

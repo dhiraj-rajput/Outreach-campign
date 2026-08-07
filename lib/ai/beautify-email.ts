@@ -15,7 +15,11 @@ export interface BeautifyResult {
 }
 
 function fallbackTemplate(subject: string, body: string, style: BeautifyStyle = "professional"): string {
-  const escapedBody = body.replace(/\n/g, "<br>");
+  let cleanBodyText = body.replace(/User Safety:\s*safe/gi, "").replace(/Safety evaluation:[\s\S]*/gi, "").trim();
+  if (!cleanBodyText || cleanBodyText.length < 15) {
+    cleanBodyText = "I hope you're having a great week. I'm reaching out to introduce our solutions tailored for engineering and technology leaders. Would you be available for a quick 15-minute intro chat next week?";
+  }
+  const escapedBody = cleanBodyText.replace(/\n/g, "<br>");
   const headerBg =
     style === "friendly"
       ? "linear-gradient(135deg, #064e3b 0%, #0d9488 100%)"
@@ -72,7 +76,7 @@ export async function beautifyEmail(
   const styleDesc = STYLE_DESCRIPTIONS[style] ?? STYLE_DESCRIPTIONS.professional;
   const prompt = `You are an elite B2B email designer. Convert this plain-text email draft into a responsive HTML email with inline CSS.
 
-Return ONLY valid raw HTML — no markdown, no code fences, no explanation text before or after.
+Return ONLY valid raw HTML — no markdown, no code fences, no explanation text, NO safety evaluation tags.
 
 Design guidelines:
 - Inline CSS styling for maximum email client compatibility (Gmail, Outlook, Apple Mail)
@@ -92,7 +96,7 @@ ${body}`;
       messages: [
         {
           role: "system",
-          content: "You are an expert HTML email designer. Return ONLY raw HTML without markdown formatting or code blocks.",
+          content: "You are an expert HTML email designer. Return ONLY raw HTML without markdown formatting, code blocks, or metadata tags.",
         },
         { role: "user", content: prompt },
       ],
@@ -100,7 +104,15 @@ ${body}`;
       temperature: 0.7,
     });
 
-    const cleanHtml = stripFences(result.content);
+    let cleanHtml = stripFences(result.content)
+      .replace(/User Safety:\s*safe/gi, "")
+      .replace(/Safety evaluation:[\s\S]*/gi, "")
+      .trim();
+
+    if (!cleanHtml || cleanHtml.length < 30 || cleanHtml === "User Safety: safe") {
+      return { html: fallbackTemplate(subject, body, style), usedFallback: true };
+    }
+
     return { html: cleanHtml, usedFallback: false };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
