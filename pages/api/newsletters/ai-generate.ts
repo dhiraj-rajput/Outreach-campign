@@ -25,25 +25,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!title) return res.status(400).json({ error: "title is required" });
 
-  const SYSTEM_PROMPT = `You are a world-class B2B email copywriter and HTML newsletter designer.
-Create an engaging, high-converting newsletter issue based on the given title and topic instructions.
+  const SYSTEM_PROMPT = `You are an expert B2B newsletter copywriter. Write a short, engaging, professional newsletter issue body.
 
-Return ONLY a JSON object with two fields:
-1. "subject": A catchy, compelling email subject line under 60 characters.
-2. "content_html": A fully styled, responsive HTML email body with inline CSS.
-
-Design Requirements:
-- Style theme: ${style}.
-- Responsive email structure (max-width 600px, centered container, 16px rounded corners).
-- Color palette: Sleek corporate header (#0f172a to #2563eb gradient), white card (#ffffff), slate text (#334155), light background (#f8fafc).
-- Typography: Clean sans-serif font stack (system-ui, -apple-system, sans-serif), font-size 15px, line-height 1.7.
-- Content sections: Introduction paragraph, 3 bullet points with bold highlights, actionable takeaway box, and clear closing.
-- Footer: Include unsubscribe footer link pointing to {{unsubscribe_url}}.
-
-NO Markdown, NO code blocks before/after JSON. ONLY raw JSON.`;
+CRITICAL INSTRUCTIONS:
+- You MUST respond with ONLY a raw JSON object.
+- NO inner monologue, NO reasoning, NO explanation, NO preamble, NO markdown fences.
+- JSON structure: {"subject": "<Catchy subject line under 60 chars>", "content_html": "<Clean HTML body paragraphs, bullet points, and callout box>"}`;
 
   const USER_PROMPT = `Newsletter Topic / Title: "${title}"
-Additional Guidelines: "${prompt || "Provide 3 actionable industry insights, a brief intro, and a concluding call to action."}"`;
+Guidelines / Context: "${prompt || "Provide a warm greeting, concise introduction, 3 key takeaways with bold highlights, and a brief closing."}"`;
 
   try {
     const result = await runAICompletion({
@@ -51,21 +41,31 @@ Additional Guidelines: "${prompt || "Provide 3 actionable industry insights, a b
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: USER_PROMPT },
       ],
-      max_tokens: 1500,
-      temperature: 0.7,
+      max_tokens: 1000,
+      temperature: 0.5,
     });
 
     const raw = result.content;
-    const jsonStr = raw.replace(/^```json?\s*/i, "").replace(/```$/, "").trim();
     let parsed: { subject?: string; content_html?: string } = {};
 
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch {
+    // Robust JSON extraction — strip any leading/trailing reasoning or thinking text
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        parsed = { subject: title, content_html: `<p>${raw}</p>` };
+      }
+    } else {
       parsed = { subject: title, content_html: `<p>${raw}</p>` };
     }
 
     let finalHtml = parsed.content_html || `<p>${title}</p>`;
+
+    // Clean up any leaked reasoning artifacts if present in content_html
+    if (finalHtml.includes("We need to output JSON") || finalHtml.includes("Let's draft")) {
+      finalHtml = finalHtml.replace(/We need to output JSON[\s\S]*?content_html":\s*"/i, "").replace(/"\s*\}\s*$/i, "");
+    }
 
     // Embed header banner image if provided
     if (bannerUrl && bannerUrl.trim()) {
