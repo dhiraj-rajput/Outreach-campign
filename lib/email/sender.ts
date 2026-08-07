@@ -17,7 +17,8 @@ export async function sendEmail(
   account: EmailAccount,
   to: string,
   subject: string,
-  body: string
+  body: string,
+  html?: string
 ): Promise<void> {
   const transporter = nodemailer.createTransport({
     host: account.smtp_host,
@@ -35,8 +36,12 @@ export async function sendEmail(
     ? `"${account.from_name}" <${account.from_email}>`
     : account.from_email;
 
+  // `html` (beautified/tracked body) is optional so every existing caller that only ever
+  // sent plain text keeps working unchanged. When present, nodemailer sends a proper
+  // multipart email — `text` stays as the plain-text fallback part.
   await transporter.sendMail({
     from, to, subject, text: body,
+    ...(html ? { html } : {}),
     ...(account.reply_to ? { replyTo: account.reply_to } : {}),
   });
 }

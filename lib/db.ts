@@ -536,6 +536,43 @@ function runMigrations(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
     "CREATE INDEX IF NOT EXISTS idx_li_msg_target ON linkedin_inbox_messages(target_id)",
+
+    // --- Email campaign feature port from PPT-Agent: open/click tracking, unsubscribe/suppression, lead scoring, and AI beautify-to-HTML. ---
+    `CREATE TABLE IF NOT EXISTS tracking_events (
+      id TEXT PRIMARY KEY,
+      tracking_id TEXT NOT NULL UNIQUE,
+      event_type TEXT NOT NULL CHECK(event_type IN ('open', 'click')),
+      target_id TEXT REFERENCES targets(id) ON DELETE CASCADE,
+      run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+      destination_url TEXT,
+      opened_at TEXT,
+      clicked_at TEXT,
+      open_count INTEGER NOT NULL DEFAULT 0,
+      click_count INTEGER NOT NULL DEFAULT 0,
+      user_agent TEXT,
+      ip_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_tracking_events_tracking_id ON tracking_events(tracking_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tracking_events_target_id ON tracking_events(target_id)",
+
+    `CREATE TABLE IF NOT EXISTS suppressions (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      reason TEXT NOT NULL DEFAULT 'unsubscribed',
+      target_id TEXT REFERENCES targets(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_suppressions_email ON suppressions(email)",
+
+    "ALTER TABLE targets ADD COLUMN score INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE targets ADD COLUMN grade TEXT NOT NULL DEFAULT 'cold'",
+    "ALTER TABLE targets ADD COLUMN email_opened_at TEXT",
+    "ALTER TABLE targets ADD COLUMN email_clicked_at TEXT",
+    "ALTER TABLE targets ADD COLUMN unsubscribed_at TEXT",
+
+    "ALTER TABLE workflow_steps ADD COLUMN email_body_html TEXT",
+    "ALTER TABLE workflow_steps ADD COLUMN email_use_html INTEGER NOT NULL DEFAULT 0",
   ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch { /* column already exists */ }

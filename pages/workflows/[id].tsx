@@ -320,6 +320,8 @@ interface WizardStep {
   templateIds: string[];            // multi-template pool for A/B
   emailSubject: string;
   emailBody: string;
+  emailBodyHtml: string;   // AI-beautified HTML version, sent instead of plain text when emailUseHtml is true
+  emailUseHtml: boolean;
   emailSignature: string | null; // null = use email account default
   // AI mode
   aiEnabled: boolean;
@@ -350,6 +352,8 @@ function buildWizardSteps(steps: Step[]): WizardStep[] {
         templateIds: s.template_ids ?? [],
         emailSubject: s.email_subject ?? "",
         emailBody: s.email_body ?? "",
+        emailBodyHtml: (raw.email_body_html as string) ?? "",
+        emailUseHtml: !!raw.email_use_html,
         emailSignature: raw.email_signature != null ? (raw.email_signature as string) : null,
         aiEnabled: !!raw.ai_enabled,
         aiModel: (raw.ai_model as string) ?? "",
@@ -595,6 +599,32 @@ function Wizard({
   // Stores last preview cost per wizard step index (for summary cost estimation)
   const [stepPreviewCosts, setStepPreviewCosts] = useState<Record<number, { input_tokens: number; output_tokens: number; cost_usd: number }>>({});
 
+  // AI beautify (plain text -> styled HTML email)
+  const [beautifyLoadingIdx, setBeautifyLoadingIdx] = useState<number | null>(null);
+  const [beautifyStyle, setBeautifyStyle] = useState<"professional" | "friendly" | "bold">("professional");
+  const [beautifyError, setBeautifyError] = useState<string | null>(null);
+
+  async function beautifyStepEmail(idx: number, ws: WizardStep) {
+    if (!ws.emailBody.trim()) return;
+    setBeautifyLoadingIdx(idx);
+    setBeautifyError(null);
+    try {
+      const res = await fetch("/api/beautify-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: ws.emailSubject, body: ws.emailBody, style: beautifyStyle }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Beautify failed");
+      updateStep(idx, { emailBodyHtml: data.html as string, emailUseHtml: true });
+      if (data.usedFallback) setBeautifyError(data.error || "AI unavailable — used a basic styled template instead.");
+    } catch (err) {
+      setBeautifyError(err instanceof Error ? err.message : "Beautify failed");
+    } finally {
+      setBeautifyLoadingIdx(null);
+    }
+  }
+
   // Open-core: is the AI writer (a premium/ee feature) available in this build?
   const [hasPremium, setHasPremium] = useState(true);
   useEffect(() => {
@@ -737,7 +767,7 @@ function Wizard({
     setWizardSteps((prev) => {
       const trackSteps = prev.filter((s) => s.track === track);
       const isFirstInTrack = trackSteps.length === 0;
-      const newStep: WizardStep = { track, type, delayDaysBefore: isFirstInTrack ? 0 : 1, connectNote: "", messageBody: "", templateId: null, templateIds: [], emailSubject: "", emailBody: "", emailSignature: null, aiEnabled: false, aiModel: "", aiPrompt: "", aiMaxWordsEnabled: false, aiMaxWords: 100, aiLanguage: "English" };
+      const newStep: WizardStep = { track, type, delayDaysBefore: isFirstInTrack ? 0 : 1, connectNote: "", messageBody: "", templateId: null, templateIds: [], emailSubject: "", emailBody: "", emailBodyHtml: "", emailUseHtml: false, emailSignature: null, aiEnabled: false, aiModel: "", aiPrompt: "", aiMaxWordsEnabled: false, aiMaxWords: 100, aiLanguage: "English" };
 
       if (type === "connect") {
         // Insert before the first linkedin message step
@@ -819,6 +849,8 @@ function Wizard({
           // InMail subject reuses the email_subject column (an InMail step never sends email).
           email_subject: isEmail ? (ws.emailSubject || null) : isInMail ? (ws.emailSubject || null) : null,
           email_body: isEmail ? (ws.emailBody || null) : null,
+          email_body_html: isEmail ? (ws.emailBodyHtml || null) : null,
+          email_use_html: isEmail ? ws.emailUseHtml : false,
           email_signature: isEmail ? (ws.emailSignature) : null,
           email_position: isEmail ? emailPosition : null,
           message_position: isMessage ? messagePosition : null,
@@ -2057,8 +2089,60 @@ function Wizard({
                               <button key={v} type="button" onClick={() => updateStep(idx, { emailBody: ws.emailBody + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
                             ))}
                           </div>
-                          <textarea className="textarea textarea-bordered w-full bg-base-300/50 text-sm resize-none font-mono" rows={7} placeholder={"Hi {{first_name}},\n\nI came across your profile..."} value={ws.emailBody} onChange={(e) => updateStep(idx, { emailBody: e.target.value })} />
+                          <textarea className="textarea textarea-bordered w-full bg-base-300/50 text-sm resize-none font-mono" rows={7} placeholder={"Hi {{first_name}},\n\nI came across your profile..."} value={ws.emailBody} onChange={(e) => updateStep(idx, { emailBody: e.target.value, emailUseHtml: false })} />
                           <p className="text-xs text-base-content/30 mt-1">{ws.emailBody.length} chars</p>
+                        </div>
+
+                        {/* AI beautify — plain text -> styled HTML email. Ported from PPT-Agent's
+                            beautify-email feature (see lib/ai/beautify-email.ts). */}
+                        <div className="rounded-xl bg-base-300/30 border border-base-300/50 p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <RiRobot2Line size={14} className="text-primary/70" />
+                              <span className="text-sm text-base-content/70">HTML email</span>
+                              {ws.emailUseHtml && ws.emailBodyHtml && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/15 text-success">Styled</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={beautifyStyle}
+                                onChange={(e) => setBeautifyStyle(e.target.value as "professional" | "friendly" | "bold")}
+                                className="bg-base-300/50 border border-base-300/50 rounded-lg px-2 py-1.5 text-xs text-base-content focus:outline-none focus:border-primary/40"
+                              >
+                                <option value="professional">Professional</option>
+                                <option value="friendly">Friendly</option>
+                                <option value="bold">Bold</option>
+                              </select>
+                              <button
+                                type="button"
+                                disabled={!ws.emailBody.trim() || beautifyLoadingIdx === idx}
+                                onClick={() => beautifyStepEmail(idx, ws)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {beautifyLoadingIdx === idx ? <RiLoader4Line size={13} className="animate-spin" /> : <RiRobot2Line size={13} />}
+                                {beautifyLoadingIdx === idx ? "Beautifying…" : "Beautify with AI"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {ws.emailBodyHtml && (
+                            <div className="space-y-2">
+                              <label className="flex items-center gap-2 cursor-pointer w-fit">
+                                <input type="checkbox" className="checkbox checkbox-xs" checked={ws.emailUseHtml} onChange={(e) => updateStep(idx, { emailUseHtml: e.target.checked })} />
+                                <span className="text-xs text-base-content/50">Send this HTML version instead of plain text</span>
+                              </label>
+                              {ws.emailUseHtml && (
+                                <div className="rounded-lg overflow-hidden border border-base-300/50 bg-white">
+                                  <iframe srcDoc={ws.emailBodyHtml} title="Email HTML preview" className="w-full h-64" sandbox="" />
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {beautifyError && beautifyLoadingIdx === null && (
+                            <p className="text-xs text-warning/80">{beautifyError}</p>
+                          )}
                         </div>
                       </div>
                     )}

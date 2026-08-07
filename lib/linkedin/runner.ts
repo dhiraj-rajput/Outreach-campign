@@ -6,6 +6,9 @@ import { sendConnectionRequest, WeeklyLimitError, AlreadyConnectedError, Pending
 import { sendMessage, NotConnectedError } from "@/lib/linkedin/message";
 import { shouldSyncAccepted, syncAcceptedConnections } from "@/lib/linkedin/sync-accepted";
 import { sendEmail } from "@/lib/email/sender";
+import { isSuppressed, unsubscribeFooterText, unsubscribeFooterHtml } from "@/lib/email/suppression";
+import { openPixelTag, rewriteLinksForTracking } from "@/lib/email/tracking";
+import { scoreEmailSent } from "@/lib/scoring/lead-score";
 import { shouldSyncEmailInbox, syncEmailInbox } from "@/lib/email/inbox";
 import { enrichProfile } from "@/lib/linkedin/enrich";
 import { matchPerson } from "@/lib/apollo";
@@ -138,6 +141,8 @@ interface WorkflowStep {
   email_position: number | null;
   message_position: number | null;
   email_signature: string | null;
+  email_body_html: string | null;
+  email_use_html: number | null;
 }
 
 // A track-run row joined with its parent run_profile and run context
@@ -893,12 +898,35 @@ async function executeStep(
         return;
       }
 
+      // Suppression check — never send to an unsubscribed/bounced address, no matter what
+      // triggered this step. Checked as late as possible (right before send) since a target
+      // could unsubscribe from an earlier email in this same run.
+      if (isSuppressed(freshTarget.email)) {
+        log(db, runId, target.id, "info", `${name} <${freshTarget.email}> is suppressed (unsubscribed) — skipping ${name}`);
+        trAdvance(db, tr, steps);
+        return;
+      }
+
       // Step-level signature takes precedence; null means fall back to email account default
       const sig = (step.email_signature !== null ? step.email_signature : emailAccount.signature)?.trim();
       const finalEmailBody = sig ? `${emailBody}\n\n--\n${sig}` : emailBody;
+
+      // If this step has a beautified HTML body, send that as the HTML part (with tracking
+      // pixel + click-tracked links + HTML unsubscribe footer embedded), and keep the plain
+      // text as the multipart fallback. Otherwise send plain text only, with a text
+      // unsubscribe footer appended — same tracked-open pixel either way.
+      let finalHtml: string | undefined;
+      let plainTextBody = finalEmailBody + unsubscribeFooterText(target.id);
+      if (step.email_use_html && step.email_body_html) {
+        const pixel = openPixelTag(target.id, runId);
+        const trackedHtml = rewriteLinksForTracking(step.email_body_html, target.id, runId);
+        finalHtml = `${trackedHtml}${unsubscribeFooterHtml(target.id)}${pixel}`;
+      }
+
       db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
       log(db, runId, target.id, "info", `Sending email to ${name} <${freshTarget.email}>`);
-      await sendEmail({ ...emailAccount, password: decryptSecret(emailAccount.password)! }, freshTarget.email, emailSubject, finalEmailBody);
+      await sendEmail({ ...emailAccount, password: decryptSecret(emailAccount.password)! }, freshTarget.email, emailSubject, plainTextBody, finalHtml);
+      scoreEmailSent(target.id);
       trRecordContext(db, tr, { emailSubject, emailBody });
       trAdvance(db, tr, steps);
       log(db, runId, target.id, "info", `Email sent to ${name}`);
