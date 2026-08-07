@@ -573,6 +573,7 @@ function runMigrations(db: Database.Database) {
 
     "ALTER TABLE workflow_steps ADD COLUMN email_body_html TEXT",
     "ALTER TABLE workflow_steps ADD COLUMN email_use_html INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE integrations ADD COLUMN model TEXT",
   ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch { /* column already exists */ }

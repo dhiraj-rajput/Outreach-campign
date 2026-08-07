@@ -22,11 +22,38 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   }
 
   if (req.method === "POST") {
-    const { email, full_name, subscribers } = req.body as {
+    const { email, full_name, subscribers, list_id } = req.body as {
       email?: string;
       full_name?: string;
       subscribers?: Array<{ email: string; full_name?: string }>;
+      list_id?: string;
     };
+
+    if (list_id) {
+      // Import targets with emails from specified DB list
+      const targets = db.prepare(`
+        SELECT t.email, t.full_name
+        FROM list_targets lt
+        JOIN targets t ON t.id = lt.target_id
+        WHERE lt.list_id = ? AND t.email IS NOT NULL AND t.email LIKE '%@%'
+      `).all(list_id) as Array<{ email: string; full_name: string | null }>;
+
+      const insertStmt = db.prepare(`
+        INSERT OR IGNORE INTO newsletter_subscribers (id, newsletter_id, email, full_name)
+        VALUES (?, ?, ?, ?)
+      `);
+
+      let added = 0;
+      const transaction = db.transaction((items: Array<{ email: string; full_name: string | null }>) => {
+        for (const item of items) {
+          const res = insertStmt.run(randomUUID(), id, item.email.trim().toLowerCase(), item.full_name?.trim() ?? null);
+          if (res.changes > 0) added++;
+        }
+      });
+
+      transaction(targets);
+      return res.status(201).json({ added, total: targets.length });
+    }
 
     if (Array.isArray(subscribers) && subscribers.length > 0) {
       // Bulk import

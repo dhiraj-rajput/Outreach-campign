@@ -11,6 +11,9 @@ import {
   RiTeamLine,
   RiDraftLine,
   RiCheckLine,
+  RiMagicLine,
+  RiFileList3Line,
+  RiMailLine,
 } from "react-icons/ri";
 
 interface Newsletter {
@@ -42,10 +45,27 @@ interface Edition {
   created_at: string;
 }
 
+interface EmailAccount {
+  id: string;
+  name: string;
+  from_email: string;
+  from_name: string | null;
+}
+
+interface DBList {
+  id: string;
+  name: string;
+  target_count: number;
+}
+
 export default function NewslettersPage() {
   const [newsletters, setNewsletters] = useState<Newsletter[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedNewsletter, setSelectedNewsletter] = useState<Newsletter | null>(null);
+
+  // Connected accounts & lists
+  const [connectedEmails, setConnectedEmails] = useState<EmailAccount[]>([]);
+  const [dbLists, setDbLists] = useState<DBList[]>([]);
 
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -57,22 +77,24 @@ export default function NewslettersPage() {
   const [editions, setEditions] = useState<Edition[]>([]);
   const [tab, setTab] = useState<"editions" | "subscribers">("editions");
 
-  // Form states
+  // Newsletter Create form states
   const [newNewsName, setNewNewsName] = useState("");
   const [newNewsDesc, setNewNewsDesc] = useState("");
-  const [newSenderName, setNewSenderName] = useState("");
-  const [newSenderEmail, setNewSenderEmail] = useState("");
+  const [selectedEmailAccount, setSelectedEmailAccount] = useState<string>("");
   const [savingNews, setSavingNews] = useState(false);
 
-  // Sub form
+  // Subscriber form (Single or List import)
+  const [subMode, setSubMode] = useState<"single" | "list">("list");
+  const [selectedListId, setSelectedListId] = useState<string>("");
   const [subEmail, setSubEmail] = useState("");
   const [subName, setSubName] = useState("");
   const [addingSub, setAddingSub] = useState(false);
 
-  // Edition form
+  // Edition form & AI state
   const [edTitle, setEdTitle] = useState("");
   const [edSubject, setEdSubject] = useState("");
   const [edContent, setEdContent] = useState("");
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [savingEd, setSavingEd] = useState(false);
 
   function loadNewsletters() {
@@ -90,13 +112,33 @@ export default function NewslettersPage() {
       .finally(() => setLoading(false));
   }
 
+  function loadConnectedData() {
+    // Load connected email accounts
+    fetch("/api/email-accounts")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: EmailAccount[]) => {
+        setConnectedEmails(data);
+        if (data.length > 0) setSelectedEmailAccount(data[0].from_email);
+      })
+      .catch(() => {});
+
+    // Load database prospect lists
+    fetch("/api/lists")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: DBList[]) => {
+        setDbLists(data);
+        if (data.length > 0) setSelectedListId(data[0].id);
+      })
+      .catch(() => {});
+  }
+
   useEffect(() => {
     loadNewsletters();
+    loadConnectedData();
   }, []);
 
   useEffect(() => {
     if (!selectedNewsletter) return;
-    // Load subscribers & editions
     fetch(`/api/newsletters/${selectedNewsletter.id}/subscribers`)
       .then((r) => r.json())
       .then((d) => setSubscribers(d.subscribers ?? []))
@@ -110,7 +152,17 @@ export default function NewslettersPage() {
 
   async function handleCreateNewsletter(e: React.FormEvent) {
     e.preventDefault();
-    if (!newNewsName.trim() || !newSenderEmail.trim()) return;
+    if (!newNewsName.trim()) return;
+
+    const emailToUse = selectedEmailAccount.trim();
+    if (!emailToUse) {
+      toast.error("Please connect an email account in Settings → Email first");
+      return;
+    }
+
+    const matchingAccount = connectedEmails.find((a) => a.from_email === emailToUse);
+    const senderName = matchingAccount?.from_name || matchingAccount?.name || "Newsletter Sender";
+
     setSavingNews(true);
     try {
       const r = await fetch("/api/newsletters", {
@@ -119,8 +171,8 @@ export default function NewslettersPage() {
         body: JSON.stringify({
           name: newNewsName,
           description: newNewsDesc,
-          sender_name: newSenderName,
-          sender_email: newSenderEmail,
+          sender_name: senderName,
+          sender_email: emailToUse,
         }),
       });
       const d = await r.json();
@@ -129,8 +181,6 @@ export default function NewslettersPage() {
       setShowCreateModal(false);
       setNewNewsName("");
       setNewNewsDesc("");
-      setNewSenderName("");
-      setNewSenderEmail("");
       loadNewsletters();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error creating newsletter");
@@ -141,21 +191,35 @@ export default function NewslettersPage() {
 
   async function handleAddSubscriber(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedNewsletter || !subEmail.trim()) return;
+    if (!selectedNewsletter) return;
     setAddingSub(true);
+
     try {
-      const r = await fetch(`/api/newsletters/${selectedNewsletter.id}/subscribers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: subEmail, full_name: subName }),
-      });
+      let r: Response;
+      if (subMode === "list") {
+        if (!selectedListId) throw new Error("Please select a database list");
+        r = await fetch(`/api/newsletters/${selectedNewsletter.id}/subscribers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ list_id: selectedListId }),
+        });
+      } else {
+        if (!subEmail.trim()) throw new Error("Valid email required");
+        r = await fetch(`/api/newsletters/${selectedNewsletter.id}/subscribers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: subEmail, full_name: subName }),
+        });
+      }
+
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? "Failed to add subscriber");
-      toast.success("Subscriber added!");
+      if (!r.ok) throw new Error(d.error ?? "Failed to add subscribers");
+      toast.success(subMode === "list" ? `Imported ${d.added} contacts from list` : "Subscriber added!");
       setSubEmail("");
       setSubName("");
       setShowSubModal(false);
-      // Reload subscribers
+
+      // Refresh subscribers list
       fetch(`/api/newsletters/${selectedNewsletter.id}/subscribers`)
         .then((res) => res.json())
         .then((data) => setSubscribers(data.subscribers ?? []));
@@ -164,6 +228,31 @@ export default function NewslettersPage() {
       toast.error(err instanceof Error ? err.message : "Error adding subscriber");
     } finally {
       setAddingSub(false);
+    }
+  }
+
+  async function handleGenerateAIContent() {
+    if (!edTitle.trim()) {
+      toast.error("Please enter an issue title first");
+      return;
+    }
+    setAiGenerating(true);
+    try {
+      const r = await fetch("/api/newsletters/ai-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: edTitle, prompt: edContent }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "AI generation failed");
+
+      if (d.subject) setEdSubject(d.subject);
+      if (d.content_html) setEdContent(d.content_html);
+      toast.success("AI generated issue content & subject!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "AI generation failed");
+    } finally {
+      setAiGenerating(false);
     }
   }
 
@@ -188,7 +277,7 @@ export default function NewslettersPage() {
       setEdSubject("");
       setEdContent("");
       setShowEditionModal(false);
-      // Reload editions
+
       fetch(`/api/newsletters/${selectedNewsletter.id}/editions`)
         .then((res) => res.json())
         .then((data) => setEditions(data.editions ?? []));
@@ -200,20 +289,45 @@ export default function NewslettersPage() {
     }
   }
 
+  const [sendingEditionId, setSendingEditionId] = useState<string | null>(null);
+
+  async function handleSendEdition(editionId: string) {
+    if (!selectedNewsletter) return;
+    setSendingEditionId(editionId);
+    try {
+      const r = await fetch(`/api/newsletters/${selectedNewsletter.id}/editions/${editionId}/send`, {
+        method: "POST",
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Failed to send newsletter issue");
+
+      toast.success(d.message ?? `Issue mailed to ${d.sent_count} subscribers!`);
+
+      // Refresh editions
+      fetch(`/api/newsletters/${selectedNewsletter.id}/editions`)
+        .then((res) => res.json())
+        .then((data) => setEditions(data.editions ?? []));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error sending issue");
+    } finally {
+      setSendingEditionId(null);
+    }
+  }
+
   return (
     <>
       <Head>
-        <title>Newsletters — Linki</title>
+        <title>Newsletters Dashboard — Linki</title>
       </Head>
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
-            <RiNewspaperLine className="text-secondary" /> Newsletters
+            <RiNewspaperLine className="text-secondary" /> Newsletters Dashboard
           </h1>
           <p className="text-base-content/40 text-sm mt-0.5">
-            Create, manage subscribers, and publish newsletter issues
+            View subscriber lists, track issues, and manage email newsletters
           </p>
         </div>
         <button
@@ -235,7 +349,7 @@ export default function NewslettersPage() {
           <div className="text-center">
             <p className="text-sm font-medium">No newsletters created yet</p>
             <p className="text-xs mt-1 text-base-content/40">
-              Create your first newsletter to engage your LinkedIn & Email audience
+              Create your first newsletter using your connected email accounts & DB lists
             </p>
           </div>
           <button
@@ -302,13 +416,13 @@ export default function NewslettersPage() {
                     onClick={() => setShowSubModal(true)}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300/60 text-base-content/80 hover:bg-base-300 transition-colors"
                   >
-                    <RiUserAddLine size={14} /> Add Subscriber
+                    <RiUserAddLine size={14} /> Add / Import Subscribers
                   </button>
                   <button
                     onClick={() => setShowEditionModal(true)}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary text-secondary-content hover:bg-secondary/90 transition-colors"
                   >
-                    <RiAddLine size={14} /> Compose Edition
+                    <RiAddLine size={14} /> Compose Issue
                   </button>
                 </div>
               </div>
@@ -323,7 +437,7 @@ export default function NewslettersPage() {
                       : "text-base-content/50 hover:bg-base-300/40"
                   }`}
                 >
-                  Editions ({editions.length})
+                  Issues ({editions.length})
                 </button>
                 <button
                   onClick={() => setTab("subscribers")}
@@ -342,7 +456,7 @@ export default function NewslettersPage() {
                 <div>
                   {editions.length === 0 ? (
                     <div className="text-center text-base-content/30 text-sm py-12 border border-dashed border-base-300/50 rounded-xl">
-                      No editions written for this newsletter yet.
+                      No issues composed for this newsletter yet.
                     </div>
                   ) : (
                     <div className="space-y-2.5">
@@ -368,8 +482,22 @@ export default function NewslettersPage() {
                               Subject: {ed.subject}
                             </div>
                           </div>
-                          <div className="text-xs text-base-content/40">
-                            {new Date(ed.created_at).toLocaleDateString()}
+                          <div className="flex items-center gap-3">
+                            <div className="text-xs text-base-content/40 text-right">
+                              <div>{new Date(ed.created_at).toLocaleDateString()}</div>
+                            </div>
+                            <button
+                              onClick={() => handleSendEdition(ed.id)}
+                              disabled={sendingEditionId === ed.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-content hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                            >
+                              {sendingEditionId === ed.id ? (
+                                <RiLoader4Line size={13} className="animate-spin" />
+                              ) : (
+                                <RiSendPlaneLine size={13} />
+                              )}
+                              {sendingEditionId === ed.id ? "Mailing…" : ed.status === "sent" ? "Resend Issue" : "Mail Issue"}
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -424,7 +552,7 @@ export default function NewslettersPage() {
         </div>
       )}
 
-      {/* Modal 1: Create Newsletter */}
+      {/* Modal 1: Create Newsletter with Connected Sender Email Selection */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-base-100 border border-base-300/50 rounded-xl p-5 w-full max-w-md shadow-2xl">
@@ -443,7 +571,7 @@ export default function NewslettersPage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. AI Founder Pulse"
+                  placeholder="e.g. Founder Digest"
                   value={newNewsName}
                   onChange={(e) => setNewNewsName(e.target.value)}
                   className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
@@ -453,32 +581,33 @@ export default function NewslettersPage() {
                 <label className="text-xs font-medium text-base-content/70">Description</label>
                 <input
                   type="text"
-                  placeholder="Weekly insights on AI and B2B SaaS"
+                  placeholder="Weekly insights on tech & growth"
                   value={newNewsDesc}
                   onChange={(e) => setNewNewsDesc(e.target.value)}
                   className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-base-content/70">Sender Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Alex Rivera"
-                  value={newSenderName}
-                  onChange={(e) => setNewSenderName(e.target.value)}
-                  className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-base-content/70">Sender Email</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="newsletter@company.com"
-                  value={newSenderEmail}
-                  onChange={(e) => setNewSenderEmail(e.target.value)}
-                  className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
-                />
+                <label className="text-xs font-medium text-base-content/70">
+                  Select Connected Sender Email
+                </label>
+                {connectedEmails.length === 0 ? (
+                  <div className="text-xs text-warning mt-1">
+                    No connected email accounts found. Please configure an account in Settings → Email.
+                  </div>
+                ) : (
+                  <select
+                    value={selectedEmailAccount}
+                    onChange={(e) => setSelectedEmailAccount(e.target.value)}
+                    className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm cursor-pointer"
+                  >
+                    {connectedEmails.map((acc) => (
+                      <option key={acc.id} value={acc.from_email}>
+                        {acc.name} ({acc.from_email})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -490,7 +619,7 @@ export default function NewslettersPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={savingNews}
+                  disabled={savingNews || connectedEmails.length === 0}
                   className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-content rounded-lg hover:bg-primary/90 disabled:opacity-40"
                 >
                   {savingNews ? "Creating…" : "Create"}
@@ -501,12 +630,12 @@ export default function NewslettersPage() {
         </div>
       )}
 
-      {/* Modal 2: Add Subscriber */}
+      {/* Modal 2: Add Subscribers from DB List or Manual Entry */}
       {showSubModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-base-100 border border-base-300/50 rounded-xl p-5 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-base">Add Subscriber</h3>
+              <h3 className="font-semibold text-base">Add / Import Subscribers</h3>
               <button
                 onClick={() => setShowSubModal(false)}
                 className="text-base-content/40 hover:text-base-content"
@@ -514,28 +643,81 @@ export default function NewslettersPage() {
                 <RiCloseLine size={18} />
               </button>
             </div>
+
+            {/* Mode selection tabs */}
+            <div className="flex items-center gap-2 mb-4 border-b border-base-300/40 pb-2">
+              <button
+                type="button"
+                onClick={() => setSubMode("list")}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  subMode === "list"
+                    ? "bg-primary/15 text-primary border border-primary/30"
+                    : "text-base-content/50 hover:bg-base-300/40"
+                }`}
+              >
+                Import from DB List
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubMode("single")}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  subMode === "single"
+                    ? "bg-primary/15 text-primary border border-primary/30"
+                    : "text-base-content/50 hover:bg-base-300/40"
+                }`}
+              >
+                Single Contact
+              </button>
+            </div>
+
             <form onSubmit={handleAddSubscriber} className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-base-content/70">Email Address</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="subscriber@domain.com"
-                  value={subEmail}
-                  onChange={(e) => setSubEmail(e.target.value)}
-                  className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-base-content/70">Full Name (optional)</label>
-                <input
-                  type="text"
-                  placeholder="John Doe"
-                  value={subName}
-                  onChange={(e) => setSubName(e.target.value)}
-                  className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
-                />
-              </div>
+              {subMode === "list" ? (
+                <div>
+                  <label className="text-xs font-medium text-base-content/70">
+                    Select Database Prospect List
+                  </label>
+                  {dbLists.length === 0 ? (
+                    <div className="text-xs text-base-content/40 mt-1">No database lists found.</div>
+                  ) : (
+                    <select
+                      value={selectedListId}
+                      onChange={(e) => setSelectedListId(e.target.value)}
+                      className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm cursor-pointer"
+                    >
+                      {dbLists.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.name} ({l.target_count} contacts)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-base-content/70">Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="subscriber@domain.com"
+                      value={subEmail}
+                      onChange={(e) => setSubEmail(e.target.value)}
+                      className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-base-content/70">Full Name (optional)</label>
+                    <input
+                      type="text"
+                      placeholder="John Doe"
+                      value={subName}
+                      onChange={(e) => setSubName(e.target.value)}
+                      className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -549,7 +731,7 @@ export default function NewslettersPage() {
                   disabled={addingSub}
                   className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-content rounded-lg hover:bg-primary/90 disabled:opacity-40"
                 >
-                  {addingSub ? "Adding…" : "Add"}
+                  {addingSub ? "Importing…" : subMode === "list" ? "Import Contacts" : "Add Subscriber"}
                 </button>
               </div>
             </form>
@@ -557,12 +739,12 @@ export default function NewslettersPage() {
         </div>
       )}
 
-      {/* Modal 3: Compose Edition */}
+      {/* Modal 3: Compose Edition with AI Assistance */}
       {showEditionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-base-100 border border-base-300/50 rounded-xl p-5 w-full max-w-xl shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-base">Compose Edition</h3>
+              <h3 className="font-semibold text-base">Compose Newsletter Issue</h3>
               <button
                 onClick={() => setShowEditionModal(false)}
                 className="text-base-content/40 hover:text-base-content"
@@ -572,16 +754,28 @@ export default function NewslettersPage() {
             </div>
             <form onSubmit={handleCreateEdition} className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-base-content/70">Edition Title</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-base-content/70">Issue Title / Topic</label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateAIContent}
+                    disabled={aiGenerating || !edTitle.trim()}
+                    className="inline-flex items-center gap-1 text-xs text-secondary hover:text-secondary/80 font-medium disabled:opacity-40 transition-colors"
+                  >
+                    {aiGenerating ? <RiLoader4Line size={12} className="animate-spin" /> : <RiMagicLine size={12} />}
+                    {aiGenerating ? "Generating..." : "Generate with AI (Gemini)"}
+                  </button>
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Issue #12 — Breakthroughs in LLM Agents"
+                  placeholder="e.g. Issue #12 — Breakthroughs in AI Agents"
                   value={edTitle}
                   onChange={(e) => setEdTitle(e.target.value)}
                   className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
                 />
               </div>
+
               <div>
                 <label className="text-xs font-medium text-base-content/70">Email Subject</label>
                 <input
@@ -593,17 +787,19 @@ export default function NewslettersPage() {
                   className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm"
                 />
               </div>
+
               <div>
                 <label className="text-xs font-medium text-base-content/70">Content (HTML / Plain text)</label>
                 <textarea
                   required
-                  rows={8}
-                  placeholder="Write your issue content here..."
+                  rows={7}
+                  placeholder="Write or generate your newsletter HTML content..."
                   value={edContent}
                   onChange={(e) => setEdContent(e.target.value)}
                   className="w-full mt-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-2 text-sm font-mono resize-none"
                 />
               </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -617,7 +813,7 @@ export default function NewslettersPage() {
                   disabled={savingEd}
                   className="px-4 py-1.5 text-xs font-medium bg-secondary text-secondary-content rounded-lg hover:bg-secondary/90 disabled:opacity-40"
                 >
-                  {savingEd ? "Saving…" : "Save Draft Edition"}
+                  {savingEd ? "Saving…" : "Save Issue Draft"}
                 </button>
               </div>
             </form>

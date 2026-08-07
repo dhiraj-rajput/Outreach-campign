@@ -19,42 +19,40 @@ export interface AIProviderConfig {
 export function getAIClient(preferredModel?: string): AIProviderConfig | null {
   const db = getDb();
 
-  // 1. Check Google AI Studio (Gemini) first
+  // 1. Check Google AI Studio (Gemini) - DB integrations
   const geminiRow = db
-    .prepare("SELECT api_key FROM integrations WHERE key IN ('gemini', 'google') AND api_key IS NOT NULL")
-    .get() as { api_key: string } | undefined;
+    .prepare("SELECT api_key, model FROM integrations WHERE key IN ('gemini', 'google') AND api_key IS NOT NULL")
+    .get() as { api_key: string; model: string | null } | undefined;
 
-  if (geminiRow?.api_key) {
-    const key = decryptSecret(geminiRow.api_key) ?? geminiRow.api_key;
-    if (key.trim()) {
-      return {
-        provider: "gemini",
-        client: new OpenAI({
-          baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
-          apiKey: key,
-        }),
-        model: preferredModel || "gemini-2.0-flash",
-      };
-    }
+  const geminiKey = geminiRow?.api_key ? (decryptSecret(geminiRow.api_key) ?? geminiRow.api_key) : undefined;
+
+  if (geminiKey && geminiKey.trim()) {
+    return {
+      provider: "gemini",
+      client: new OpenAI({
+        baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        apiKey: geminiKey.trim(),
+      }),
+      model: preferredModel || geminiRow?.model || "gemini-2.5-flash",
+    };
   }
 
-  // 2. Check OpenRouter
+  // 2. Check OpenRouter - DB integrations
   const openrouterRow = db
-    .prepare("SELECT api_key FROM integrations WHERE key = 'openrouter' AND api_key IS NOT NULL")
-    .get() as { api_key: string } | undefined;
+    .prepare("SELECT api_key, model FROM integrations WHERE key = 'openrouter' AND api_key IS NOT NULL")
+    .get() as { api_key: string; model: string | null } | undefined;
 
-  if (openrouterRow?.api_key) {
-    const key = decryptSecret(openrouterRow.api_key) ?? openrouterRow.api_key;
-    if (key.trim()) {
-      return {
-        provider: "openrouter",
-        client: new OpenAI({
-          baseURL: "https://openrouter.ai/api/v1",
-          apiKey: key,
-        }),
-        model: preferredModel || "google/gemini-flash-1.5",
-      };
-    }
+  const openrouterKey = openrouterRow?.api_key ? (decryptSecret(openrouterRow.api_key) ?? openrouterRow.api_key) : undefined;
+
+  if (openrouterKey && openrouterKey.trim()) {
+    return {
+      provider: "openrouter",
+      client: new OpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: openrouterKey.trim(),
+      }),
+      model: preferredModel || openrouterRow?.model || "openrouter/free",
+    };
   }
 
   return null;

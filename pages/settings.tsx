@@ -1403,6 +1403,17 @@ interface IntegrationDef {
   placeholder: string;
 }
 
+interface IntegrationDef {
+  key: string;
+  name: string;
+  description: string;
+  badge: string;
+  badgeColor: string;
+  accentColor: string;
+  placeholder: string;
+  models?: Array<{ id: string; name: string }>;
+}
+
 const INTEGRATIONS: IntegrationDef[] = [
   {
     key: "apollo",
@@ -1416,20 +1427,31 @@ const INTEGRATIONS: IntegrationDef[] = [
   {
     key: "gemini",
     name: "Google AI Studio (Gemini)",
-    description: "Google Gemini 2.0 Flash / Pro for AI-powered personalization & intent classification",
+    description: "Google Gemini 2.5 Flash / Pro for AI-powered personalization & intent classification",
     badge: "GO",
     badgeColor: "#34a853",
     accentColor: "#34a853",
     placeholder: "AIzaSy...",
+    models: [
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (Recommended - Workhorse)" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (Reasoning & Complex Tasks)" },
+    ],
   },
   {
     key: "openrouter",
     name: "OpenRouter",
-    description: "Route AI requests across models (GPT-4, Claude, Llama…)",
+    description: "Route AI requests across free & frontier models (Llama, DeepSeek, Gemini, Qwen…)",
     badge: "OR",
     badgeColor: "#0ea5e9",
     accentColor: "#0ea5e9",
     placeholder: "sk-or-...",
+    models: [
+      { id: "openrouter/free", name: "OpenRouter Free (Auto-selects best available free model)" },
+      { id: "google/gemini-2.0-flash-exp:free", name: "Google Gemini 2.0 Flash (Free)" },
+      { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Meta Llama 3.3 70B Instruct (Free)" },
+      { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1 (Free Reasoning)" },
+      { id: "qwen/qwen-2.5-coder-32b-instruct:free", name: "Qwen 2.5 Coder 32B (Free)" },
+    ],
   },
   {
     key: "claude",
@@ -1447,17 +1469,18 @@ const INTEGRATIONS: IntegrationDef[] = [
 const PREMIUM_INTEGRATION_KEYS = new Set(["openrouter", "claude", "gemini"]);
 
 function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
-  const [configuredMap, setConfiguredMap] = useState<Record<string, { masked: string | null; configured: boolean }>>({});
+  const [configuredMap, setConfiguredMap] = useState<Record<string, { masked: string | null; model: string | null; configured: boolean }>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [modelInput, setModelInput] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/integrations")
       .then((r) => r.json())
-      .then((rows: { key: string; api_key_masked: string | null; configured: boolean }[]) => {
-        const m: Record<string, { masked: string | null; configured: boolean }> = {};
-        for (const row of rows) m[row.key] = { masked: row.api_key_masked, configured: row.configured };
+      .then((rows: { key: string; api_key_masked: string | null; model: string | null; configured: boolean }[]) => {
+        const m: Record<string, { masked: string | null; model: string | null; configured: boolean }> = {};
+        for (const row of rows) m[row.key] = { masked: row.api_key_masked, model: row.model, configured: row.configured };
         setConfiguredMap(m);
       })
       .catch(() => {});
@@ -1470,20 +1493,21 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
     const res = await fetch("/api/integrations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, api_key: apiKeyInput.trim() }),
+      body: JSON.stringify({ key, api_key: apiKeyInput.trim(), model: modelInput.trim() || undefined }),
     });
     setSaving(false);
     if (!res.ok) { toast.error("Failed to save"); return; }
     const masked = "••••••••" + apiKeyInput.trim().slice(-4);
-    setConfiguredMap((m) => ({ ...m, [key]: { masked, configured: true } }));
+    setConfiguredMap((m) => ({ ...m, [key]: { masked, model: modelInput || null, configured: true } }));
     setEditingKey(null);
     setApiKeyInput("");
-    toast.success("API key saved");
+    setModelInput("");
+    toast.success("API key & model saved");
   }
 
   async function remove(key: string) {
     await fetch(`/api/integrations?key=${key}`, { method: "DELETE" });
-    setConfiguredMap((m) => ({ ...m, [key]: { masked: null, configured: false } }));
+    setConfiguredMap((m) => ({ ...m, [key]: { masked: null, model: null, configured: false } }));
     toast.success("Integration removed");
   }
 
@@ -1513,6 +1537,11 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
                       <RiCheckLine size={9} /> Connected
                     </span>
                   )}
+                  {configured && state?.model && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary">
+                      {state.model}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-base-content/40">{intg.description}</p>
               </div>
@@ -1521,41 +1550,60 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
                 {configured && !isEditing && (
                   <>
                     <span className="text-xs text-base-content/25 font-mono">{state?.masked}</span>
-                    <button onClick={() => { setEditingKey(intg.key); setApiKeyInput(""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-2 py-1">Change</button>
+                    <button onClick={() => { setEditingKey(intg.key); setApiKeyInput(""); setModelInput(state?.model || ""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-2 py-1">Change</button>
                     <button onClick={() => remove(intg.key)} className="text-xs text-error/50 hover:text-error transition-colors p-1"><RiCloseLine size={14} /></button>
                   </>
                 )}
                 {!configured && !isEditing && (
                   <button
-                    onClick={() => { setEditingKey(intg.key); setApiKeyInput(""); }}
+                    onClick={() => { setEditingKey(intg.key); setApiKeyInput(""); setModelInput(intg.models?.[0]?.id || ""); }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300 text-base-content/70 hover:bg-base-300/80 transition-colors"
                   >
                     Configure
                   </button>
                 )}
                 {isEditing && (
-                  <button onClick={() => { setEditingKey(null); setApiKeyInput(""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-1 py-1">
+                  <button onClick={() => { setEditingKey(null); setApiKeyInput(""); setModelInput(""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-1 py-1">
                     <RiCloseLine size={14} />
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Inline key input */}
+            {/* Inline key & model input */}
             {isEditing && (
-              <form onSubmit={(e) => save(intg.key, e)} className="px-4 pb-4 flex gap-2">
-                <input
-                  type="text"
-                  autoFocus
-                  className="input input-bordered input-sm flex-1 bg-base-300/50 font-mono text-xs"
-                  placeholder={intg.placeholder}
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                  required
-                />
-                <button type="submit" disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50">
-                  {saving ? <span className="loading loading-spinner loading-xs" /> : "Save"}
-                </button>
+              <form onSubmit={(e) => save(intg.key, e)} className="px-4 pb-4 flex flex-col gap-2.5">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    className="input input-bordered input-sm flex-1 bg-base-300/50 font-mono text-xs"
+                    placeholder={intg.placeholder}
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    required
+                  />
+                  <button type="submit" disabled={saving} className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50">
+                    {saving ? <span className="loading loading-spinner loading-xs" /> : "Save Settings"}
+                  </button>
+                </div>
+
+                {intg.models && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-base-content/60 shrink-0">Model Selection:</label>
+                    <select
+                      value={modelInput}
+                      onChange={(e) => setModelInput(e.target.value)}
+                      className="select select-bordered select-xs flex-1 bg-base-300/40 text-xs font-medium"
+                    >
+                      {intg.models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </form>
             )}
           </div>
