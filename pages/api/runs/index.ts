@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
 import { randomUUID } from "crypto";
+import { resolveEnrollmentEligibility, tracksFor } from "@/lib/enrollment";
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   const db = getDb();
@@ -34,8 +35,17 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
   if (req.method === "POST") {
     const { workflow_id, list_id, account_id, email_account_id, email_account_ids, target_ids } = req.body;
-    if (!workflow_id || !list_id || !account_id)
-      return res.status(400).json({ error: "workflow_id, list_id, account_id required" });
+    if (!workflow_id || !list_id)
+      return res.status(400).json({ error: "workflow_id, list_id required" });
+
+    // A LinkedIn account is only required when the workflow actually has LinkedIn steps.
+    // Email-only workflows should be launchable with just an email account.
+    const workflowHasLinkedInStep = !!(db.prepare(
+      "SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND track = 'linkedin' LIMIT 1"
+    ).get(workflow_id));
+    if (workflowHasLinkedInStep && !account_id) {
+      return res.status(400).json({ error: "account_id required for workflows with LinkedIn steps" });
+    }
 
     // Normalise email account list — prefer the new array, fall back to legacy single-id
     const emailAccountPool: string[] = Array.isArray(email_account_ids) && email_account_ids.length > 0
@@ -64,36 +74,34 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       ? (target_ids as string[]).map((id) => ({ target_id: id }))
       : db.prepare("SELECT target_id FROM list_targets WHERE list_id = ?").all(list_id) as { target_id: string }[];
 
-    // Exclude targets already enrolled in any run of this workflow
-    const alreadyEnrolled = new Set(
-      (db.prepare(
-        `SELECT DISTINCT rp.target_id FROM run_profiles rp
-         JOIN runs r ON r.id = rp.run_id
-         WHERE r.workflow_id = ?`
-      ).all(workflow_id) as { target_id: string }[]).map((r) => r.target_id)
-    );
+    // Determine which tracks this workflow has steps for
+    const workflowTracks = [...new Set(
+      (db.prepare("SELECT DISTINCT track FROM workflow_steps WHERE workflow_id = ?").all(workflow_id) as { track: string }[]).map(r => r.track)
+    )];
+    // If no track column exists yet (old DB), default to linkedin-only
+    if (workflowTracks.length === 0) workflowTracks.push("linkedin");
 
-    // Exclude targets currently active in any other running/paused workflow
-    const activeElsewhere = new Set(
-      (db.prepare(
-        `SELECT DISTINCT rp.target_id FROM run_profiles rp
-         JOIN runs r ON r.id = rp.run_id
-         WHERE r.status IN ('running', 'paused')
-         AND EXISTS (
-           SELECT 1 FROM run_profile_tracks rt
-           WHERE rt.run_profile_id = rp.id AND rt.state NOT IN ('completed', 'failed', 'skipped')
-         )`
-      ).all() as { target_id: string }[]).map((r) => r.target_id)
-    );
+    // Per-channel eligibility: LinkedIn contacts can only be active in one LinkedIn
+    // campaign at a time; email contacts can be in many, unless they've unsubscribed;
+    // newsletters are a separate system entirely and aren't touched here.
+    const elig = resolveEnrollmentEligibility(db, workflow_id, workflowTracks, candidates.map(c => c.target_id));
 
-    const targets = candidates.filter((t) => !alreadyEnrolled.has(t.target_id) && !activeElsewhere.has(t.target_id));
+    // Drop targets already enrolled anywhere in this workflow; for everyone else, work
+    // out which tracks they're actually eligible for (may be a subset of workflowTracks).
+    const targetTracks = new Map<string, string[]>();
+    for (const c of candidates) {
+      if (elig.alreadyInWorkflow.has(c.target_id)) continue;
+      const tracks = tracksFor(c.target_id, workflowTracks, elig);
+      if (tracks.length > 0) targetTracks.set(c.target_id, tracks);
+    }
+    const targets = candidates.filter((t) => targetTracks.has(t.target_id));
 
     if (targets.length === 0) {
       // Clean up the run we just created since there's nothing to enroll
       db.prepare("DELETE FROM runs WHERE id = ?").run(runId);
       return res.status(400).json({
         error: "all_already_enrolled",
-        message: "All selected contacts are already enrolled in this workflow.",
+        message: "All selected contacts are already enrolled in this workflow, already active in another LinkedIn campaign, or have unsubscribed.",
       });
     }
 
@@ -126,13 +134,6 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       }
     }
 
-    // Determine which tracks this workflow has steps for
-    const workflowTracks = [...new Set(
-      (db.prepare("SELECT DISTINCT track FROM workflow_steps WHERE workflow_id = ?").all(workflow_id) as { track: string }[]).map(r => r.track)
-    )];
-    // If no track column exists yet (old DB), default to linkedin-only
-    if (workflowTracks.length === 0) workflowTracks.push("linkedin");
-
     const insertProfile = db.prepare(
       "INSERT INTO run_profiles (id, run_id, target_id, email_account_id) VALUES (?, ?, ?, ?)"
     );
@@ -144,7 +145,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         const assignedEmailAccountId = emailAssignment.get(t.target_id) ?? null;
         const rpId = randomUUID();
         insertProfile.run(rpId, runId, t.target_id, assignedEmailAccountId);
-        for (const track of workflowTracks) {
+        for (const track of targetTracks.get(t.target_id)!) {
           // Skip email track if no email account is configured on this run
           if (track === "email" && !assignedEmailAccountId) continue;
           insertTrack.run(randomUUID(), rpId, track);

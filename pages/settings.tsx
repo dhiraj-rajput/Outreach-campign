@@ -1427,36 +1427,43 @@ const INTEGRATIONS: IntegrationDef[] = [
   {
     key: "gemini",
     name: "Google AI Studio (Gemini)",
-    description: "Google Gemini 2.5 Flash / Pro for AI-powered personalization & intent classification",
+    description: "Google Gemini Flash models for AI-powered personalization, beautify-email & intent classification — free tier, no billing needed",
     badge: "GO",
     badgeColor: "#34a853",
     accentColor: "#34a853",
     placeholder: "AIzaSy...",
+    // Google moved Pro-series models to paid-only in the AI Studio free tier (Apr 2026) — only
+    // Flash / Flash-Lite models keep a no-billing free quota, so those are what we offer here.
     models: [
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (Recommended - Workhorse)" },
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (Reasoning & Complex Tasks)" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (Recommended - Workhorse, Free)" },
+      { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite (Fastest & Cheapest, Free)" },
+      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview (Newest, Free)" },
     ],
   },
   {
     key: "openrouter",
     name: "OpenRouter",
-    description: "Route AI requests across free & frontier models (Llama, DeepSeek, Gemini, Qwen…)",
+    description: "Route AI requests across free & frontier models (Llama, GPT-OSS, Qwen, Nemotron…)",
     badge: "OR",
     badgeColor: "#0ea5e9",
     accentColor: "#0ea5e9",
     placeholder: "sk-or-...",
+    // OpenRouter's free-model roster rotates constantly — DeepSeek, Mistral, and Gemini
+    // currently have zero $0 models on OpenRouter despite older guides still listing them.
+    // These are verified live against openrouter.ai/api/v1/models (:free / $0 pricing).
     models: [
-      { id: "openrouter/free", name: "OpenRouter Free (Auto-selects best available free model)" },
-      { id: "google/gemini-2.0-flash-exp:free", name: "Google Gemini 2.0 Flash (Free)" },
+      { id: "openrouter/free", name: "OpenRouter Free (Auto-selects a free model)" },
+      { id: "openai/gpt-oss-120b:free", name: "OpenAI GPT-OSS 120B (Free)" },
+      { id: "openai/gpt-oss-20b:free", name: "OpenAI GPT-OSS 20B (Free, Fast)" },
       { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Meta Llama 3.3 70B Instruct (Free)" },
-      { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1 (Free Reasoning)" },
-      { id: "qwen/qwen-2.5-coder-32b-instruct:free", name: "Qwen 2.5 Coder 32B (Free)" },
+      { id: "nvidia/nemotron-3-ultra-550b-a55b:free", name: "NVIDIA Nemotron 3 Ultra 550B (Free)" },
+      { id: "qwen/qwen3-coder:free", name: "Qwen3 Coder (Free)" },
     ],
   },
   {
     key: "claude",
     name: "Claude (Anthropic)",
-    description: "Anthropic Claude for AI-powered personalization",
+    description: "Anthropic Claude for AI-powered personalization (premium AI writer)",
     badge: "AI",
     badgeColor: "#d97706",
     accentColor: "#d97706",
@@ -1464,9 +1471,12 @@ const INTEGRATIONS: IntegrationDef[] = [
   },
 ];
 
-// Apollo is open-core (free); OpenRouter/Claude/Gemini drive the premium AI writer and are
-// hidden in the free build.
-const PREMIUM_INTEGRATION_KEYS = new Set(["openrouter", "claude", "gemini"]);
+// Apollo, Gemini, and OpenRouter are open-core (free) — they back the free AI add-ons
+// (beautify-email, newsletter AI-generate, LinkedIn reply classification; see lib/ai/client.ts)
+// which read directly from the `integrations` table and don't touch premium.ai at all. Claude
+// is reserved for the ee/-only premium AI writer (per-step personalization with tone/language
+// controls in the workflow editor) and stays hidden in the free build.
+const PREMIUM_INTEGRATION_KEYS = new Set(["claude"]);
 
 function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
   const [configuredMap, setConfiguredMap] = useState<Record<string, { masked: string | null; model: string | null; configured: boolean }>>({});

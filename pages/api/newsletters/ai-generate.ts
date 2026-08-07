@@ -16,9 +16,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end();
   }
 
-  const { title, prompt, style = "professional" } = req.body as {
+  const { title, prompt, bannerUrl, style = "professional" } = req.body as {
     title?: string;
     prompt?: string;
+    bannerUrl?: string;
     style?: string;
   };
 
@@ -56,9 +57,20 @@ JSON format:
     const jsonStr = raw.replace(/^```json?\s*/i, "").replace(/```$/, "").trim();
     const parsed = JSON.parse(jsonStr) as { subject?: string; content_html?: string };
 
+    let finalHtml = parsed.content_html || `<p>${title}</p>`;
+
+    // Embed and beautify header banner image if provided
+    if (bannerUrl && bannerUrl.trim()) {
+      const bannerHtml = `
+<div style="text-align: center; margin-bottom: 24px;">
+  <img src="${bannerUrl.trim()}" alt="Newsletter Banner" style="max-width: 100%; height: auto; border-radius: 12px; border: 1px solid #e2e8f0; display: block; margin: 0 auto;" />
+</div>`.trim();
+      finalHtml = `${bannerHtml}\n${finalHtml}`;
+    }
+
     return res.json({
       subject: parsed.subject || title,
-      content_html: parsed.content_html || `<p>${title}</p>`,
+      content_html: finalHtml,
     });
   } catch (err) {
     console.error("[ai-generate newsletter] error:", err instanceof Error ? err.message : err);

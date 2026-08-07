@@ -994,14 +994,17 @@ async function globalLoop(): Promise<void> {
 }
 
 async function tick(db: ReturnType<typeof getDb>): Promise<void> {
+  // LEFT JOIN — email-only runs have no LinkedIn account attached (account_id may be
+  // null/empty), and must still be picked up here so their email tracks get processed.
+  // A run IS excluded if it has a LinkedIn account that isn't authenticated.
   const activeRuns = db.prepare(`
     SELECT r.id as run_id, r.workflow_id, r.account_id, r.email_account_id,
            a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
            a.active_hours_start, a.active_hours_end, a.timezone, a.working_days
     FROM runs r
-    JOIN accounts a ON a.id = r.account_id
-    WHERE r.status = 'running' AND a.is_authenticated = 1
-  `).all() as Array<{ run_id: string; workflow_id: string; account_id: string; email_account_id: string | null } & AccountLimits>;
+    LEFT JOIN accounts a ON a.id = r.account_id
+    WHERE r.status = 'running' AND (r.account_id IS NULL OR r.account_id = '' OR a.is_authenticated = 1)
+  `).all() as Array<{ run_id: string; workflow_id: string; account_id: string | null; email_account_id: string | null } & Partial<AccountLimits>>;
 
   if (activeRuns.length === 0) return;
 
@@ -1009,6 +1012,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
 
   const seenAccounts = new Set<string>();
   for (const run of activeRuns) {
+    if (!run.account_id) continue; // email-only run, no LinkedIn account to sync
     if (seenAccounts.has(run.account_id)) continue;
     seenAccounts.add(run.account_id);
   }
@@ -1106,15 +1110,16 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
            a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
            a.active_hours_start, a.active_hours_end, a.timezone, a.working_days
     FROM runs r
-    JOIN accounts a ON a.id = r.account_id
+    LEFT JOIN accounts a ON a.id = r.account_id
     WHERE r.status = 'running'
-  `).all() as Array<{ run_id: string; workflow_id: string; account_id: string; email_account_id: string | null } & AccountLimits>;
+  `).all() as Array<{ run_id: string; workflow_id: string; account_id: string | null; email_account_id: string | null } & Partial<AccountLimits>>;
 
   if (stillActive.length === 0) return;
 
   const accountLimitsMap = new Map<string, AccountLimits>();
   for (const run of stillActive) {
-    if (!accountLimitsMap.has(run.account_id)) accountLimitsMap.set(run.account_id, run);
+    if (!run.account_id) continue; // email-only run — no LinkedIn account/limits to track
+    if (!accountLimitsMap.has(run.account_id)) accountLimitsMap.set(run.account_id, run as AccountLimits & { run_id: string; workflow_id: string });
   }
 
   // Build email account limits map
@@ -1235,42 +1240,45 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   };
   const enrolledEmailPairs = new Set<string>();
   for (const run of stillActive) {
-    const limits = accountLimitsMap.get(run.account_id)!;
-    const firstStepType = getFirstLinkedinStepType(run.workflow_id);
-    const isInmailFirst = firstStepType === "sales_inmail";
-    const slotsRemaining = isInmailFirst ? inmailSlotsRemaining : connectSlotsRemaining;
+    // Email-only runs have no LinkedIn account — skip LinkedIn-track slot enrollment entirely.
+    if (run.account_id) {
+      const limits = accountLimitsMap.get(run.account_id)!;
+      const firstStepType = getFirstLinkedinStepType(run.workflow_id);
+      const isInmailFirst = firstStepType === "sales_inmail";
+      const slotsRemaining = isInmailFirst ? inmailSlotsRemaining : connectSlotsRemaining;
 
-    // LinkedIn track enrollment — each run gets its own enrollment, but all runs
-    // for the same account share the daily slot budget for that action type
-    if (!slotsRemaining.has(run.account_id)) {
-      const dailyLimit = isInmailFirst ? (limits.daily_inmail_limit ?? 15) : (limits.daily_connection_limit ?? 20);
-      const sentToday = isInmailFirst
-        ? (inmailsSentToday.get(run.account_id) ?? 0)
-        : (connectsSentToday.get(run.account_id) ?? 0);
-      const actionsLeft = Math.max(0, dailyLimit - sentToday);
-      const firstStepTypeSql = isInmailFirst ? "'sales_inmail'" : "'connect'";
-      const scheduledToday = (db.prepare(
-        `SELECT COUNT(*) as c FROM run_profile_tracks rt
-         JOIN run_profiles rp ON rp.id = rt.run_profile_id
-         JOIN runs r ON r.id = rp.run_id
-         JOIN workflow_steps ws ON ws.workflow_id = r.workflow_id AND ws.track = 'linkedin' AND ws.step_order = 1
-         WHERE r.account_id = ? AND rt.track = 'linkedin' AND rt.state = 'in_progress'
-         AND ws.step_type = ${firstStepTypeSql}
-         AND date(datetime(rt.next_step_at)) = date('now')`
-      ).get(run.account_id) as { c: number }).c;
-      slotsRemaining.set(run.account_id, Math.max(0, actionsLeft - scheduledToday));
-    }
-    const slotsLeft = slotsRemaining.get(run.account_id)!;
-    if (slotsLeft > 0) {
-      const toEnroll = Math.min(slotsLeft, 5);
-      const pending = db.prepare(
-        `SELECT rt.id, rt.run_profile_id, rt.track FROM run_profile_tracks rt
-         JOIN run_profiles rp ON rp.id = rt.run_profile_id
-         WHERE rp.run_id = ? AND rt.track = 'linkedin' AND rt.state = 'pending'
-         ORDER BY rt.id LIMIT ?`
-      ).all(run.run_id, toEnroll) as Array<{ id: string; run_profile_id: string; track: string }>;
-      spreadEnrollBatch(db, run.run_id, pending, limits, "linkedin");
-      slotsRemaining.set(run.account_id, slotsLeft - pending.length);
+      // LinkedIn track enrollment — each run gets its own enrollment, but all runs
+      // for the same account share the daily slot budget for that action type
+      if (!slotsRemaining.has(run.account_id)) {
+        const dailyLimit = isInmailFirst ? (limits.daily_inmail_limit ?? 15) : (limits.daily_connection_limit ?? 20);
+        const sentToday = isInmailFirst
+          ? (inmailsSentToday.get(run.account_id) ?? 0)
+          : (connectsSentToday.get(run.account_id) ?? 0);
+        const actionsLeft = Math.max(0, dailyLimit - sentToday);
+        const firstStepTypeSql = isInmailFirst ? "'sales_inmail'" : "'connect'";
+        const scheduledToday = (db.prepare(
+          `SELECT COUNT(*) as c FROM run_profile_tracks rt
+           JOIN run_profiles rp ON rp.id = rt.run_profile_id
+           JOIN runs r ON r.id = rp.run_id
+           JOIN workflow_steps ws ON ws.workflow_id = r.workflow_id AND ws.track = 'linkedin' AND ws.step_order = 1
+           WHERE r.account_id = ? AND rt.track = 'linkedin' AND rt.state = 'in_progress'
+           AND ws.step_type = ${firstStepTypeSql}
+           AND date(datetime(rt.next_step_at)) = date('now')`
+        ).get(run.account_id) as { c: number }).c;
+        slotsRemaining.set(run.account_id, Math.max(0, actionsLeft - scheduledToday));
+      }
+      const slotsLeft = slotsRemaining.get(run.account_id)!;
+      if (slotsLeft > 0) {
+        const toEnroll = Math.min(slotsLeft, 5);
+        const pending = db.prepare(
+          `SELECT rt.id, rt.run_profile_id, rt.track FROM run_profile_tracks rt
+           JOIN run_profiles rp ON rp.id = rt.run_profile_id
+           WHERE rp.run_id = ? AND rt.track = 'linkedin' AND rt.state = 'pending'
+           ORDER BY rt.id LIMIT ?`
+        ).all(run.run_id, toEnroll) as Array<{ id: string; run_profile_id: string; track: string }>;
+        spreadEnrollBatch(db, run.run_id, pending, limits, "linkedin");
+        slotsRemaining.set(run.account_id, slotsLeft - pending.length);
+      }
     }
 
     // Email track enrollment — iterate per actual sending account used by this run's profiles
@@ -1385,9 +1393,13 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
     }
   }
 
-  // Reschedule overflow to tomorrow (use LinkedIn account schedule for reschedule)
+  // Reschedule overflow to tomorrow (use LinkedIn account schedule where available,
+  // falling back to the email account's own schedule for email-only runs that have
+  // no LinkedIn account attached)
   for (const tr of toReschedule) {
-    const limits = accountLimitsMap.get(tr.account_id)!;
+    const limits: ScheduleConfig | undefined = (tr.account_id ? accountLimitsMap.get(tr.account_id) : undefined)
+      ?? (tr.email_account_id ? emailAccountLimitsMap.get(tr.email_account_id) : undefined);
+    if (!limits) continue; // no schedule info available — leave next_step_at as-is, picked up next tick
     const slot = rescheduleToTomorrow(limits);
     db.prepare("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?").run(slot, tr.id);
     log(db, tr.run_id, tr.target_id, "info", `Daily limit reached — rescheduled to ${slot}`);

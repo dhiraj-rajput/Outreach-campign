@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
 import { randomUUID } from "crypto";
+import { resolveEnrollmentEligibility, tracksFor } from "@/lib/enrollment";
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -35,43 +36,30 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     )
     .all(runId) as Array<{ email_account_id: string }>).map((r) => r.email_account_id);
 
-  // Dedup: already enrolled in this workflow at all
-  const alreadyEnrolled = new Set(
-    (db
-      .prepare(
-        `SELECT DISTINCT rp.target_id FROM run_profiles rp
-         JOIN runs r ON r.id = rp.run_id
-         WHERE r.workflow_id = ?`
-      )
-      .all(run.workflow_id) as { target_id: string }[]).map((r) => r.target_id)
-  );
-
-  // Active elsewhere (in some other running/paused run with an in-progress track)
-  const activeElsewhere = new Set(
-    (db
-      .prepare(
-        `SELECT DISTINCT rp.target_id FROM run_profiles rp
-         JOIN runs r ON r.id = rp.run_id
-         WHERE r.status IN ('running', 'paused')
-         AND EXISTS (
-           SELECT 1 FROM run_profile_tracks rt
-           WHERE rt.run_profile_id = rp.id AND rt.state NOT IN ('completed', 'failed', 'skipped')
-         )`
-      )
-      .all() as { target_id: string }[]).map((r) => r.target_id)
-  );
+  // Per-channel eligibility — see lib/enrollment.ts for the rules.
+  const elig = resolveEnrollmentEligibility(db, run.workflow_id, workflowTracks, target_ids);
 
   let skipped_already_enrolled = 0;
-  let skipped_active_elsewhere = 0;
+  let skipped_linkedin_active_elsewhere = 0;
+  let skipped_unsubscribed = 0;
   const eligible: string[] = [];
+  const targetTracks = new Map<string, string[]>();
   for (const tid of target_ids) {
-    if (alreadyEnrolled.has(tid)) { skipped_already_enrolled++; continue; }
-    if (activeElsewhere.has(tid)) { skipped_active_elsewhere++; continue; }
+    if (elig.alreadyInWorkflow.has(tid)) { skipped_already_enrolled++; continue; }
+    const tracks = tracksFor(tid, workflowTracks, elig);
+    if (tracks.length === 0) {
+      // Every track this workflow has was blocked for this target — report the most
+      // relevant reason (LinkedIn conflict takes priority since it's the harder block).
+      if (workflowTracks.includes("linkedin") && elig.linkedinBlockedElsewhere.has(tid)) skipped_linkedin_active_elsewhere++;
+      else skipped_unsubscribed++;
+      continue;
+    }
     eligible.push(tid);
+    targetTracks.set(tid, tracks);
   }
 
   if (eligible.length === 0) {
-    return res.json({ enrolled: 0, skipped_already_enrolled, skipped_active_elsewhere });
+    return res.json({ enrolled: 0, skipped_already_enrolled, skipped_linkedin_active_elsewhere, skipped_unsubscribed });
   }
 
   // Assign email accounts: company-grouped round-robin (same as run creation)
@@ -108,7 +96,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       const assignedEmailAccountId = emailAssignment.get(tid) ?? null;
       const rpId = randomUUID();
       insertProfile.run(rpId, runId, tid, assignedEmailAccountId);
-      for (const track of workflowTracks) {
+      for (const track of targetTracks.get(tid)!) {
         if (track === "email" && !assignedEmailAccountId) continue;
         insertTrack.run(randomUUID(), rpId, track);
       }
@@ -119,6 +107,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   return res.json({
     enrolled: eligible.length,
     skipped_already_enrolled,
-    skipped_active_elsewhere,
+    skipped_linkedin_active_elsewhere,
+    skipped_unsubscribed,
   });
 }

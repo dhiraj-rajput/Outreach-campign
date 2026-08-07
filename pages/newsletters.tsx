@@ -12,8 +12,8 @@ import {
   RiDraftLine,
   RiCheckLine,
   RiMagicLine,
-  RiFileList3Line,
-  RiMailLine,
+  RiImageAddLine,
+  RiEyeLine,
 } from "react-icons/ri";
 
 interface Newsletter {
@@ -71,6 +71,7 @@ export default function NewslettersPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showSubModal, setShowSubModal] = useState(false);
   const [showEditionModal, setShowEditionModal] = useState(false);
+  const [previewEdition, setPreviewEdition] = useState<{ title: string; subject: string; content_html: string } | null>(null);
 
   // Subscribers & Editions for selected newsletter
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
@@ -90,12 +91,15 @@ export default function NewslettersPage() {
   const [subName, setSubName] = useState("");
   const [addingSub, setAddingSub] = useState(false);
 
-  // Edition form & AI state
+  // Edition form, Banner & AI state
   const [edTitle, setEdTitle] = useState("");
   const [edSubject, setEdSubject] = useState("");
   const [edContent, setEdContent] = useState("");
+  const [bannerUrl, setBannerUrl] = useState("");
+  const [uploadingBanner, setUploadingBanner] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [savingEd, setSavingEd] = useState(false);
+  const [sendingEditionId, setSendingEditionId] = useState<string | null>(null);
 
   function loadNewsletters() {
     setLoading(true);
@@ -113,7 +117,6 @@ export default function NewslettersPage() {
   }
 
   function loadConnectedData() {
-    // Load connected email accounts
     fetch("/api/email-accounts")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: EmailAccount[]) => {
@@ -122,7 +125,6 @@ export default function NewslettersPage() {
       })
       .catch(() => {});
 
-    // Load database prospect lists
     fetch("/api/lists")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: DBList[]) => {
@@ -219,7 +221,6 @@ export default function NewslettersPage() {
       setSubName("");
       setShowSubModal(false);
 
-      // Refresh subscribers list
       fetch(`/api/newsletters/${selectedNewsletter.id}/subscribers`)
         .then((res) => res.json())
         .then((data) => setSubscribers(data.subscribers ?? []));
@@ -228,6 +229,31 @@ export default function NewslettersPage() {
       toast.error(err instanceof Error ? err.message : "Error adding subscriber");
     } finally {
       setAddingSub(false);
+    }
+  }
+
+  async function handleImageUpload(file: File) {
+    setUploadingBanner(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result as string;
+        const res = await fetch("/api/newsletters/upload-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, filename: file.name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Image upload failed");
+
+        setBannerUrl(data.url);
+        toast.success("Banner image uploaded!");
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to upload banner image");
+    } finally {
+      setUploadingBanner(false);
     }
   }
 
@@ -241,14 +267,14 @@ export default function NewslettersPage() {
       const r = await fetch("/api/newsletters/ai-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: edTitle, prompt: edContent }),
+        body: JSON.stringify({ title: edTitle, prompt: edContent, bannerUrl }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "AI generation failed");
 
       if (d.subject) setEdSubject(d.subject);
       if (d.content_html) setEdContent(d.content_html);
-      toast.success("AI generated issue content & subject!");
+      toast.success("AI generated newsletter content with banner!");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI generation failed");
     } finally {
@@ -276,6 +302,7 @@ export default function NewslettersPage() {
       setEdTitle("");
       setEdSubject("");
       setEdContent("");
+      setBannerUrl("");
       setShowEditionModal(false);
 
       fetch(`/api/newsletters/${selectedNewsletter.id}/editions`)
@@ -289,8 +316,6 @@ export default function NewslettersPage() {
     }
   }
 
-  const [sendingEditionId, setSendingEditionId] = useState<string | null>(null);
-
   async function handleSendEdition(editionId: string) {
     if (!selectedNewsletter) return;
     setSendingEditionId(editionId);
@@ -303,7 +328,6 @@ export default function NewslettersPage() {
 
       toast.success(d.message ?? `Issue mailed to ${d.sent_count} subscribers!`);
 
-      // Refresh editions
       fetch(`/api/newsletters/${selectedNewsletter.id}/editions`)
         .then((res) => res.json())
         .then((data) => setEditions(data.editions ?? []));
@@ -482,10 +506,13 @@ export default function NewslettersPage() {
                               Subject: {ed.subject}
                             </div>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <div className="text-xs text-base-content/40 text-right">
-                              <div>{new Date(ed.created_at).toLocaleDateString()}</div>
-                            </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setPreviewEdition(ed)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-base-300/60 text-base-content hover:bg-base-300 transition-colors"
+                            >
+                              <RiEyeLine size={13} /> Preview
+                            </button>
                             <button
                               onClick={() => handleSendEdition(ed.id)}
                               disabled={sendingEditionId === ed.id}
@@ -552,16 +579,13 @@ export default function NewslettersPage() {
         </div>
       )}
 
-      {/* Modal 1: Create Newsletter with Connected Sender Email Selection */}
+      {/* Modal 1: Create Newsletter */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-base-100 border border-base-300/50 rounded-xl p-5 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-base">New Newsletter</h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-base-content/40 hover:text-base-content"
-              >
+              <button onClick={() => setShowCreateModal(false)} className="text-base-content/40 hover:text-base-content">
                 <RiCloseLine size={18} />
               </button>
             </div>
@@ -588,9 +612,7 @@ export default function NewslettersPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-base-content/70">
-                  Select Connected Sender Email
-                </label>
+                <label className="text-xs font-medium text-base-content/70">Select Connected Sender Email</label>
                 {connectedEmails.length === 0 ? (
                   <div className="text-xs text-warning mt-1">
                     No connected email accounts found. Please configure an account in Settings → Email.
@@ -610,18 +632,10 @@ export default function NewslettersPage() {
                 )}
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content"
-                >
+                <button type="button" onClick={() => setShowCreateModal(false)} className="px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={savingNews || connectedEmails.length === 0}
-                  className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-content rounded-lg hover:bg-primary/90 disabled:opacity-40"
-                >
+                <button type="submit" disabled={savingNews || connectedEmails.length === 0} className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-content rounded-lg hover:bg-primary/90 disabled:opacity-40">
                   {savingNews ? "Creating…" : "Create"}
                 </button>
               </div>
@@ -630,29 +644,22 @@ export default function NewslettersPage() {
         </div>
       )}
 
-      {/* Modal 2: Add Subscribers from DB List or Manual Entry */}
+      {/* Modal 2: Add Subscribers */}
       {showSubModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-base-100 border border-base-300/50 rounded-xl p-5 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-base">Add / Import Subscribers</h3>
-              <button
-                onClick={() => setShowSubModal(false)}
-                className="text-base-content/40 hover:text-base-content"
-              >
+              <button onClick={() => setShowSubModal(false)} className="text-base-content/40 hover:text-base-content">
                 <RiCloseLine size={18} />
               </button>
             </div>
-
-            {/* Mode selection tabs */}
             <div className="flex items-center gap-2 mb-4 border-b border-base-300/40 pb-2">
               <button
                 type="button"
                 onClick={() => setSubMode("list")}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  subMode === "list"
-                    ? "bg-primary/15 text-primary border border-primary/30"
-                    : "text-base-content/50 hover:bg-base-300/40"
+                  subMode === "list" ? "bg-primary/15 text-primary border border-primary/30" : "text-base-content/50 hover:bg-base-300/40"
                 }`}
               >
                 Import from DB List
@@ -661,21 +668,16 @@ export default function NewslettersPage() {
                 type="button"
                 onClick={() => setSubMode("single")}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  subMode === "single"
-                    ? "bg-primary/15 text-primary border border-primary/30"
-                    : "text-base-content/50 hover:bg-base-300/40"
+                  subMode === "single" ? "bg-primary/15 text-primary border border-primary/30" : "text-base-content/50 hover:bg-base-300/40"
                 }`}
               >
                 Single Contact
               </button>
             </div>
-
             <form onSubmit={handleAddSubscriber} className="space-y-3">
               {subMode === "list" ? (
                 <div>
-                  <label className="text-xs font-medium text-base-content/70">
-                    Select Database Prospect List
-                  </label>
+                  <label className="text-xs font-medium text-base-content/70">Select Database Prospect List</label>
                   {dbLists.length === 0 ? (
                     <div className="text-xs text-base-content/40 mt-1">No database lists found.</div>
                   ) : (
@@ -717,20 +719,11 @@ export default function NewslettersPage() {
                   </div>
                 </>
               )}
-
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowSubModal(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content"
-                >
+                <button type="button" onClick={() => setShowSubModal(false)} className="px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={addingSub}
-                  className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-content rounded-lg hover:bg-primary/90 disabled:opacity-40"
-                >
+                <button type="submit" disabled={addingSub} className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-content rounded-lg hover:bg-primary/90 disabled:opacity-40">
                   {addingSub ? "Importing…" : subMode === "list" ? "Import Contacts" : "Add Subscriber"}
                 </button>
               </div>
@@ -739,16 +732,13 @@ export default function NewslettersPage() {
         </div>
       )}
 
-      {/* Modal 3: Compose Edition with AI Assistance */}
+      {/* Modal 3: Compose Edition with Banner Upload & Live Preview */}
       {showEditionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-base-100 border border-base-300/50 rounded-xl p-5 w-full max-w-xl shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-base">Compose Newsletter Issue</h3>
-              <button
-                onClick={() => setShowEditionModal(false)}
-                className="text-base-content/40 hover:text-base-content"
-              >
+              <button onClick={() => setShowEditionModal(false)} className="text-base-content/40 hover:text-base-content">
                 <RiCloseLine size={18} />
               </button>
             </div>
@@ -776,6 +766,38 @@ export default function NewslettersPage() {
                 />
               </div>
 
+              {/* Banner Image Upload */}
+              <div>
+                <label className="text-xs font-medium text-base-content/70">Header Banner Image (Optional)</label>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="text"
+                    placeholder="https://... or upload banner image"
+                    value={bannerUrl}
+                    onChange={(e) => setBannerUrl(e.target.value)}
+                    className="flex-1 bg-base-200 border border-base-300/50 rounded-lg px-3 py-1.5 text-xs font-mono"
+                  />
+                  <label className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300/60 text-base-content hover:bg-base-300 transition-colors shrink-0">
+                    {uploadingBanner ? <RiLoader4Line size={13} className="animate-spin" /> : <RiImageAddLine size={13} />}
+                    {uploadingBanner ? "Uploading..." : "Upload Banner"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file);
+                      }}
+                    />
+                  </label>
+                </div>
+                {bannerUrl && (
+                  <div className="mt-2 text-center border border-base-300/40 rounded-lg p-2 bg-base-200/40">
+                    <img src={bannerUrl} alt="Banner Preview" className="max-h-24 mx-auto rounded border" />
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="text-xs font-medium text-base-content/70">Email Subject</label>
                 <input
@@ -792,7 +814,7 @@ export default function NewslettersPage() {
                 <label className="text-xs font-medium text-base-content/70">Content (HTML / Plain text)</label>
                 <textarea
                   required
-                  rows={7}
+                  rows={6}
                   placeholder="Write or generate your newsletter HTML content..."
                   value={edContent}
                   onChange={(e) => setEdContent(e.target.value)}
@@ -800,23 +822,59 @@ export default function NewslettersPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex items-center justify-between pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowEditionModal(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content"
+                  onClick={() => setPreviewEdition({ title: edTitle || "Issue Preview", subject: edSubject || "Subject Preview", content_html: edContent })}
+                  disabled={!edContent.trim()}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-base-content/70 hover:text-base-content disabled:opacity-40"
                 >
-                  Cancel
+                  <RiEyeLine size={14} /> Live HTML Preview
                 </button>
-                <button
-                  type="submit"
-                  disabled={savingEd}
-                  className="px-4 py-1.5 text-xs font-medium bg-secondary text-secondary-content rounded-lg hover:bg-secondary/90 disabled:opacity-40"
-                >
-                  {savingEd ? "Saving…" : "Save Issue Draft"}
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setShowEditionModal(false)} className="px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-base-content">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={savingEd} className="px-4 py-1.5 text-xs font-medium bg-secondary text-secondary-content rounded-lg hover:bg-secondary/90 disabled:opacity-40">
+                    {savingEd ? "Saving…" : "Save Issue Draft"}
+                  </button>
+                </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 4: Live Newsletter Preview Modal */}
+      {previewEdition && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-base-100 border border-base-300/50 rounded-xl p-5 w-full max-w-2xl shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-base-300/40 mb-3">
+              <div>
+                <h3 className="font-semibold text-base flex items-center gap-2">
+                  <RiEyeLine className="text-primary" /> {previewEdition.title}
+                </h3>
+                <p className="text-xs text-base-content/50 mt-0.5">Subject: {previewEdition.subject}</p>
+              </div>
+              <button onClick={() => setPreviewEdition(null)} className="text-base-content/40 hover:text-base-content">
+                <RiCloseLine size={18} />
+              </button>
+            </div>
+
+            {/* Email HTML Preview Box */}
+            <div className="flex-1 overflow-y-auto bg-white text-slate-800 p-6 rounded-xl border border-slate-200 shadow-inner">
+              <div
+                className="prose prose-slate max-w-none text-sm"
+                dangerouslySetInnerHTML={{ __html: previewEdition.content_html }}
+              />
+            </div>
+
+            <div className="flex justify-end pt-3">
+              <button onClick={() => setPreviewEdition(null)} className="px-4 py-1.5 text-xs font-medium bg-base-300 text-base-content rounded-lg hover:bg-base-300/80">
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}

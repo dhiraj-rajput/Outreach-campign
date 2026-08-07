@@ -78,8 +78,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // 4. Batch send emails via nodemailer SMTP
   for (const sub of subscribers) {
     try {
-      await sendEmail({
-        account: {
+      await sendEmail(
+        {
+          id: emailAccount.id,
           smtp_host: emailAccount.smtp_host,
           smtp_port: emailAccount.smtp_port,
           smtp_secure: emailAccount.smtp_secure,
@@ -88,10 +89,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           from_email: emailAccount.from_email,
           from_name: newsletter.sender_name ?? emailAccount.from_name ?? newsletter.name,
         },
-        to: sub.email,
-        subject: edition.subject,
-        html: edition.content_html,
-      });
+        sub.email,
+        edition.subject,
+        // Plain-text fallback part for clients that don't render HTML — sendEmail() requires
+        // a `body` (text) argument; `html` is the separate, optional rich part.
+        edition.title,
+        edition.content_html
+      );
 
       // Record send log
       db.prepare(`

@@ -1,14 +1,18 @@
-import { getDb } from "@/lib/db";
-import { decryptSecret } from "@/lib/crypto";
+import { getAIClient } from "@/lib/ai/client";
 
 // Direct port of PPT-Agent's backend/app/routes/campaigns.py::beautify_email(). PPT-Agent's
 // version calls its own internal AI client (Ollama → Gemini → OpenRouter fallback chain);
 // linki's equivalent multi-provider AI plumbing (premium.ai) lives in the ee/-only build and
-// is not present in this zip (see 01-comparison-report.md §1/§5), so this module talks to
-// OpenRouter directly using the same `integrations` row (key = 'openrouter') the rest of the
-// app already uses for AI calls (see lib/linkedin/runner.ts). If no key/model is configured,
-// or the call fails for any reason, it degrades to the same styled fallback template
-// PPT-Agent falls back to — beautify never blocks the user from sending.
+// is not present in this zip (see 01-comparison-report.md §1/§5), so this module goes through
+// the same shared, free-tier AI client (lib/ai/client.ts) that newsletter AI-generate and the
+// LinkedIn reply classifier already use — it reads whichever of Gemini/OpenRouter the user has
+// configured in Settings → Integrations. (An earlier version of this file queried the
+// `integrations` table directly and read its model from `agent_config.default_model`, a column
+// that's only ever written by the ee/-only premium AI writer — in this public build that column
+// is always NULL, so beautify silently fell back to the plain template on every call even with
+// a valid key configured.) If no provider is configured, or the call fails for any reason, this
+// degrades to the same styled fallback template PPT-Agent falls back to — beautify never blocks
+// the user from sending.
 
 export type BeautifyStyle = "professional" | "friendly" | "bold";
 
@@ -57,17 +61,13 @@ export async function beautifyEmail(
   body: string,
   style: BeautifyStyle = "professional"
 ): Promise<BeautifyResult> {
-  const db = getDb();
-  const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as
-    { api_key: string } | undefined;
-  const agentConfig = db.prepare("SELECT default_model FROM agent_config WHERE id = 1").get() as
-    { default_model: string | null } | undefined;
-
-  const apiKey = integration?.api_key ? decryptSecret(integration.api_key) : null;
-  const model = agentConfig?.default_model;
-
-  if (!apiKey || !model) {
-    return { html: fallbackTemplate(subject, body), usedFallback: true, error: "OpenRouter key or default model not configured" };
+  const ai = getAIClient();
+  if (!ai) {
+    return {
+      html: fallbackTemplate(subject, body),
+      usedFallback: true,
+      error: "No AI integration configured. Add a Google AI Studio or OpenRouter key in Settings → Integrations.",
+    };
   }
 
   const styleDesc = STYLE_DESCRIPTIONS[style] ?? STYLE_DESCRIPTIONS.professional;
@@ -89,32 +89,20 @@ Plain text draft:
 ${body}`;
 
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        messages: [
-          {
-            role: "system",
-            content: "You are an expert HTML email designer. You respond with ONLY raw HTML — no markdown, no code fences, no commentary before or after the HTML.",
-          },
-          { role: "user", content: prompt },
-        ],
-      }),
+    const completion = await ai.client.chat.completions.create({
+      model: ai.model,
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert HTML email designer. You respond with ONLY raw HTML — no markdown, no code fences, no commentary before or after the HTML.",
+        },
+        { role: "user", content: prompt },
+      ],
     });
 
-    if (!res.ok) {
-      throw new Error(`OpenRouter returned ${res.status}: ${await res.text()}`);
-    }
-
-    const data = await res.json();
-    const raw = data?.choices?.[0]?.message?.content as string | undefined;
-    if (!raw || !raw.trim()) throw new Error("AI returned an empty response");
+    const raw = completion.choices[0]?.message?.content?.trim();
+    if (!raw) throw new Error("AI returned an empty response");
 
     return { html: stripFences(raw), usedFallback: false };
   } catch (err) {

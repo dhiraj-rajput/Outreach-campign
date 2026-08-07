@@ -713,7 +713,7 @@ function Wizard({
     if (!id) return;
     setConflictsLoading(true);
     const [conflictsRes, targetsRes] = await Promise.all([
-      fetch(`/api/lists/${id}/conflicts`),
+      fetch(`/api/lists/${id}/conflicts?workflow_id=${encodeURIComponent(workflowId)}`),
       fetch(`/api/lists/${id}`),
     ]);
     if (conflictsRes.ok) setConflicts(await conflictsRes.json());
@@ -994,7 +994,9 @@ function Wizard({
     if (p === "linkedin-steps") return prospectsReady;
     if (p === "email-steps") return prospectsReady;
     if (p === "account") return prospectsReady && stepsReady;
-    if (p === "summary") return prospectsReady && stepsReady && !!accountId;
+    // A LinkedIn account is only required when the campaign actually has a LinkedIn step.
+    // Email-only campaigns should be able to reach summary/launch with just an email account.
+    if (p === "summary") return prospectsReady && stepsReady && (!hasLinkedInStep || !!accountId);
     return false;
   }
 
@@ -1425,46 +1427,45 @@ function Wizard({
                     Select the account{hasLinkedInStep && hasEmailStep ? "s" : ""} that will execute this campaign.
                   </p>
 
-                  <div className="mb-8">
-                      <div className="mb-3">
-                        <h3 className="text-base font-semibold">LinkedIn account</h3>
-                        {!hasLinkedInStep && (
-                          <p className="text-xs text-base-content/40 mt-0.5">Required for automation even on email-only workflows.</p>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        {accounts.filter((a) => a.is_authenticated).length === 0 ? (
-                          <p className="text-sm text-warning">
-                            No authenticated accounts.{" "}
-                            <Link href="/settings?tab=linkedin" className="underline">Authenticate one first.</Link>
-                          </p>
-                        ) : accounts.filter((a) => a.is_authenticated).map((a) => {
-                          const connLeft = a.daily_connection_limit - a.connections_today;
-                          const msgLeft = a.daily_message_limit - a.messages_today;
-                          const inmailLeft = a.daily_inmail_limit - a.inmails_today;
-                          return (
-                            <button
-                              key={a.id}
-                              onClick={() => setAccountId(String(a.id))}
-                              className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-colors text-left ${
-                                accountId === String(a.id)
-                                  ? "bg-primary/10 border-primary/40"
-                                  : "bg-base-200 border-base-300/50 hover:border-base-300"
-                              }`}
-                            >
-                              <span className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${accountId === String(a.id) ? "bg-primary text-primary-content" : "bg-base-300 text-base-content/60"}`}>
-                                {a.name.charAt(0).toUpperCase()}
-                              </span>
-                              <div className="flex-1 min-w-0">
-                                <p className={`font-medium text-sm ${accountId === String(a.id) ? "text-primary" : ""}`}>{a.name}</p>
-                                <p className="text-xs text-base-content/40">{connLeft} connections left today · {msgLeft} messages left today · {inmailLeft} InMails left today</p>
-                              </div>
-                              {accountId === String(a.id) && <span className="ml-auto text-primary text-xs font-semibold shrink-0">Selected</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                  </div>
+                  {hasLinkedInStep && (
+                    <div className="mb-8">
+                        <div className="mb-3">
+                          <h3 className="text-base font-semibold">LinkedIn account</h3>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {accounts.filter((a) => a.is_authenticated).length === 0 ? (
+                            <p className="text-sm text-warning">
+                              No authenticated accounts.{" "}
+                              <Link href="/settings?tab=linkedin" className="underline">Authenticate one first.</Link>
+                            </p>
+                          ) : accounts.filter((a) => a.is_authenticated).map((a) => {
+                            const connLeft = a.daily_connection_limit - a.connections_today;
+                            const msgLeft = a.daily_message_limit - a.messages_today;
+                            const inmailLeft = a.daily_inmail_limit - a.inmails_today;
+                            return (
+                              <button
+                                key={a.id}
+                                onClick={() => setAccountId(String(a.id))}
+                                className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-colors text-left ${
+                                  accountId === String(a.id)
+                                    ? "bg-primary/10 border-primary/40"
+                                    : "bg-base-200 border-base-300/50 hover:border-base-300"
+                                }`}
+                              >
+                                <span className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${accountId === String(a.id) ? "bg-primary text-primary-content" : "bg-base-300 text-base-content/60"}`}>
+                                  {a.name.charAt(0).toUpperCase()}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <p className={`font-medium text-sm ${accountId === String(a.id) ? "text-primary" : ""}`}>{a.name}</p>
+                                  <p className="text-xs text-base-content/40">{connLeft} connections left today · {msgLeft} messages left today · {inmailLeft} InMails left today</p>
+                                </div>
+                                {accountId === String(a.id) && <span className="ml-auto text-primary text-xs font-semibold shrink-0">Selected</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                    </div>
+                  )}
 
                   {hasEmailStep && (
                     <div>
