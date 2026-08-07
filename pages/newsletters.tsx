@@ -287,13 +287,19 @@ export default function NewslettersPage() {
     if (!selectedNewsletter || !edTitle.trim() || !edSubject.trim() || !edContent.trim()) return;
     setSavingEd(true);
     try {
+      let finalHtml = edContent.trim();
+      if (bannerUrl && bannerUrl.trim() && !finalHtml.includes(bannerUrl.trim())) {
+        const bannerHtml = `<div style="text-align: center; margin-bottom: 24px;"><img src="${bannerUrl.trim()}" alt="Banner" style="max-width: 100%; height: auto; border-radius: 12px; border: 1px solid #e2e8f0; display: block; margin: 0 auto;" /></div>`;
+        finalHtml = `${bannerHtml}\n${finalHtml}`;
+      }
+
       const r = await fetch(`/api/newsletters/${selectedNewsletter.id}/editions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: edTitle,
           subject: edSubject,
-          content_html: edContent,
+          content_html: finalHtml,
         }),
       });
       const d = await r.json();
@@ -844,7 +850,14 @@ export default function NewslettersPage() {
               <div className="flex items-center justify-between pt-2">
                 <button
                   type="button"
-                  onClick={() => setPreviewEdition({ title: edTitle || "Issue Preview", subject: edSubject || "Subject Preview", content_html: edContent })}
+                  onClick={() => {
+                    let previewHtml = edContent;
+                    if (bannerUrl && bannerUrl.trim() && !previewHtml.includes(bannerUrl.trim())) {
+                      const bannerHtml = `<div style="text-align: center; margin-bottom: 24px;"><img src="${bannerUrl.trim()}" alt="Banner" style="max-width: 100%; height: auto; border-radius: 12px; border: 1px solid #e2e8f0; display: block; margin: 0 auto;" /></div>`;
+                      previewHtml = `${bannerHtml}\n${previewHtml}`;
+                    }
+                    setPreviewEdition({ title: edTitle || "Issue Preview", subject: edSubject || "Subject Preview", content_html: previewHtml });
+                  }}
                   disabled={!edContent.trim()}
                   className="inline-flex items-center gap-1 text-xs font-medium text-base-content/70 hover:text-base-content disabled:opacity-40"
                 >

@@ -81,6 +81,7 @@ function getLocalParts(tz: string, date = new Date()): { hour: number; minute: n
 }
 
 function isWithinSchedule(account: ScheduleConfig): boolean {
+  if (process.env.NODE_ENV === "development" || process.env.IGNORE_SCHEDULE === "true") return true;
   const { hour, minute, isoWeekday } = getLocalParts(account.timezone || "UTC");
   const allowedDays = (account.working_days || "1,2,3,4,5").split(",").map(Number);
   if (!allowedDays.includes(isoWeekday)) return false;
