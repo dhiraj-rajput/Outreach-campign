@@ -27,13 +27,18 @@ export function getAIClient(preferredModel?: string): AIProviderConfig | null {
   const geminiKey = geminiRow?.api_key ? (decryptSecret(geminiRow.api_key) ?? geminiRow.api_key) : undefined;
 
   if (geminiKey && geminiKey.trim()) {
+    let activeModel = preferredModel || geminiRow?.model || "gemini-2.5-flash";
+    // If an OpenRouter model was passed but we only have Gemini key, map to valid Gemini model
+    if (activeModel.includes("/") || activeModel.includes("openrouter") || activeModel.includes("llama") || activeModel.includes("deepseek") || activeModel.includes("qwen")) {
+      activeModel = geminiRow?.model || "gemini-2.5-flash";
+    }
     return {
       provider: "gemini",
       client: new OpenAI({
         baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
         apiKey: geminiKey.trim(),
       }),
-      model: preferredModel || geminiRow?.model || "gemini-2.5-flash",
+      model: activeModel,
     };
   }
 
@@ -45,13 +50,17 @@ export function getAIClient(preferredModel?: string): AIProviderConfig | null {
   const openrouterKey = openrouterRow?.api_key ? (decryptSecret(openrouterRow.api_key) ?? openrouterRow.api_key) : undefined;
 
   if (openrouterKey && openrouterKey.trim()) {
+    let activeModel = preferredModel || openrouterRow?.model || "google/gemini-2.0-flash-exp:free";
+    if (activeModel.startsWith("gemini-")) {
+      activeModel = "google/gemini-2.0-flash-exp:free";
+    }
     return {
       provider: "openrouter",
       client: new OpenAI({
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: openrouterKey.trim(),
       }),
-      model: preferredModel || openrouterRow?.model || "openrouter/free",
+      model: activeModel,
     };
   }
 

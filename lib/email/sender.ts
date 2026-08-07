@@ -18,7 +18,8 @@ export async function sendEmail(
   to: string,
   subject: string,
   body: string,
-  html?: string
+  html?: string,
+  headers?: Record<string, string>
 ): Promise<void> {
   const transporter = nodemailer.createTransport({
     host: account.smtp_host,
@@ -43,6 +44,7 @@ export async function sendEmail(
     from, to, subject, text: body,
     ...(html ? { html } : {}),
     ...(account.reply_to ? { replyTo: account.reply_to } : {}),
+    ...(headers ? { headers } : {}),
   });
 }
 

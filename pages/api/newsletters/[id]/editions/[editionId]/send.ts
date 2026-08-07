@@ -8,6 +8,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
 import { sendEmail } from "@/lib/email/sender";
 import { decryptSecret } from "@/lib/crypto";
+import { unsubscribeUrl } from "@/lib/email/suppression";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -78,6 +79,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // 4. Batch send emails via nodemailer SMTP
   for (const sub of subscribers) {
     try {
+      const unsubLink = unsubscribeUrl(sub.id);
+      const htmlBody = edition.content_html
+        ? edition.content_html.replace(/\{\{unsubscribe_url\}\}/g, unsubLink)
+        : undefined;
+
       await sendEmail(
         {
           id: emailAccount.id,
@@ -93,8 +99,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         edition.subject,
         // Plain-text fallback part for clients that don't render HTML — sendEmail() requires
         // a `body` (text) argument; `html` is the separate, optional rich part.
-        edition.title,
-        edition.content_html
+        `${edition.title}\n\nUnsubscribe: ${unsubLink}`,
+        htmlBody,
+        {
+          "List-Unsubscribe": `<${unsubLink}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        }
       );
 
       // Record send log

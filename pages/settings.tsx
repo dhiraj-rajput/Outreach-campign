@@ -1796,37 +1796,25 @@ function GeneralTab({ hasPremium }: { hasPremium: boolean }) {
         <p className="text-xs text-base-content/50 mb-3">
           Replay the guided walkthrough for any page.
         </p>
-        <div className="flex items-center gap-2">
-          <select
-            className="flex-1 px-3 py-1.5 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50 cursor-pointer"
-            defaultValue=""
-            onChange={(e) => {
-              const page = e.target.value as TourPage;
-              if (!page) return;
-              e.target.value = "";
-              if (page === "settings") {
-                replayPageTour(page);
-              } else {
-                router.push(page === "dashboard" ? "/" : `/${page}`).then(() => setTimeout(() => replayPageTour(page), 400));
-              }
-            }}
-          >
-            <option value="">Select a page to replay…</option>
-            {ALL_TOUR_PAGES.map((p) => (
-              <option key={p} value={p}>{TOUR_PAGE_LABELS[p]}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => {
-              skipAllTours();
-              toast.success("All page tours skipped");
-            }}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300 text-base-content/70 hover:bg-base-300/80 transition-colors shrink-0"
-          >
-            Skip All Tours
-          </button>
-        </div>
+        <select
+          className="w-full px-3 py-1.5 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50 cursor-pointer"
+          defaultValue=""
+          onChange={(e) => {
+            const page = e.target.value as TourPage;
+            if (!page) return;
+            e.target.value = "";
+            if (page === "settings") {
+              replayPageTour(page);
+            } else {
+              router.push(page === "dashboard" ? "/" : `/${page}`).then(() => setTimeout(() => replayPageTour(page), 400));
+            }
+          }}
+        >
+          <option value="">Select a page to replay…</option>
+          {ALL_TOUR_PAGES.map((p) => (
+            <option key={p} value={p}>{TOUR_PAGE_LABELS[p]}</option>
+          ))}
+        </select>
       </div>
 
       {/* Change password */}

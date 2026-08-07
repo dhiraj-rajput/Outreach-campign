@@ -274,6 +274,26 @@ function buildAndRun(page: TourPage, persist: boolean) {
     prevBtnText: "Back",
     doneBtnText: "Done",
     steps,
+    onPopoverRender: (popover) => {
+      const footer = popover.wrapper.querySelector(".driver-popover-footer");
+      if (footer && !footer.querySelector(".linki-tour-skip-btn")) {
+        const skipBtn = document.createElement("button");
+        skipBtn.className = "driver-popover-btn linki-tour-skip-btn";
+        skipBtn.innerText = "Skip Tour";
+        skipBtn.style.marginRight = "auto";
+        skipBtn.style.background = "transparent";
+        skipBtn.style.color = "#9ca3af";
+        skipBtn.style.border = "none";
+        skipBtn.style.fontSize = "12px";
+        skipBtn.style.cursor = "pointer";
+        skipBtn.style.padding = "4px 8px";
+        skipBtn.onclick = () => {
+          skipAllTours();
+          d.destroy();
+        };
+        footer.insertBefore(skipBtn, footer.firstChild);
+      }
+    },
     onDestroyed: () => {
       if (persist) markSeen(page);
     },

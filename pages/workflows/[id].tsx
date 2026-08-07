@@ -603,6 +603,7 @@ function Wizard({
   const [beautifyLoadingIdx, setBeautifyLoadingIdx] = useState<number | null>(null);
   const [beautifyStyle, setBeautifyStyle] = useState<"professional" | "friendly" | "bold">("professional");
   const [beautifyError, setBeautifyError] = useState<string | null>(null);
+  const [htmlModalIdx, setHtmlModalIdx] = useState<number | null>(null);
 
   async function beautifyStepEmail(idx: number, ws: WizardStep) {
     if (!ws.emailBody.trim()) return;
@@ -1445,7 +1446,7 @@ function Wizard({
                             return (
                               <button
                                 key={a.id}
-                                onClick={() => setAccountId(String(a.id))}
+                                onClick={() => setAccountId(accountId === String(a.id) ? "" : String(a.id))}
                                 className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-colors text-left ${
                                   accountId === String(a.id)
                                     ? "bg-primary/10 border-primary/40"
@@ -2128,16 +2129,18 @@ function Wizard({
                           </div>
 
                           {ws.emailBodyHtml && (
-                            <div className="space-y-2">
-                              <label className="flex items-center gap-2 cursor-pointer w-fit">
+                            <div className="flex items-center gap-3 pt-1">
+                              <label className="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" className="checkbox checkbox-xs" checked={ws.emailUseHtml} onChange={(e) => updateStep(idx, { emailUseHtml: e.target.checked })} />
-                                <span className="text-xs text-base-content/50">Send this HTML version instead of plain text</span>
+                                <span className="text-xs text-base-content/50">Send HTML version</span>
                               </label>
-                              {ws.emailUseHtml && (
-                                <div className="rounded-lg overflow-hidden border border-base-300/50 bg-white">
-                                  <iframe srcDoc={ws.emailBodyHtml} title="Email HTML preview" className="w-full h-64" sandbox="" />
-                                </div>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => setHtmlModalIdx(idx)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-base-300 text-base-content/80 hover:bg-base-300/80 transition-colors"
+                              >
+                                Preview HTML Email
+                              </button>
                             </div>
                           )}
 
@@ -2384,6 +2387,41 @@ function Wizard({
           </div>
         );
       })()}
+
+      {/* ── Styled HTML Email Preview Modal Dialogue ── */}
+      {htmlModalIdx !== null && wizardSteps[htmlModalIdx]?.emailBodyHtml && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-base-200 border border-base-300/50 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-base-300/50">
+              <h3 className="font-semibold text-base flex items-center gap-2">
+                <RiRobot2Line className="text-primary" /> Styled HTML Email Preview
+              </h3>
+              <button
+                type="button"
+                onClick={() => setHtmlModalIdx(null)}
+                className="text-base-content/40 hover:text-base-content transition-colors text-lg leading-none"
+              >×</button>
+            </div>
+            <div className="p-4 flex-1 overflow-y-auto bg-slate-900">
+              <iframe
+                srcDoc={wizardSteps[htmlModalIdx].emailBodyHtml}
+                title="Email HTML Preview"
+                className="w-full h-[500px] border-0 rounded-xl bg-white"
+                sandbox=""
+              />
+            </div>
+            <div className="px-5 py-3 border-t border-base-300/50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setHtmlModalIdx(null)}
+                className="px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Test Email Modal ── */}
       {testEmailIdx !== null && (
