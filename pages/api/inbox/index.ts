@@ -30,7 +30,12 @@ export interface InboxReply {
   dispatched_at: string | null;
   dispatch_result_json: string | null;
   manually_edited: number;
+  // LinkedIn intent classification (AI-powered, stored directly on targets)
+  li_intent: string | null;
+  li_intent_at: string | null;
+  li_intent_action: string | null;
 }
+
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
@@ -82,7 +87,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       er.classification_error,
       er.dispatched_at,
       er.dispatch_result_json,
-      COALESCE(er.manually_edited, 0) AS manually_edited
+      COALESCE(er.manually_edited, 0) AS manually_edited,
+      t.li_intent,
+      t.li_intent_at,
+      t.li_intent_action
     FROM targets t
     LEFT JOIN run_profiles rp ON rp.target_id = t.id
     LEFT JOIN runs r ON r.id = rp.run_id AND r.status IN ('running', 'paused', 'completed')

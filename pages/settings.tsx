@@ -1414,6 +1414,15 @@ const INTEGRATIONS: IntegrationDef[] = [
     placeholder: "Apollo API key",
   },
   {
+    key: "gemini",
+    name: "Google AI Studio (Gemini)",
+    description: "Google Gemini 2.0 Flash / Pro for AI-powered personalization & intent classification",
+    badge: "GO",
+    badgeColor: "#34a853",
+    accentColor: "#34a853",
+    placeholder: "AIzaSy...",
+  },
+  {
     key: "openrouter",
     name: "OpenRouter",
     description: "Route AI requests across models (GPT-4, Claude, Llama…)",
@@ -1433,9 +1442,9 @@ const INTEGRATIONS: IntegrationDef[] = [
   },
 ];
 
-// Apollo is open-core (free); OpenRouter/Claude drive the premium AI writer and are
+// Apollo is open-core (free); OpenRouter/Claude/Gemini drive the premium AI writer and are
 // hidden in the free build.
-const PREMIUM_INTEGRATION_KEYS = new Set(["openrouter", "claude"]);
+const PREMIUM_INTEGRATION_KEYS = new Set(["openrouter", "claude", "gemini"]);
 
 function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
   const [configuredMap, setConfiguredMap] = useState<Record<string, { masked: string | null; configured: boolean }>>({});

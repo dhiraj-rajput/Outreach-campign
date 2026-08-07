@@ -6,10 +6,14 @@
 /.pnp
 .pnp.*
 .yarn/*
+!.yarn/versions
 !.yarn/patches
 !.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+
+# package lockfiles
+package-lock.json
+bun.lock
+bun.lockb
 
 # testing
 /coverage
@@ -49,6 +53,7 @@ next-env.d.ts
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 
 # Runtime log file
 log.txt

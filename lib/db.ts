@@ -472,6 +472,70 @@ function runMigrations(db: Database.Database) {
     "ALTER TABLE lists ADD COLUMN purpose TEXT",
     // Manual/CSV-only field — no automation reads or writes this, reference data only.
     "ALTER TABLE targets ADD COLUMN phone TEXT",
+    // LinkedIn reply intent classification — set when a LinkedIn reply is classified by AI.
+    // li_intent: one of interested|meeting_request|objection|not_interested|out_of_office|unclear
+    "ALTER TABLE targets ADD COLUMN li_intent TEXT",
+    "ALTER TABLE targets ADD COLUMN li_intent_at TEXT",
+    "ALTER TABLE targets ADD COLUMN li_intent_action TEXT",
+    // Track last LinkedIn message WE sent per target — used as context for intent classification
+    "ALTER TABLE targets ADD COLUMN li_last_message_sent TEXT",
+    // Newsletter core tables
+    `CREATE TABLE IF NOT EXISTS newsletters (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      sender_name TEXT,
+      sender_email TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+      id TEXT PRIMARY KEY,
+      newsletter_id TEXT NOT NULL REFERENCES newsletters(id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      full_name TEXT,
+      status TEXT NOT NULL DEFAULT 'subscribed' CHECK(status IN ('subscribed', 'unsubscribed', 'bounced')),
+      subscribed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      unsubscribed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(newsletter_id, email)
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_ns_newsletter ON newsletter_subscribers(newsletter_id)",
+    "CREATE INDEX IF NOT EXISTS idx_ns_email ON newsletter_subscribers(email)",
+    `CREATE TABLE IF NOT EXISTS newsletter_editions (
+      id TEXT PRIMARY KEY,
+      newsletter_id TEXT NOT NULL REFERENCES newsletters(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      content_html TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'scheduled', 'sending', 'sent')),
+      scheduled_at TEXT,
+      sent_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_ne_newsletter ON newsletter_editions(newsletter_id)",
+    `CREATE TABLE IF NOT EXISTS newsletter_sends (
+      id TEXT PRIMARY KEY,
+      edition_id TEXT NOT NULL REFERENCES newsletter_editions(id) ON DELETE CASCADE,
+      subscriber_id TEXT NOT NULL REFERENCES newsletter_subscribers(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
+      sent_at TEXT,
+      opened_at TEXT,
+      clicked_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(edition_id, subscriber_id)
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_nsends_edition ON newsletter_sends(edition_id)",
+    // Inbound LinkedIn messages table
+    `CREATE TABLE IF NOT EXISTS linkedin_inbox_messages (
+      id TEXT PRIMARY KEY,
+      target_id TEXT NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+      sender_urn TEXT,
+      body TEXT NOT NULL,
+      received_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_li_msg_target ON linkedin_inbox_messages(target_id)",
   ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch { /* column already exists */ }

@@ -18,6 +18,7 @@ import {
   RiQuestionLine,
   RiCompassLine,
   RiPlayCircleLine,
+  RiNewspaperLine,
 } from "react-icons/ri";
 import { pathToTourPage, replayPageTour } from "@/lib/tour";
 
@@ -29,6 +30,7 @@ const mainNav = [
   { href: "/contacts", label: "Contacts", icon: RiContactsLine, color: "#34d399", tour: "nav-contacts" },
   { href: "/companies", label: "Companies", icon: RiBuildingLine, color: "#a78bfa", tour: "nav-companies" },
   { href: "/workflows", label: "Campaigns", icon: RiFlowChart, color: "#f4b740", tour: "nav-workflows" },
+  { href: "/newsletters", label: "Newsletters", icon: RiNewspaperLine, color: "#e879f9", tour: "nav-newsletters" },
   { href: "/inbox", label: "Inbox", icon: RiInboxLine, color: "#38bdf8", tour: "nav-inbox" },
   { href: "/email-health", label: "Email Health", icon: RiMailCheckLine, color: "#f4b740", tour: "nav-email-health" },
 ];

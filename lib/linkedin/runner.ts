@@ -653,6 +653,8 @@ async function executeStep(
       }
       await saveSessionState(accountId);
       db.prepare("UPDATE targets SET message_sent_at = ? WHERE id = ?").run(nowIso(), target.id);
+      // Store last sent message for intent-classification context
+      db.prepare("UPDATE targets SET li_last_message_sent = ? WHERE id = ?").run(messageText, target.id);
       trRecordContext(db, tr, { linkedinMessage: messageText });
       trAdvance(db, tr, steps);
       log(db, runId, target.id, "info", `Message sent to ${name}`);
@@ -756,6 +758,7 @@ async function executeStep(
       }
       await saveSessionState(accountId);
       db.prepare("UPDATE targets SET inmail_sent_at = ?, message_sent_at = COALESCE(message_sent_at, ?) WHERE id = ?").run(nowIso(), nowIso(), target.id);
+      db.prepare("UPDATE targets SET li_last_message_sent = ? WHERE id = ?").run(inmailBody, target.id);
       trRecordContext(db, tr, { linkedinMessage: inmailBody });
       trAdvance(db, tr, steps);
       log(db, runId, target.id, "info", `InMail sent to ${name}`);

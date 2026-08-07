@@ -50,9 +50,16 @@ const VERDICT_BADGES: Record<string, { label: string; cls: string }> = {
   human_reply: { label: "Human reply", cls: "bg-info/15 text-info" },
   not_interested: { label: "Not interested", cls: "bg-error/15 text-error" },
   cancelled: { label: "Cancelled", cls: "bg-base-300/60 text-base-content/50" },
+  // LinkedIn intents
+  interested: { label: "Interested", cls: "bg-success/15 text-success" },
+  meeting_request: { label: "Meeting request", cls: "bg-primary/15 text-primary" },
+  objection: { label: "Objection", cls: "bg-warning/15 text-warning" },
+  out_of_office: { label: "OOO", cls: "bg-warning/15 text-warning" },
+  unclear: { label: "Unclear", cls: "bg-base-300/60 text-base-content/50" },
 };
 
 function verdictBadge(reply: InboxReply): { label: string; cls: string } {
+  if (reply.li_intent && VERDICT_BADGES[reply.li_intent]) return VERDICT_BADGES[reply.li_intent];
   if (reply.classification_error) return { label: "Failed", cls: "bg-error/15 text-error" };
   if (reply.reply_id && !reply.classified_at) return { label: "Pending", cls: "bg-base-300/60 text-base-content/50" };
   if (reply.reply_kind && VERDICT_BADGES[reply.reply_kind]) return VERDICT_BADGES[reply.reply_kind];
@@ -61,6 +68,7 @@ function verdictBadge(reply: InboxReply): { label: string; cls: string } {
 
 // Stable key for filtering — matches the categories the badge renders.
 function verdictKey(reply: InboxReply): string {
+  if (reply.li_intent) return reply.li_intent;
   if (reply.classification_error) return "failed";
   if (reply.reply_id && !reply.classified_at) return "pending";
   if (reply.reply_kind && VERDICT_BADGES[reply.reply_kind]) return reply.reply_kind;
@@ -69,11 +77,14 @@ function verdictKey(reply: InboxReply): string {
 
 const VERDICT_FILTERS: Array<{ key: string; label: string }> = [
   { key: "all", label: "All verdicts" },
-  { key: "ooo_followup", label: "OOO follow-up" },
-  { key: "substitute", label: "Substitute" },
-  { key: "call_task", label: "Call task" },
+  { key: "interested", label: "Interested" },
+  { key: "meeting_request", label: "Meeting request" },
+  { key: "objection", label: "Objection" },
   { key: "human_reply", label: "Human reply" },
   { key: "not_interested", label: "Not interested" },
+  { key: "ooo_followup", label: "OOO follow-up" },
+  { key: "out_of_office", label: "OOO (LinkedIn)" },
+  { key: "unclear", label: "Unclear" },
   { key: "pending", label: "Pending" },
   { key: "failed", label: "Failed" },
   { key: "none", label: "Unclassified" },
@@ -116,6 +127,26 @@ function ReplyModal({ reply, onClose, onActionDone, hasPremium }: ReplyModalProp
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Reclassify failed");
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function handleClassifyLinkedIn() {
+    setActing("reclassify");
+    try {
+      const r = await fetch("/api/inbox/linkedin-classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: reply.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "LinkedIn classification failed");
+      toast.success(`Classified as: ${d.intent}`);
+      onActionDone();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Classification failed");
     } finally {
       setActing(null);
     }
@@ -219,7 +250,7 @@ function ReplyModal({ reply, onClose, onActionDone, hasPremium }: ReplyModalProp
         </div>
 
         {/* Classifier verdict + dispatch trail */}
-        {reply.reply_id && (
+        {(reply.reply_id || reply.last_replied_at) && (
           <div className="px-5 py-3.5 border-b border-base-300/50 bg-base-200/40 space-y-2.5">
             <div className="flex items-center gap-2 flex-wrap">
               <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${verdict.cls}`}>
@@ -232,6 +263,9 @@ function ReplyModal({ reply, onClose, onActionDone, hasPremium }: ReplyModalProp
               )}
               {reply.reply_summary && (
                 <span className="text-xs text-base-content/60">{reply.reply_summary}</span>
+              )}
+              {reply.li_intent_action && (
+                <span className="text-xs text-base-content/60">{reply.li_intent_action}</span>
               )}
             </div>
 
@@ -248,14 +282,24 @@ function ReplyModal({ reply, onClose, onActionDone, hasPremium }: ReplyModalProp
             )}
 
             <div className="flex items-center gap-2 pt-0.5">
-              {hasPremium && (
+              {reply.reply_id && (
                 <button
                   onClick={handleReclassify}
                   disabled={acting !== null}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-base-300/50 text-base-content/70 hover:bg-base-300 disabled:opacity-40 transition-colors"
                 >
                   {acting === "reclassify" ? <RiLoader4Line size={12} className="animate-spin" /> : null}
-                  Reclassify
+                  Reclassify Email
+                </button>
+              )}
+              {reply.last_replied_at && (
+                <button
+                  onClick={handleClassifyLinkedIn}
+                  disabled={acting !== null}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 disabled:opacity-40 transition-colors"
+                >
+                  {acting === "reclassify" ? <RiLoader4Line size={12} className="animate-spin" /> : null}
+                  Classify LinkedIn Intent (AI)
                 </button>
               )}
               {scheduledFor && (

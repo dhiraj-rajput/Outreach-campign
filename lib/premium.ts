@@ -52,10 +52,9 @@ export interface PremiumSurface {
 
 function loadPremium(): PremiumSurface | null {
   try {
-    // Loaded by real path. The ee/ folder is imported IN PLACE (not copied) so its own
-    // relative imports resolve normally. In the public build this require throws → null.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("@/ee");
+    // Loaded dynamically. In the public build where ee/ is absent, this fails gracefully to null without build warnings.
+    const dynamicReq = eval("require");
+    const mod = dynamicReq("@/ee");
     return (mod?.default ?? mod) as PremiumSurface;
   } catch {
     return null; // public build: ee/ has been stripped
