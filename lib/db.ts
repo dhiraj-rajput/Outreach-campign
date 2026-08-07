@@ -472,6 +472,55 @@ function runMigrations(db: Database.Database) {
     "ALTER TABLE lists ADD COLUMN purpose TEXT",
     // Manual/CSV-only field — no automation reads or writes this, reference data only.
     "ALTER TABLE targets ADD COLUMN phone TEXT",
+
+    // --- Email campaign feature port from PPT-Agent (see 01-comparison-report.md §4.2 /
+    // 02-migration-plan.md Part A.3): open/click tracking, unsubscribe/suppression,
+    // lead scoring, and AI beautify-to-HTML. ---
+
+    // Open/click tracking events. One row per pixel or per rewritten link, keyed by an
+    // opaque tracking_id embedded in the sent email. Mirrors PPT-Agent's TrackingEvent model,
+    // adapted to linki's target/run shape (no separate "campaign" entity exists here).
+    `CREATE TABLE IF NOT EXISTS tracking_events (
+      id TEXT PRIMARY KEY,
+      tracking_id TEXT NOT NULL UNIQUE,
+      event_type TEXT NOT NULL CHECK(event_type IN ('open', 'click')),
+      target_id TEXT REFERENCES targets(id) ON DELETE CASCADE,
+      run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+      destination_url TEXT,
+      opened_at TEXT,
+      clicked_at TEXT,
+      open_count INTEGER NOT NULL DEFAULT 0,
+      click_count INTEGER NOT NULL DEFAULT 0,
+      user_agent TEXT,
+      ip_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_tracking_events_tracking_id ON tracking_events(tracking_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tracking_events_target_id ON tracking_events(target_id)",
+
+    // Suppression list — emails that must never be sent to again. Checked before every
+    // campaign email send. Mirrors PPT-Agent's Suppression model.
+    `CREATE TABLE IF NOT EXISTS suppressions (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      reason TEXT NOT NULL DEFAULT 'unsubscribed',
+      target_id TEXT REFERENCES targets(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_suppressions_email ON suppressions(email)",
+
+    // Lead score/grade (cold/warm/hot/sql) — ported thresholds from PPT-Agent's
+    // email_worker.py::classify_score(). Purely additive metadata, doesn't gate sending.
+    "ALTER TABLE targets ADD COLUMN score INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE targets ADD COLUMN grade TEXT NOT NULL DEFAULT 'cold'",
+    "ALTER TABLE targets ADD COLUMN email_opened_at TEXT",
+    "ALTER TABLE targets ADD COLUMN email_clicked_at TEXT",
+    "ALTER TABLE targets ADD COLUMN unsubscribed_at TEXT",
+
+    // AI-beautified HTML body for an email step, alongside the existing plain-text
+    // email_body. email_use_html decides which one the runner actually sends.
+    "ALTER TABLE workflow_steps ADD COLUMN email_body_html TEXT",
+    "ALTER TABLE workflow_steps ADD COLUMN email_use_html INTEGER NOT NULL DEFAULT 0",
   ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch { /* column already exists */ }

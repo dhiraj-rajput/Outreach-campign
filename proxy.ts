@@ -20,7 +20,12 @@ import { isAuthenticated } from "@/lib/auth";
 //                                   can bootstrap the auth flow. A generic 401 here would
 //                                   swallow that header and break every MCP client's first
 //                                   connection attempt.
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/oauth/", "/api/mcp"];
+//  - /api/track/                    Email open pixel, click redirect, and unsubscribe link —
+//                                   hit by recipients' email clients and browsers, which have
+//                                   no linki session. Each has its own protection instead: the
+//                                   pixel/redirect just record an opaque tracking id, and the
+//                                   unsubscribe link is HMAC-signed (see lib/email/suppression.ts).
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/oauth/", "/api/mcp", "/api/track/"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
