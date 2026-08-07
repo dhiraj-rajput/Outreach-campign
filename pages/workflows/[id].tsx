@@ -604,6 +604,58 @@ function Wizard({
   const [beautifyStyle, setBeautifyStyle] = useState<"professional" | "friendly" | "bold">("professional");
   const [beautifyError, setBeautifyError] = useState<string | null>(null);
   const [htmlModalIdx, setHtmlModalIdx] = useState<number | null>(null);
+  const [aiGeneratingIdx, setAiGeneratingIdx] = useState<number | null>(null);
+
+  async function handleGenerateStepWithAI(idx: number) {
+    const ws = wizardSteps[idx];
+    setAiGeneratingIdx(idx);
+    try {
+      const listTarget = listTargets[0] || previewListTargets[0];
+      const targetId = listTarget?.id;
+      const contextText = `Workflow Name: ${workflowName || "Outreach Campaign"}\nGoal: ${campaignPrompt || "B2B Outreach"}`;
+
+      const r = await fetch("/api/agent/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          step_type: ws.type,
+          ai_prompt: ws.aiPrompt || campaignPrompt || "Write a high-converting personalized outreach message.",
+          target_id: targetId || undefined,
+          ai_language: ws.aiLanguage || "English",
+          ai_max_words: ws.aiMaxWordsEnabled ? ws.aiMaxWords : (ws.type === "connect" ? 40 : 100),
+          campaign_prompt: contextText,
+        }),
+      });
+
+      const d = await r.json();
+      if (r.ok && d) {
+        if (ws.type === "email") {
+          updateStep(idx, {
+            emailSubject: d.subject || ws.emailSubject || "Quick question for {{first_name}}",
+            emailBody: d.body || "",
+          });
+        } else if (ws.type === "connect") {
+          updateStep(idx, {
+            connectNote: (d.body || "").slice(0, 280),
+          });
+        } else {
+          if (ws.type === "sales_inmail" && d.subject) {
+            updateStep(idx, { emailSubject: d.subject });
+          }
+          updateStep(idx, {
+            messageBody: d.body || "",
+          });
+        }
+        toast.success("✨ AI generated personalized message using campaign context!");
+      } else {
+        toast.error(d.error || "AI generation failed");
+      }
+    } catch {
+      toast.error("AI generation failed");
+    } finally {
+      setAiGeneratingIdx(null);
+    }
+  }
 
   async function beautifyStepEmail(idx: number, ws: WizardStep) {
     if (!ws.emailBody.trim()) return;
@@ -1533,7 +1585,7 @@ function Wizard({
                     </div>
                   )}
                 </div>
-              )}
+              })()}
 
               {/* ── Page: Summary ── */}
               {page === "summary" && (() => {
@@ -1899,10 +1951,21 @@ function Wizard({
                     </div>
                     {!!ws.connectNote && (
                       <div>
-                        <div className="flex flex-wrap gap-1.5 mb-2">
-                          {VARIABLES.map(v => (
-                            <button key={v} type="button" onClick={() => updateStep(idx, { connectNote: ws.connectNote + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
-                          ))}
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex flex-wrap gap-1.5">
+                            {VARIABLES.map(v => (
+                              <button key={v} type="button" onClick={() => updateStep(idx, { connectNote: ws.connectNote + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={aiGeneratingIdx === idx}
+                            onClick={() => handleGenerateStepWithAI(idx)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors shrink-0 disabled:opacity-40"
+                          >
+                            {aiGeneratingIdx === idx ? <RiLoader4Line size={13} className="animate-spin" /> : <RiRobot2Line size={13} />}
+                            {aiGeneratingIdx === idx ? "Generating…" : "✨ AI Generate Note"}
+                          </button>
                         </div>
                         <textarea
                           className="textarea textarea-bordered w-full bg-base-300/50 text-sm h-28 resize-none"
@@ -1920,236 +1983,147 @@ function Wizard({
 
                 {(ws.type === "message" || ws.type === "sales_inmail") && (
                   <div className="space-y-4">
-                    {ws.type === "sales_inmail" && !(hasPremium && ws.aiEnabled) && (
+                    {ws.type === "sales_inmail" && (
                       <div>
                         <label className="text-xs text-base-content/40 mb-1.5 block">Subject <span className="text-error/70">(required for InMail)</span></label>
                         <input type="text" placeholder="e.g. Quick question about {{company}}" value={ws.emailSubject} onChange={(e) => updateStep(idx, { emailSubject: e.target.value })} className="w-full bg-base-300/50 border border-base-300/50 rounded-xl px-3 py-2.5 text-sm text-base-content placeholder:text-base-content/20 focus:outline-none focus:border-primary/40" />
                       </div>
                     )}
-                    {ws.type === "sales_inmail" && hasPremium && ws.aiEnabled && (
-                      <p className="text-xs text-base-content/30 -mt-1">The AI writer generates both the subject and body for each InMail.</p>
-                    )}
-                    {hasPremium ? (
-                    <div className="flex items-center gap-3 p-3 rounded-xl bg-base-300/40 border border-base-300/50">
-                      <RiRobot2Line size={15} className="text-base-content/40 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-sm text-base-content/70">AI writes this {ws.type === "sales_inmail" ? "InMail" : "message"}</p>
-                        <p className="text-xs text-base-content/30 mt-0.5">Uses lead context to personalise each {ws.type === "sales_inmail" ? "InMail" : "message"}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => updateStep(idx, { aiEnabled: !ws.aiEnabled })}
-                        className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${ws.aiEnabled ? "bg-primary" : "bg-base-300"}`}
-                      >
-                        <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${ws.aiEnabled ? "translate-x-5" : "translate-x-0"}`} />
-                      </button>
-                    </div>
-                    ) : (
-                      <a href="https://opsily.com?utm_source=linki&utm_medium=app&utm_campaign=ai-writer" target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors">
-                        <RiRobot2Line size={15} className="text-primary/70 shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-sm text-base-content/80">AI message writer <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary align-middle">Premium</span></p>
-                          <p className="text-xs text-base-content/40 mt-0.5">Auto-personalise every message from lead context. Upgrade to enable.</p>
-                        </div>
-                        <span className="text-xs font-medium text-primary shrink-0">Upgrade →</span>
-                      </a>
-                    )}
-                    {hasPremium && ws.aiEnabled ? (
-                      <div className="space-y-4">
-                        <ModelPicker models={orModels} value={ws.aiModel} open={orModelOpen === idx} search={orModelSearch} collapsedProviders={collapsedProviders}
-                          onOpen={() => { setOrModelOpen(orModelOpen === idx ? null : idx); setOrModelSearch(""); }}
-                          onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSearch={setOrModelSearch}
-                          onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
-                        />
+                    <div className="space-y-3">
+                      {templates.length > 0 && (
                         <div>
-                          <label className="text-xs text-base-content/40 mb-1.5 block">Step instruction</label>
-                          <textarea rows={3} placeholder="e.g. Reference their recent role change." value={ws.aiPrompt} onChange={(e) => updateStep(idx, { aiPrompt: e.target.value })} className="w-full bg-base-300/50 border border-base-300/50 rounded-xl px-3 py-2.5 text-sm text-base-content placeholder:text-base-content/20 focus:outline-none focus:border-primary/40 resize-none" />
+                          <p className="text-xs text-base-content/40 mb-2">Templates <span className="text-base-content/25">(random per send)</span></p>
+                          {ws.templateIds.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              {ws.templateIds.map((tid) => {
+                                const t = templates.find((t) => t.id === tid);
+                                return (
+                                  <span key={tid} className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-md text-xs font-medium bg-success/10 text-success border border-success/20">
+                                    {t?.name ?? tid}
+                                    <button type="button" onClick={() => updateStep(idx, { templateIds: ws.templateIds.filter((id) => id !== tid) })} className="ml-0.5 hover:text-error transition-colors">×</button>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {templates.filter((t) => !ws.templateIds.includes(t.id)).length > 0 && (
+                            <select className="select select-bordered select-sm bg-base-300/50 text-sm" value="" onChange={(e) => { const tid = e.target.value; if (tid && !ws.templateIds.includes(tid)) updateStep(idx, { templateIds: [...ws.templateIds, tid], messageBody: "" }); }}>
+                              <option value="">+ Add template</option>
+                              {templates.filter((t) => !ws.templateIds.includes(t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            </select>
+                          )}
                         </div>
-                        <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" className="checkbox checkbox-xs" checked={ws.aiMaxWordsEnabled} onChange={(e) => updateStep(idx, { aiMaxWordsEnabled: e.target.checked })} />
-                            <span className="text-xs text-base-content/50">Max words</span>
-                          </label>
-                          {ws.aiMaxWordsEnabled && <input type="number" min={10} max={500} value={ws.aiMaxWords} onChange={(e) => updateStep(idx, { aiMaxWords: Number(e.target.value) })} className="w-20 bg-base-300/50 border border-base-300/50 rounded-lg px-2 py-1.5 text-sm text-base-content focus:outline-none focus:border-primary/40" />}
-                          <select value={ws.aiLanguage} onChange={(e) => updateStep(idx, { aiLanguage: e.target.value })} className="flex-1 bg-base-300/50 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm text-base-content focus:outline-none focus:border-primary/40">
-                            {AI_LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
-                          </select>
-                        </div>
-                        <button type="button" onClick={() => { setPreviewIdx(idx); setPreviewResult(null); setPreviewListId(""); setPreviewListTargets([]); setPreviewTargetId(""); setConfigIdx(null); }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors">
-                          <RiRobot2Line size={13} /> Preview AI output
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {templates.length > 0 && (
-                          <div>
-                            <p className="text-xs text-base-content/40 mb-2">Templates <span className="text-base-content/25">(random per send)</span></p>
-                            {ws.templateIds.length > 0 && (
-                              <div className="flex flex-wrap gap-1.5 mb-2">
-                                {ws.templateIds.map((tid) => {
-                                  const t = templates.find((t) => t.id === tid);
-                                  return (
-                                    <span key={tid} className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-md text-xs font-medium bg-success/10 text-success border border-success/20">
-                                      {t?.name ?? tid}
-                                      <button type="button" onClick={() => updateStep(idx, { templateIds: ws.templateIds.filter((id) => id !== tid) })} className="ml-0.5 hover:text-error transition-colors">×</button>
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            )}
-                            {templates.filter((t) => !ws.templateIds.includes(t.id)).length > 0 && (
-                              <select className="select select-bordered select-sm bg-base-300/50 text-sm" value="" onChange={(e) => { const tid = e.target.value; if (tid && !ws.templateIds.includes(tid)) updateStep(idx, { templateIds: [...ws.templateIds, tid], messageBody: "" }); }}>
-                                <option value="">+ Add template</option>
-                                {templates.filter((t) => !ws.templateIds.includes(t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                              </select>
-                            )}
-                          </div>
-                        )}
-                        <div>
-                          <div className="flex flex-wrap gap-1.5 mb-2">
+                      )}
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex flex-wrap gap-1.5">
                             {VARIABLES.map(v => (
                               <button key={v} type="button" onClick={() => updateStep(idx, { messageBody: ws.messageBody + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
                             ))}
                           </div>
-                          <textarea className={`textarea textarea-bordered w-full bg-base-300/50 text-sm h-32 resize-none font-mono ${ws.templateIds.length > 0 ? "opacity-40 pointer-events-none" : ""}`} placeholder="Hi {{first_name}}, I noticed..." value={ws.messageBody} onChange={(e) => updateStep(idx, { messageBody: e.target.value })} disabled={ws.templateIds.length > 0} />
-                          <p className="text-xs text-base-content/30 mt-1">{ws.messageBody.length} chars</p>
+                          <button
+                            type="button"
+                            disabled={aiGeneratingIdx === idx}
+                            onClick={() => handleGenerateStepWithAI(idx)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors shrink-0 disabled:opacity-40"
+                          >
+                            {aiGeneratingIdx === idx ? <RiLoader4Line size={13} className="animate-spin" /> : <RiRobot2Line size={13} />}
+                            {aiGeneratingIdx === idx ? "Generating…" : "✨ AI Generate Message"}
+                          </button>
                         </div>
+                        <textarea className={`textarea textarea-bordered w-full bg-base-300/50 text-sm h-32 resize-none font-mono ${ws.templateIds.length > 0 ? "opacity-40 pointer-events-none" : ""}`} placeholder="Hi {{first_name}}, I noticed..." value={ws.messageBody} onChange={(e) => updateStep(idx, { messageBody: e.target.value })} disabled={ws.templateIds.length > 0} />
+                        <p className="text-xs text-base-content/30 mt-1">{ws.messageBody.length} chars</p>
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
 
                 {ws.type === "email" && (
                   <div className="space-y-4">
-                    {hasPremium ? (
-                    <div className="flex items-center gap-3 p-3 rounded-xl bg-base-300/40 border border-base-300/50">
-                      <RiRobot2Line size={15} className="text-base-content/40 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-sm text-base-content/70">AI writes this email</p>
-                        <p className="text-xs text-base-content/30 mt-0.5">Subject + body generated per lead</p>
+                    <div>
+                      <label className="text-sm text-base-content/50 block mb-1.5">Subject</label>
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {VARIABLES.map(v => (
+                          <button key={v} type="button" onClick={() => updateStep(idx, { emailSubject: ws.emailSubject + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
+                        ))}
                       </div>
-                      <button type="button" onClick={() => updateStep(idx, { aiEnabled: !ws.aiEnabled })} className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${ws.aiEnabled ? "bg-primary" : "bg-base-300"}`}>
-                        <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${ws.aiEnabled ? "translate-x-5" : "translate-x-0"}`} />
-                      </button>
+                      <input className="input input-bordered w-full bg-base-300/50 font-mono text-sm" placeholder="Hi {{first_name}}, quick question" value={ws.emailSubject} onChange={(e) => updateStep(idx, { emailSubject: e.target.value })} />
                     </div>
-                    ) : (
-                      <a href="https://opsily.com?utm_source=linki&utm_medium=app&utm_campaign=ai-writer" target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors">
-                        <RiRobot2Line size={15} className="text-primary/70 shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-sm text-base-content/80">AI email writer <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary align-middle">Premium</span></p>
-                          <p className="text-xs text-base-content/40 mt-0.5">Auto-generate subject + body from lead context. Upgrade to enable.</p>
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {VARIABLES.map(v => (
+                            <button key={v} type="button" onClick={() => updateStep(idx, { emailBody: ws.emailBody + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
+                          ))}
                         </div>
-                        <span className="text-xs font-medium text-primary shrink-0">Upgrade →</span>
-                      </a>
-                    )}
-                    {hasPremium && ws.aiEnabled ? (
-                      <div className="space-y-4">
-                        <ModelPicker models={orModels} value={ws.aiModel} open={orModelOpen === idx} search={orModelSearch} collapsedProviders={collapsedProviders}
-                          onOpen={() => { setOrModelOpen(orModelOpen === idx ? null : idx); setOrModelSearch(""); }}
-                          onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
-                          onSearch={setOrModelSearch}
-                          onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
-                        />
-                        <div>
-                          <label className="text-xs text-base-content/40 mb-1.5 block">Step instruction</label>
-                          <textarea rows={3} placeholder="e.g. Focus on their company's growth." value={ws.aiPrompt} onChange={(e) => updateStep(idx, { aiPrompt: e.target.value })} className="w-full bg-base-300/50 border border-base-300/50 rounded-xl px-3 py-2.5 text-sm text-base-content placeholder:text-base-content/20 focus:outline-none focus:border-primary/40 resize-none" />
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" className="checkbox checkbox-xs" checked={ws.aiMaxWordsEnabled} onChange={(e) => updateStep(idx, { aiMaxWordsEnabled: e.target.checked })} />
-                            <span className="text-xs text-base-content/50">Max words</span>
-                          </label>
-                          {ws.aiMaxWordsEnabled && <input type="number" min={10} max={1000} value={ws.aiMaxWords} onChange={(e) => updateStep(idx, { aiMaxWords: Number(e.target.value) })} className="w-20 bg-base-300/50 border border-base-300/50 rounded-lg px-2 py-1.5 text-sm text-base-content focus:outline-none focus:border-primary/40" />}
-                          <select value={ws.aiLanguage} onChange={(e) => updateStep(idx, { aiLanguage: e.target.value })} className="flex-1 bg-base-300/50 border border-base-300/50 rounded-lg px-3 py-1.5 text-sm text-base-content focus:outline-none focus:border-primary/40">
-                            {AI_LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
-                          </select>
-                        </div>
-                        <button type="button" onClick={() => { setPreviewIdx(idx); setPreviewResult(null); setPreviewListId(""); setPreviewListTargets([]); setPreviewTargetId(""); setConfigIdx(null); }} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors">
-                          <RiRobot2Line size={13} /> Preview AI output
+                        <button
+                          type="button"
+                          disabled={aiGeneratingIdx === idx}
+                          onClick={() => handleGenerateStepWithAI(idx)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors shrink-0 disabled:opacity-40"
+                        >
+                          {aiGeneratingIdx === idx ? <RiLoader4Line size={13} className="animate-spin" /> : <RiRobot2Line size={13} />}
+                          {aiGeneratingIdx === idx ? "Generating…" : "✨ AI Generate Email"}
                         </button>
                       </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-sm text-base-content/50 block mb-1.5">Subject</label>
-                          <div className="flex flex-wrap gap-1.5 mb-2">
-                            {VARIABLES.map(v => (
-                              <button key={v} type="button" onClick={() => updateStep(idx, { emailSubject: ws.emailSubject + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
-                            ))}
-                          </div>
-                          <input className="input input-bordered w-full bg-base-300/50 font-mono text-sm" placeholder="Hi {{first_name}}, quick question" value={ws.emailSubject} onChange={(e) => updateStep(idx, { emailSubject: e.target.value })} />
-                        </div>
-                        <div>
-                          <label className="text-sm text-base-content/50 block mb-1.5">Body</label>
-                          <div className="flex flex-wrap gap-1.5 mb-2">
-                            {VARIABLES.map(v => (
-                              <button key={v} type="button" onClick={() => updateStep(idx, { emailBody: ws.emailBody + v })} className="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content/50 hover:text-base-content hover:bg-base-300 transition-colors font-mono">{v}</button>
-                            ))}
-                          </div>
-                          <textarea className="textarea textarea-bordered w-full bg-base-300/50 text-sm resize-none font-mono" rows={7} placeholder={"Hi {{first_name}},\n\nI came across your profile..."} value={ws.emailBody} onChange={(e) => updateStep(idx, { emailBody: e.target.value, emailUseHtml: false })} />
-                          <p className="text-xs text-base-content/30 mt-1">{ws.emailBody.length} chars</p>
-                        </div>
+                      <textarea className="textarea textarea-bordered w-full bg-base-300/50 text-sm resize-none font-mono" rows={7} placeholder={"Hi {{first_name}},\n\nI came across your profile..."} value={ws.emailBody} onChange={(e) => updateStep(idx, { emailBody: e.target.value, emailUseHtml: false })} />
+                      <p className="text-xs text-base-content/30 mt-1">{ws.emailBody.length} chars</p>
+                    </div>
 
-                        {/* AI beautify — plain text -> styled HTML email. Ported from PPT-Agent's
-                            beautify-email feature (see lib/ai/beautify-email.ts). */}
-                        <div className="rounded-xl bg-base-300/30 border border-base-300/50 p-3 space-y-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <RiRobot2Line size={14} className="text-primary/70" />
-                              <span className="text-sm text-base-content/70">HTML email</span>
-                              {ws.emailUseHtml && ws.emailBodyHtml && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/15 text-success">Styled</span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <select
-                                value={beautifyStyle}
-                                onChange={(e) => setBeautifyStyle(e.target.value as "professional" | "friendly" | "bold")}
-                                className="bg-base-300/50 border border-base-300/50 rounded-lg px-2 py-1.5 text-xs text-base-content focus:outline-none focus:border-primary/40"
-                              >
-                                <option value="professional">Professional</option>
-                                <option value="friendly">Friendly</option>
-                                <option value="bold">Bold</option>
-                              </select>
-                              <button
-                                type="button"
-                                disabled={!ws.emailBody.trim() || beautifyLoadingIdx === idx}
-                                onClick={() => beautifyStepEmail(idx, ws)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                              >
-                                {beautifyLoadingIdx === idx ? <RiLoader4Line size={13} className="animate-spin" /> : <RiRobot2Line size={13} />}
-                                {beautifyLoadingIdx === idx ? "Beautifying…" : "Beautify with AI"}
-                              </button>
-                            </div>
-                          </div>
-
-                          {ws.emailBodyHtml && (
-                            <div className="flex items-center gap-3 pt-1">
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" className="checkbox checkbox-xs" checked={ws.emailUseHtml} onChange={(e) => updateStep(idx, { emailUseHtml: e.target.checked })} />
-                                <span className="text-xs text-base-content/50">Send HTML version</span>
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => setHtmlModalIdx(idx)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-base-300 text-base-content/80 hover:bg-base-300/80 transition-colors"
-                              >
-                                Preview HTML Email
-                              </button>
-                            </div>
+                    {/* AI beautify — plain text -> styled HTML email */}
+                    <div className="rounded-xl bg-base-300/30 border border-base-300/50 p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <RiRobot2Line size={14} className="text-primary/70" />
+                          <span className="text-sm text-base-content/70">HTML email</span>
+                          {ws.emailUseHtml && ws.emailBodyHtml && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/15 text-success">Styled</span>
                           )}
-
-                          {beautifyError && beautifyLoadingIdx === null && (
-                            <p className="text-xs text-warning/80">{beautifyError}</p>
-                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={beautifyStyle}
+                            onChange={(e) => setBeautifyStyle(e.target.value as "professional" | "friendly" | "bold")}
+                            className="bg-base-300/50 border border-base-300/50 rounded-lg px-2 py-1.5 text-xs text-base-content focus:outline-none focus:border-primary/40"
+                          >
+                            <option value="professional">Professional</option>
+                            <option value="friendly">Friendly</option>
+                            <option value="bold">Bold</option>
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!ws.emailBody.trim() || beautifyLoadingIdx === idx}
+                            onClick={() => beautifyStepEmail(idx, ws)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {beautifyLoadingIdx === idx ? <RiLoader4Line size={13} className="animate-spin" /> : <RiRobot2Line size={13} />}
+                            {beautifyLoadingIdx === idx ? "Beautifying…" : "Beautify with AI"}
+                          </button>
                         </div>
                       </div>
-                    )}
+
+                      {ws.emailBodyHtml && (
+                        <div className="flex items-center gap-3 pt-1">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="checkbox checkbox-xs" checked={ws.emailUseHtml} onChange={(e) => updateStep(idx, { emailUseHtml: e.target.checked })} />
+                            <span className="text-xs text-base-content/50">Send HTML version</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setHtmlModalIdx(idx)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-base-300 text-base-content/80 hover:bg-base-300/80 transition-colors"
+                          >
+                            Preview HTML Email
+                          </button>
+                        </div>
+                      )}
+
+                      {beautifyError && beautifyLoadingIdx === null && (
+                        <p className="text-xs text-warning/80">{beautifyError}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                     {/* Signature — always visible for email steps regardless of AI mode */}
                     <div className="border-t border-base-300/30 pt-4">

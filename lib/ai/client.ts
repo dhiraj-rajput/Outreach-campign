@@ -29,9 +29,10 @@ export function getAllAIProviders(preferredModel?: string): AIProviderConfig[] {
     const geminiKey = geminiRow?.api_key ? (decryptSecret(geminiRow.api_key) ?? geminiRow.api_key) : undefined;
 
     if (geminiKey && geminiKey.trim()) {
-      let activeModel = preferredModel || geminiRow?.model || "gemini-2.0-flash";
+      // Prioritize model explicitly configured by user in Settings -> Integrations
+      let activeModel = geminiRow?.model || preferredModel || "gemini-2.0-flash";
       if (activeModel.includes("/") || activeModel.includes("openrouter") || activeModel.includes("llama") || activeModel.includes("deepseek") || activeModel.includes("qwen")) {
-        activeModel = geminiRow?.model || "gemini-2.0-flash";
+        activeModel = "gemini-2.0-flash";
       }
       const deprecatedOrInvalid: Record<string, string> = {
         "gemini-pro": "gemini-1.5-flash",
@@ -67,7 +68,8 @@ export function getAllAIProviders(preferredModel?: string): AIProviderConfig[] {
     const openrouterKey = openrouterRow?.api_key ? (decryptSecret(openrouterRow.api_key) ?? openrouterRow.api_key) : undefined;
 
     if (openrouterKey && openrouterKey.trim()) {
-      let activeModel = preferredModel || openrouterRow?.model || "google/gemini-2.0-flash-exp:free";
+      // Prioritize model explicitly configured by user in Settings -> Integrations
+      let activeModel = openrouterRow?.model || preferredModel || "google/gemini-2.0-flash-exp:free";
       if (activeModel.startsWith("gemini-") && !activeModel.includes("/")) {
         activeModel = "google/gemini-2.0-flash-exp:free";
       }
