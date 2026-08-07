@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
-import { getAIClient } from "@/lib/ai/client";
+import { runAICompletion } from "@/lib/ai/client";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -11,11 +11,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!target_id) {
     return res.status(400).json({ error: "target_id is required" });
-  }
-
-  const ai = getAIClient(ai_model);
-  if (!ai) {
-    return res.status(400).json({ error: "No AI provider configured. Add a Gemini or OpenRouter key in Settings → Integrations." });
   }
 
   const db = getDb();
@@ -49,14 +44,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
     ];
 
-    const completion = await ai.client.chat.completions.create({
-      model: ai.model,
+    const result = await runAICompletion({
       messages,
+      preferredModel: ai_model,
       temperature: 0.7,
       max_tokens: 500,
     });
 
-    const raw = completion.choices[0]?.message?.content?.trim() || "";
+    const raw = result.content;
     let json: { subject?: string; body?: string } = {};
 
     try {
@@ -69,9 +64,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({
       subject: json.subject || (isEmail ? `Quick question for ${leadName}` : undefined),
       body: json.body || raw,
-      input_tokens: completion.usage?.prompt_tokens ?? 120,
-      output_tokens: completion.usage?.completion_tokens ?? 80,
+      input_tokens: result.prompt_tokens ?? 120,
+      output_tokens: result.completion_tokens ?? 80,
       cost_usd: 0.0001,
+      provider: result.provider,
+      model: result.model,
     });
   } catch (err) {
     console.error("[preview] AI generation error:", err);

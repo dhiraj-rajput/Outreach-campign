@@ -8,7 +8,7 @@
  * Returns: { subject: string; content_html: string }
  */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getAIClient } from "@/lib/ai/client";
+import { runAICompletion } from "@/lib/ai/client";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -24,13 +24,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   };
 
   if (!title) return res.status(400).json({ error: "title is required" });
-
-  const ai = getAIClient();
-  if (!ai) {
-    return res.status(400).json({
-      error: "No AI integration configured. Please add a Google AI Studio or OpenRouter key in Settings → Integrations.",
-    });
-  }
 
   const SYSTEM_PROMPT = `You are a world-class B2B email copywriter and HTML newsletter designer.
 Create an engaging, high-converting newsletter issue based on the given title and topic instructions.
@@ -53,8 +46,7 @@ NO Markdown, NO code blocks before/after JSON. ONLY raw JSON.`;
 Additional Guidelines: "${prompt || "Provide 3 actionable industry insights, a brief intro, and a concluding call to action."}"`;
 
   try {
-    const completion = await ai.client.chat.completions.create({
-      model: ai.model,
+    const result = await runAICompletion({
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: USER_PROMPT },
@@ -63,7 +55,7 @@ Additional Guidelines: "${prompt || "Provide 3 actionable industry insights, a b
       temperature: 0.7,
     });
 
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+    const raw = result.content;
     const jsonStr = raw.replace(/^```json?\s*/i, "").replace(/```$/, "").trim();
     let parsed: { subject?: string; content_html?: string } = {};
 

@@ -1,4 +1,4 @@
-import { getAIClient } from "@/lib/ai/client";
+import { runAICompletion } from "@/lib/ai/client";
 
 // Direct port of PPT-Agent's backend/app/routes/campaigns.py::beautify_email(). PPT-Agent's
 // version calls its own internal AI client (Ollama → Gemini → OpenRouter fallback chain);
@@ -17,9 +17,9 @@ import { getAIClient } from "@/lib/ai/client";
 export type BeautifyStyle = "professional" | "friendly" | "bold";
 
 const STYLE_DESCRIPTIONS: Record<BeautifyStyle, string> = {
-  professional: "Sleek slate-blue gradient header, crisp corporate typography, white card background, soft shadow border, dark slate text",
-  friendly: "Warm emerald and teal gradient header, approachable layout, rounded cards, dark teal text",
-  bold: "Modern dark theme header, high contrast, bold headlines, crisp typography",
+  professional: "Sleek slate-blue gradient header (#0f172a to #2563eb), crisp corporate typography, white card background (#ffffff), soft shadow border, dark slate text (#1e293b)",
+  friendly: "Warm emerald and teal gradient header (#059669 to #0d9488), approachable layout, rounded cards (#f0fdf4), dark teal text (#064e3b)",
+  bold: "Modern dark theme header (#09090b with vibrant #6366f1 indigo accents), high contrast, bold headlines, crisp typography",
 };
 
 export interface BeautifyResult {
@@ -92,15 +92,6 @@ export async function beautifyEmail(
   body: string,
   style: BeautifyStyle = "professional"
 ): Promise<BeautifyResult> {
-  const ai = getAIClient();
-  if (!ai) {
-    return {
-      html: fallbackTemplate(subject, body, style),
-      usedFallback: true,
-      error: "No AI integration configured. Add a Google AI Studio or OpenRouter key in Settings → Integrations.",
-    };
-  }
-
   const styleDesc = STYLE_DESCRIPTIONS[style] ?? STYLE_DESCRIPTIONS.professional;
   const prompt = `You are an elite B2B email designer. Convert this plain-text email draft into a responsive HTML email with inline CSS.
 
@@ -120,9 +111,7 @@ Plain text draft:
 ${body}`;
 
   try {
-    const completion = await ai.client.chat.completions.create({
-      model: ai.model,
-      max_tokens: 4096,
+    const result = await runAICompletion({
       messages: [
         {
           role: "system",
@@ -130,12 +119,11 @@ ${body}`;
         },
         { role: "user", content: prompt },
       ],
+      max_tokens: 4096,
+      temperature: 0.7,
     });
 
-    const raw = completion.choices[0]?.message?.content?.trim();
-    if (!raw) throw new Error("AI returned an empty response");
-
-    const cleanHtml = stripFences(raw);
+    const cleanHtml = stripFences(result.content);
     return { html: cleanHtml, usedFallback: false };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
