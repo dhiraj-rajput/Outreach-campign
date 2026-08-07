@@ -29,7 +29,7 @@
 const path = require("path");
 const Database = require("better-sqlite3");
 
-const DB_PATH = process.env.LINKI_DB_PATH || path.join(process.cwd(), "linki.db");
+const DB_PATH = process.env.LINKI_DB_PATH || path.join(process.cwd(), "data", "linki.db");
 
 function parseArgs(argv) {
   const args = { apply: false, list: false, allTargets: false, skipSchedule: false, run: null, target: null };

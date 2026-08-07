@@ -422,6 +422,25 @@ export default function NewslettersPage() {
           {/* Selected Newsletter Main View */}
           {selectedNewsletter && (
             <div className="md:col-span-3 space-y-4">
+              {/* Analytics KPI summary cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-base-200 border border-base-300/50 rounded-xl p-3.5">
+                  <div className="text-xs font-medium text-base-content/40 uppercase tracking-wider">Subscribers</div>
+                  <div className="text-xl font-bold text-base-content mt-1">{selectedNewsletter.subscriber_count}</div>
+                  <div className="text-[11px] text-success mt-0.5">Active recipients</div>
+                </div>
+                <div className="bg-base-200 border border-base-300/50 rounded-xl p-3.5">
+                  <div className="text-xs font-medium text-base-content/40 uppercase tracking-wider">Issues Composed</div>
+                  <div className="text-xl font-bold text-base-content mt-1">{selectedNewsletter.edition_count}</div>
+                  <div className="text-[11px] text-base-content/50 mt-0.5">{editions.filter(e => e.status === "sent").length} dispatched</div>
+                </div>
+                <div className="bg-base-200 border border-base-300/50 rounded-xl p-3.5">
+                  <div className="text-xs font-medium text-base-content/40 uppercase tracking-wider">Sender Channel</div>
+                  <div className="text-sm font-semibold text-primary truncate mt-1">{selectedNewsletter.sender_email}</div>
+                  <div className="text-[11px] text-base-content/50 mt-0.5">{selectedNewsletter.sender_name || "Connected Account"}</div>
+                </div>
+              </div>
+
               {/* Active Newsletter Banner */}
               <div className="bg-base-200/60 border border-base-300/50 rounded-xl p-4 flex items-center justify-between">
                 <div>

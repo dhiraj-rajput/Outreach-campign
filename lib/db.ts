@@ -1,15 +1,22 @@
 import Database from "better-sqlite3";
 import path from "path";
+import fs from "fs";
 import { randomUUID } from "crypto";
 import { scheduleUpdateCheck } from "@/lib/update-check";
 import { encryptSecret, isEncrypted } from "@/lib/crypto";
 
-const DB_PATH = process.env.LINKI_DB_PATH || path.join(process.cwd(), "linki.db");
+const DEFAULT_DB_DIR = path.join(process.cwd(), "data");
+const DEFAULT_DB_PATH = path.join(DEFAULT_DB_DIR, "linki.db");
+const DB_PATH = process.env.LINKI_DB_PATH || DEFAULT_DB_PATH;
 
 let db: Database.Database;
 
 export function getDb(): Database.Database {
   if (!db) {
+    const dbDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
     db = new Database(DB_PATH);
     db.pragma("journal_mode = WAL");
     db.pragma("foreign_keys = ON");
@@ -584,55 +591,30 @@ function runMigrations(db: Database.Database) {
   // Drop deprecated run_profiles columns (state, current_step, etc.) — consumers now read track-runs
   dropDeprecatedRunProfileColumns(db);
 
-  // Migrate workflow_steps CHECK constraint to allow 'delay' and 'email' step_types
-  try {
-    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='workflow_steps'").get() as { sql: string } | undefined;
-    if (tableInfo && (!tableInfo.sql.includes("'delay'") || !tableInfo.sql.includes("'email'"))) {
-      db.exec(`
-        PRAGMA foreign_keys = OFF;
-        CREATE TABLE workflow_steps_new (
-          id TEXT PRIMARY KEY,
-          workflow_id TEXT REFERENCES workflows(id) ON DELETE CASCADE,
-          step_order INTEGER NOT NULL,
-          step_type TEXT NOT NULL CHECK(step_type IN ('visit', 'connect', 'message', 'delay', 'email')),
-          template_id TEXT REFERENCES templates(id),
-          delay_seconds INTEGER DEFAULT 0,
-          connect_note TEXT,
-          message_body TEXT,
-          email_subject TEXT,
-          email_body TEXT,
-          enabled INTEGER DEFAULT 1
-        );
-        INSERT INTO workflow_steps_new
-          SELECT id, workflow_id, step_order, step_type, template_id, delay_seconds,
-                 connect_note, message_body,
-                 NULL, NULL,
-                 enabled
-          FROM workflow_steps;
-        DROP TABLE workflow_steps;
-        ALTER TABLE workflow_steps_new RENAME TO workflow_steps;
-        PRAGMA foreign_keys = ON;
-      `);
-    }
-  } catch { /* migration already done */ }
-
-  // Allow the 'sales_inmail' step_type (Sales Navigator InMail). Rebuilds the
-  // table preserving EVERY current column (the historical rebuild above only
-  // copied the original columns — do NOT reuse it). InMail reuses message_body
-  // for the body and email_subject for the required subject.
+  // Allow 'email', 'sales_inmail', and 'newsletter' step_types. Rebuilds the table preserving
+  // EVERY current column dynamically.
   try {
     const ti = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='workflow_steps'").get() as { sql: string } | undefined;
-    if (ti && !ti.sql.includes("'sales_inmail'")) {
-      const cols = (db.prepare("PRAGMA table_info(workflow_steps)").all() as Array<{ name: string }>).map((c) => c.name);
+    if (ti && (!ti.sql.includes("'email'") || !ti.sql.includes("'sales_inmail'") || !ti.sql.includes("'newsletter'"))) {
+      const colsInfo = db.prepare("PRAGMA table_info(workflow_steps)").all() as Array<{ name: string; type: string; dflt_value: unknown; notnull: number }>;
+      const cols = colsInfo.map((c) => c.name);
       const colList = cols.join(", ");
-      db.exec(`
-        PRAGMA foreign_keys = OFF;
-        CREATE TABLE workflow_steps_new (
+
+      // Create new definition with updated CHECK constraint
+      let createSql = ti.sql.replace(
+        /CHECK\(step_type IN \([^)]+\)\)/i,
+        "CHECK(step_type IN ('visit', 'connect', 'message', 'sales_inmail', 'delay', 'email', 'newsletter'))"
+      );
+
+      if (createSql === ti.sql) {
+        // Fallback if regex did not match
+        createSql = `CREATE TABLE workflow_steps_new (
           id TEXT PRIMARY KEY,
           workflow_id TEXT REFERENCES workflows(id) ON DELETE CASCADE,
           step_order INTEGER NOT NULL,
-          step_type TEXT NOT NULL CHECK(step_type IN ('visit', 'connect', 'message', 'sales_inmail', 'delay', 'email')),
+          step_type TEXT NOT NULL CHECK(step_type IN ('visit', 'connect', 'message', 'sales_inmail', 'delay', 'email', 'newsletter')),
           template_id TEXT REFERENCES templates(id),
+          newsletter_id TEXT REFERENCES newsletters(id),
           delay_seconds INTEGER DEFAULT 0,
           connect_note TEXT,
           message_body TEXT,
@@ -647,15 +629,31 @@ function runMigrations(db: Database.Database) {
           message_position INTEGER DEFAULT 1,
           ai_language TEXT DEFAULT 'English',
           track TEXT NOT NULL DEFAULT 'linkedin' CHECK(track IN ('linkedin', 'email')),
-          email_signature TEXT
-        );
+          email_signature TEXT,
+          email_body_html TEXT,
+          email_use_html INTEGER NOT NULL DEFAULT 0
+        )`;
+      } else {
+        createSql = createSql.replace("CREATE TABLE workflow_steps", "CREATE TABLE workflow_steps_new");
+      }
+
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        ${createSql};
         INSERT INTO workflow_steps_new (${colList}) SELECT ${colList} FROM workflow_steps;
         DROP TABLE workflow_steps;
         ALTER TABLE workflow_steps_new RENAME TO workflow_steps;
         PRAGMA foreign_keys = ON;
       `);
     }
-  } catch { /* migration already done */ }
+  } catch (err) {
+    console.error("[db migration] error updating workflow_steps check constraint:", err);
+  }
+
+  // Add newsletter_id column to workflow_steps if not already present
+  try {
+    db.exec("ALTER TABLE workflow_steps ADD COLUMN newsletter_id TEXT REFERENCES newsletters(id)");
+  } catch { /* column exists */ }
 
   // CSV import: allow email-only targets (no LinkedIn URL). targets.linkedin_url was
   // NOT NULL UNIQUE from the base schema — rebuild to make it nullable (still UNIQUE,

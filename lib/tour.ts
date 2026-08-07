@@ -13,6 +13,7 @@ export type TourPage =
   | "contacts"
   | "companies"
   | "workflows"
+  | "newsletters"
   | "inbox"
   | "settings";
 
@@ -155,8 +156,8 @@ const TOURS: Record<TourPage, DriveStep[]> = {
     {
       element: '[data-tour="workflows-new"]',
       popover: {
-        title: "A LinkedIn account is always required",
-        description: "Even an email-only campaign needs one authenticated LinkedIn account selected — set that up first in Settings if you haven't.",
+        title: "A LinkedIn account is required",
+        description: "An authenticated LinkedIn account executes the LinkedIn steps — configure your accounts in Settings.",
       },
     },
     {
@@ -175,6 +176,23 @@ const TOURS: Record<TourPage, DriveStep[]> = {
     },
   ],
 
+  newsletters: [
+    {
+      element: '[data-tour="nav-newsletters"]',
+      popover: {
+        title: "Newsletters Dashboard",
+        description: "Manage newsletters, import subscribers directly from database prospect lists, and dispatch issues using connected email accounts.",
+      },
+    },
+    {
+      element: '[data-tour="nav-newsletters"]',
+      popover: {
+        title: "AI Issue Generator & Banner Upload",
+        description: "Upload header banner images and generate beautified HTML email issues using AI (Gemini & OpenRouter) with live preview before sending.",
+      },
+    },
+  ],
+
   inbox: [
     {
       element: '[data-tour="nav-inbox"]',
@@ -186,8 +204,8 @@ const TOURS: Record<TourPage, DriveStep[]> = {
     {
       element: '[data-tour="nav-inbox"]',
       popover: {
-        title: "Not every reply means interest",
-        description: "Reply counts can be misleadingly high — many are auto-responders (out-of-office, \"contact my colleague\") rather than genuine interest. Open one to see the full thread and judge for yourself.",
+        title: "AI Intent Classification",
+        description: "LinkedIn and email replies are automatically analyzed by AI to classify intent (interested, meeting_request, objection, out_of_office).",
       },
     },
   ],
@@ -210,8 +228,8 @@ const TOURS: Record<TourPage, DriveStep[]> = {
     {
       element: '[data-tour="settings-tab-integrations"]',
       popover: {
-        title: "Apollo enrichment",
-        description: "Add an Apollo API key here to enrich leads with verified emails, seniority, and company data.",
+        title: "AI Integrations & Model Selection",
+        description: "Configure Google AI Studio (Gemini) or OpenRouter API keys and select active AI models (Gemini 2.5 Flash, Llama 3.3, DeepSeek R1, Qwen) for outreach generation & intent classification.",
       },
     },
     {
@@ -230,6 +248,13 @@ function markSeen(page: TourPage) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ page }),
   }).catch(() => {});
+}
+
+export function skipAllTours() {
+  const ALL_PAGES: TourPage[] = ["dashboard", "lists", "contacts", "companies", "workflows", "newsletters", "inbox", "settings"];
+  for (const page of ALL_PAGES) {
+    markSeen(page);
+  }
 }
 
 function buildAndRun(page: TourPage, persist: boolean) {
@@ -276,7 +301,7 @@ export async function getSeenTours(): Promise<Set<TourPage>> {
   }
 }
 
-export const ALL_TOUR_PAGES: TourPage[] = ["dashboard", "lists", "contacts", "companies", "workflows", "inbox", "settings"];
+export const ALL_TOUR_PAGES: TourPage[] = ["dashboard", "lists", "contacts", "companies", "workflows", "newsletters", "inbox", "settings"];
 
 export const TOUR_PAGE_LABELS: Record<TourPage, string> = {
   dashboard: "Dashboard",
@@ -284,6 +309,7 @@ export const TOUR_PAGE_LABELS: Record<TourPage, string> = {
   contacts: "Contacts",
   companies: "Companies",
   workflows: "Campaigns",
+  newsletters: "Newsletters",
   inbox: "Inbox",
   settings: "Settings",
 };
@@ -296,6 +322,7 @@ export function pathToTourPage(pathname: string): TourPage | null {
   if (pathname === "/contacts") return "contacts";
   if (pathname === "/companies") return "companies";
   if (pathname === "/workflows") return "workflows";
+  if (pathname === "/newsletters") return "newsletters";
   if (pathname === "/inbox") return "inbox";
   if (pathname === "/settings") return "settings";
   return null;
