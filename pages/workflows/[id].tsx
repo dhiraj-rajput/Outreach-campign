@@ -594,7 +594,18 @@ function Wizard({
   const [previewListId, setPreviewListId] = useState("");
   const [previewTargetId, setPreviewTargetId] = useState("");
   const [previewListTargets, setPreviewListTargets] = useState<ListTarget[]>([]);
-  const [previewResult, setPreviewResult] = useState<{ subject?: string; body: string; html?: string; input_tokens: number; output_tokens: number; cost_usd: number | null } | null>(null);
+  const [previewResult, setPreviewResult] = useState<{
+    subject?: string;
+    body: string;
+    html?: string;
+    preview_subject?: string;
+    preview_body?: string;
+    sample_lead?: string;
+    sample_company?: string;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number | null;
+  } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   // Stores last preview cost per wizard step index (for summary cost estimation)
   const [stepPreviewCosts, setStepPreviewCosts] = useState<Record<number, { input_tokens: number; output_tokens: number; cost_usd: number }>>({});
@@ -656,15 +667,42 @@ function Wizard({
     setPreviewListTargets([]);
     setPreviewTargetId("");
     if (!lId) return;
-    const r = await fetch(`/api/lists/${lId}`);
-    if (r.ok) {
+    // Prefer contacts already loaded for this workflow list (same id)
+    if (lId === listId && listTargets.length > 0) {
+      setPreviewListTargets(listTargets);
+      setPreviewTargetId(listTargets[0]?.id ?? "");
+      return;
+    }
+    try {
+      const r = await fetch(`/api/lists/${lId}`);
+      if (!r.ok) {
+        console.warn("[preview] list fetch failed", r.status);
+        return;
+      }
       const d = await r.json();
-      setPreviewListTargets(d.targets ?? []);
+      const ts: ListTarget[] = d.targets ?? d.members ?? [];
+      setPreviewListTargets(ts);
+      if (ts[0]?.id) setPreviewTargetId(ts[0].id);
+    } catch (e) {
+      console.warn("[preview] list fetch error", e);
     }
   }
 
+
+  useEffect(() => {
+    if (previewIdx === null) return;
+    if (previewListId) {
+      void loadPreviewTargets(previewListId);
+      return;
+    }
+    if (listId) {
+      setPreviewListId(listId);
+      void loadPreviewTargets(listId);
+    }
+  }, [previewIdx]);
+
   async function runPreview() {
-    if (previewIdx === null || !previewTargetId) return;
+    if (previewIdx === null || !previewListId) return;
     const ws = wizardSteps[previewIdx];
     setPreviewLoading(true);
     setPreviewResult(null);
@@ -678,7 +716,8 @@ function Wizard({
           ai_prompt: ws.aiPrompt,
           ai_max_words: ws.aiMaxWordsEnabled ? ws.aiMaxWords : null,
           ai_language: ws.aiLanguage ?? null,
-          target_id: previewTargetId,
+          // List only — server picks the first contact as a sample; saved copy uses {{tokens}}
+          list_id: previewListId,
           campaign_prompt: campaignPrompt || null,
         }),
       });
@@ -1571,14 +1610,6 @@ function Wizard({
               {/* ── Page: Summary ── */}
               {page === "summary" && (() => {
                 const contactCount = selectedTargetIds.size;
-                // Collect AI steps with their preview costs
-                const aiSteps = wizardSteps.map((ws, i) => ({ ws, i })).filter(({ ws }) => ws.aiEnabled && (ws.type === "email" || ws.type === "message" || ws.type === "sales_inmail"));
-                const hasCostData = aiSteps.some(({ i }) => stepPreviewCosts[i] != null);
-                const totalAiCost = aiSteps.reduce((sum, { i }) => sum + (stepPreviewCosts[i]?.cost_usd ?? 0), 0) * contactCount;
-                const totalTokens = aiSteps.reduce((sum, { i }) => {
-                  const c = stepPreviewCosts[i];
-                  return sum + (c ? c.input_tokens + c.output_tokens : 0);
-                }, 0) * contactCount;
 
                 return (
                   <div className="space-y-5">
@@ -1730,51 +1761,6 @@ function Wizard({
                       );
                     })()}
 
-                    {/* AI Cost estimate */}
-                    {aiSteps.length > 0 && (
-                      <div className={`rounded-xl border overflow-hidden ${hasCostData ? "border-primary/20 bg-primary/5" : "border-base-300/50 bg-base-200"}`}>
-                        <div className="px-5 py-3 border-b border-base-300/30 flex items-center gap-2">
-                          <RiRobot2Line size={13} className={hasCostData ? "text-primary" : "text-base-content/30"} />
-                          <p className="text-xs font-medium text-base-content/40 uppercase tracking-widest">AI Cost Estimate</p>
-                        </div>
-                        {!hasCostData ? (
-                          <div className="px-5 py-4 text-xs text-base-content/40">
-                            Run an AI preview on your steps to get a cost estimate for this campaign.
-                          </div>
-                        ) : (
-                          <div className="divide-y divide-base-300/30">
-                            {aiSteps.map(({ ws, i }) => {
-                              const cost = stepPreviewCosts[i];
-                              const label = ws.type === "email" ? getEmailStepLabel(wizardSteps, i) : getMessageStepLabel(wizardSteps, i);
-                              if (!cost) return (
-                                <div key={i} className="grid grid-cols-[1fr_auto] px-5 py-2.5 text-xs items-center gap-4">
-                                  <span className="text-base-content/40">{label}</span>
-                                  <span className="text-base-content/25 italic">no preview</span>
-                                </div>
-                              );
-                              const stepTotal = cost.cost_usd * contactCount;
-                              return (
-                                <div key={i} className="grid grid-cols-[1fr_auto_auto] px-5 py-2.5 text-xs items-center gap-4">
-                                  <span className="text-base-content/60 font-medium">{label}</span>
-                                  <span className="text-base-content/35">${cost.cost_usd.toFixed(5)} × {contactCount}</span>
-                                  <span className="font-semibold text-base-content tabular-nums">${stepTotal.toFixed(4)}</span>
-                                </div>
-                              );
-                            })}
-                            {aiSteps.filter(({ i }) => stepPreviewCosts[i]).length > 0 && (
-                              <div className="grid grid-cols-[1fr_auto] px-5 py-3 text-sm items-center bg-primary/5">
-                                <div>
-                                  <span className="font-semibold text-base-content">Total estimated cost</span>
-                                  <p className="text-xs text-base-content/35 mt-0.5">{totalTokens.toLocaleString()} tokens across {contactCount} contacts</p>
-                                </div>
-                                <span className="text-lg font-bold text-primary tabular-nums">${totalAiCost.toFixed(4)}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     {/* Warnings */}
                     {conflicts && conflicts.blocked > 0 && (
                       <p className="text-xs text-warning flex items-center gap-1.5">
@@ -1842,7 +1828,12 @@ function Wizard({
                 disabled={
                   (page === "prospects" && (!prospectsReady || conflictsLoading)) ||
                   (page === "email-steps" && wizardSteps.length === 0) ||
-                  (page === "account" && !accountId)
+                  // Email-only campaigns need an email account, not a LinkedIn account.
+                  // LinkedIn-only need LinkedIn. Mixed need both.
+                  (page === "account" && (
+                    (hasLinkedInStep && !accountId) ||
+                    (hasEmailStep && emailAccountIds.size === 0)
+                  ))
                 }
                 onClick={() => setPage(pages[pageIdx + 1])}
               >
@@ -1869,7 +1860,7 @@ function Wizard({
         const idx = configIdx;
         const stepLabel = ws.type === "email" ? getEmailStepLabel(wizardSteps, idx) : ws.type === "message" ? getMessageStepLabel(wizardSteps, idx) : STEP_LABELS[ws.type];
         return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setConfigIdx(null)}>
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setConfigIdx(null)}>
             <div
               className="bg-base-200 border border-base-300/50 rounded-2xl shadow-2xl w-full max-w-xl flex flex-col overflow-hidden"
               style={{ maxHeight: "85vh" }}
@@ -2352,7 +2343,7 @@ function Wizard({
         const fromName = senderAccount?.name ?? "You";
         const fromEmail = senderAccount?.from_email ?? "you@example.com";
         return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/70 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
               {/* Email client chrome */}
               <div className="bg-[#f5f5f5] border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
@@ -2412,7 +2403,7 @@ function Wizard({
       {previewIdx !== null && (() => {
         const ws = wizardSteps[previewIdx];
         return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-base-200 border border-base-300/50 rounded-2xl shadow-2xl w-full max-w-lg p-6 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -2427,10 +2418,12 @@ function Wizard({
               </div>
 
               <p className="text-xs text-base-content/40">
-                Select a list and a lead to generate a preview using the current model and step instruction.
+                Select a list. Preview uses one sample contact from that list; the saved step keeps{" "}
+                <code className="text-[10px]">{"{{first_name}}"}</code> /{" "}
+                <code className="text-[10px]">{"{{company}}"}</code> tokens so every lead is personalized at send time.
               </p>
 
-              {/* List selector */}
+              {/* List selector only — no per-lead picker */}
               <div>
                 <label className="text-xs text-base-content/50 block mb-1">List</label>
                 <select
@@ -2443,32 +2436,25 @@ function Wizard({
                     <option key={l.id} value={l.id}>{l.name}</option>
                   ))}
                 </select>
+                {previewListId && previewListTargets.length > 0 && (
+                  <p className="text-[11px] text-base-content/40 mt-1.5">
+                    Sample for preview: {previewListTargets[0].full_name ?? "first contact"}
+                    {previewListTargets[0].company ? ` @ ${previewListTargets[0].company}` : ""}
+                    {" "}({previewListTargets.length} in list)
+                  </p>
+                )}
+                {previewListId && previewListTargets.length === 0 && (
+                  <p className="text-[11px] text-base-content/40 mt-1.5">
+                    Loading contacts… if this stays empty, open the list once on the campaign page then try again. Generate still works — the server will pick a sample.
+                  </p>
+                )}
               </div>
-
-              {/* Lead selector */}
-              {previewListTargets.length > 0 && (
-                <div>
-                  <label className="text-xs text-base-content/50 block mb-1">Lead</label>
-                  <select
-                    className="select select-sm w-full"
-                    value={previewTargetId}
-                    onChange={(e) => setPreviewTargetId(e.target.value)}
-                  >
-                    <option value="">Choose a lead…</option>
-                    {previewListTargets.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.full_name ?? t.linkedin_url}{t.title ? ` — ${t.title}` : ""}{t.company ? ` @ ${t.company}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
 
               {/* Generate button */}
               <button
                 type="button"
                 onClick={runPreview}
-                disabled={previewLoading || !previewTargetId}
+                disabled={previewLoading || !previewListId}
                 className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-primary text-white disabled:opacity-40 hover:bg-primary/90 transition-colors"
               >
                 {previewLoading
@@ -2483,10 +2469,20 @@ function Wizard({
               {/* Result */}
               {previewResult && (
                 <div className="space-y-3">
-                  {previewResult.subject && (
+                  {(previewResult.preview_subject || previewResult.subject) && (
                     <div>
-                      <p className="text-xs text-base-content/40 mb-1">Subject</p>
-                      <div className="bg-base-300/50 rounded-lg px-3 py-2 text-sm font-medium">{previewResult.subject}</div>
+                      <p className="text-xs text-base-content/40 mb-1">
+                        Subject
+                        {previewResult.sample_lead ? (
+                          <span className="ml-2 text-base-content/30">sample: {previewResult.sample_lead}</span>
+                        ) : null}
+                      </p>
+                      <div className="bg-base-300/50 rounded-lg px-3 py-2 text-sm font-medium">
+                        {previewResult.preview_subject || previewResult.subject}
+                      </div>
+                      {previewResult.subject && previewResult.preview_subject && previewResult.subject !== previewResult.preview_subject && (
+                        <p className="text-[10px] text-base-content/35 mt-1 font-mono">Saved template: {previewResult.subject}</p>
+                      )}
                     </div>
                   )}
 
@@ -2514,7 +2510,10 @@ function Wizard({
                         Body
                         <span className="ml-2 text-base-content/25">{previewResult.body.trim().split(/\s+/).filter(Boolean).length} words</span>
                       </p>
-                      <div className="bg-base-300/50 rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">{previewResult.body}</div>
+                      <div className="bg-base-300/50 rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">{previewResult.preview_body || previewResult.body}</div>
+                      {previewResult.body && previewResult.preview_body && (
+                        <p className="text-[10px] text-base-content/35 mt-1">Step saves tokenized template (e.g. {"{{first_name}}"}) so each lead is personalized.</p>
+                      )}
                     </div>
                   )}
 
@@ -2559,7 +2558,7 @@ function Wizard({
 
       {/* ── Styled HTML Email Preview Modal Dialogue ── */}
       {htmlModalIdx !== null && wizardSteps[htmlModalIdx]?.emailBodyHtml && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-base-200 border border-base-300/50 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-base-300/50">
               <h3 className="font-semibold text-base flex items-center gap-2">
@@ -2575,7 +2574,7 @@ function Wizard({
               <iframe
                 srcDoc={wizardSteps[htmlModalIdx].emailBodyHtml}
                 title="Email HTML Preview"
-                className="w-full h-[500px] border-0 rounded-xl bg-white"
+                className="w-full h-125 border-0 rounded-xl bg-white"
                 sandbox=""
               />
             </div>
@@ -2594,7 +2593,7 @@ function Wizard({
 
       {/* ── Test Email Modal ── */}
       {testEmailIdx !== null && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-base-200 border border-base-300/50 rounded-2xl shadow-2xl w-full max-w-sm p-6">
             <h3 className="font-semibold text-base mb-1">Send test email</h3>
             <p className="text-xs text-base-content/50 mb-5">
@@ -3304,7 +3303,7 @@ export default function WorkflowDetailPage({
       </div>
 
       {/* Tab switcher */}
-      <div className="flex items-center gap-1 border-b border-base-300/30 mb-0 -mb-px pl-11">
+      <div className="flex items-center gap-1 border-b border-base-300/30 -mb-px pl-11">
         {(["prospects", "analytics"] as const).map(tab => (
           <button
             key={tab}

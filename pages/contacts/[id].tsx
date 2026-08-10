@@ -1,5 +1,6 @@
 import Head from "next/head";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import { useState, useRef, useEffect } from "react";
 import { GetServerSideProps } from "next";
 import { getDb } from "@/lib/db";
@@ -10,7 +11,7 @@ import {
   RiTimeLine, RiGlobalLine, RiLinkedinBoxLine, RiCheckboxCircleLine,
   RiEditLine, RiCheckLine, RiCloseLine, RiFlowChart,
   RiCheckboxBlankCircleLine, RiDeleteBinLine, RiCalendarLine,
-  RiAddLine, RiCloseCircleLine, RiPhoneLine,
+  RiAddLine, RiCloseCircleLine, RiPhoneLine, RiForbid2Line,
 } from "react-icons/ri";
 
 interface Company {
@@ -92,6 +93,7 @@ interface Target {
   enriched_profile_at: string | null;
   notes: string | null;
   company_id: string | null;
+  unsubscribed_at: string | null;
   companyObj: Company | null;
   lists: ListRef[];
 }
@@ -568,6 +570,9 @@ export default function ContactDetailPage({
   const [editingEmail, setEditingEmail] = useState(false);
   const [emailDraft, setEmailDraft] = useState(target.email ?? "");
   const emailInputRef = useRef<HTMLInputElement>(null);
+  const [unsubscribedAt, setUnsubscribedAt] = useState(target.unsubscribed_at ?? null);
+  const [unsubscribing, setUnsubscribing] = useState(false);
+  const router = useRouter();
 
   const [phone, setPhone] = useState(target.phone ?? "");
   const [editingPhone, setEditingPhone] = useState(false);
@@ -668,6 +673,23 @@ export default function ContactDetailPage({
     setEmail(trimmed);
     setEditingEmail(false);
     toast.success("Email saved");
+  }
+
+  async function unsubscribeContact() {
+    if (!confirm(`Unsubscribe ${target.full_name ?? "this contact"}? They'll stop receiving emails and newsletters, and can't be re-added to any email campaign.`)) return;
+    setUnsubscribing(true);
+    try {
+      const res = await fetch(`/api/targets/${target.id}/unsubscribe`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Failed to unsubscribe"); return; }
+      setUnsubscribedAt(data.target?.unsubscribed_at ?? new Date().toISOString());
+      toast.success("Unsubscribed — tracked on the Email page");
+      // Track + surface the action: jump to the Email history page's Unsubscribed tab,
+      // highlighting this contact's row.
+      router.push(`/email?unsub=${target.id}`);
+    } finally {
+      setUnsubscribing(false);
+    }
   }
 
   async function savePhone() {
@@ -842,6 +864,23 @@ export default function ContactDetailPage({
                     }`}>
                       {target.email_status}
                     </span>
+                  )}
+                  {unsubscribedAt ? (
+                    <span
+                      title={`Unsubscribed ${new Date(unsubscribedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-error/15 text-error"
+                    >
+                      <RiForbid2Line size={10} /> Unsubscribed
+                    </span>
+                  ) : (
+                    <button
+                      onClick={unsubscribeContact}
+                      disabled={unsubscribing}
+                      title="Stop sending this contact any emails/newsletters and block them from future campaigns"
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-base-300 text-base-content/40 hover:bg-error/15 hover:text-error transition-colors disabled:opacity-50"
+                    >
+                      <RiForbid2Line size={10} /> {unsubscribing ? "Unsubscribing…" : "Unsubscribe"}
+                    </button>
                   )}
                 </div>
               ) : (

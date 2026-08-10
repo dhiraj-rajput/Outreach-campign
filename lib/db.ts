@@ -311,6 +311,9 @@ function runMigrations(db: Database.Database) {
     // Ramp-up: start slow and increase sending volume over time
     "ALTER TABLE email_accounts ADD COLUMN ramp_up_enabled INTEGER DEFAULT 1",
     "ALTER TABLE email_accounts ADD COLUMN ramp_start_date TEXT",
+    // LinkedIn account ramp-up (mirrors email) — start conservative, grow daily connection volume
+    "ALTER TABLE accounts ADD COLUMN ramp_up_enabled INTEGER DEFAULT 0",
+    "ALTER TABLE accounts ADD COLUMN ramp_start_date TEXT",
     // Company description and employee count moved from targets to companies
     "ALTER TABLE companies ADD COLUMN description TEXT",
     "ALTER TABLE companies ADD COLUMN employee_count INTEGER",

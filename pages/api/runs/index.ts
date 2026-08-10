@@ -43,14 +43,29 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const workflowHasLinkedInStep = !!(db.prepare(
       "SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND track = 'linkedin' LIMIT 1"
     ).get(workflow_id));
-    if (workflowHasLinkedInStep && !account_id) {
+    // Empty string breaks SQLite FKs — treat as null for email-only campaigns
+    const linkedInAccountId =
+      typeof account_id === "string" && account_id.trim() ? account_id.trim() : null;
+
+    if (workflowHasLinkedInStep && !linkedInAccountId) {
       return res.status(400).json({ error: "account_id required for workflows with LinkedIn steps" });
     }
 
     // Normalise email account list — prefer the new array, fall back to legacy single-id
-    const emailAccountPool: string[] = Array.isArray(email_account_ids) && email_account_ids.length > 0
-      ? email_account_ids
-      : (email_account_id ? [email_account_id] : []);
+    const emailAccountPool: string[] = (
+      Array.isArray(email_account_ids) && email_account_ids.length > 0
+        ? email_account_ids
+        : (email_account_id ? [email_account_id] : [])
+    )
+      .map((id: string) => String(id).trim())
+      .filter(Boolean);
+
+    const workflowHasEmailStep = !!(db.prepare(
+      "SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND track = 'email' LIMIT 1"
+    ).get(workflow_id));
+    if (workflowHasEmailStep && emailAccountPool.length === 0) {
+      return res.status(400).json({ error: "email_account_ids required for workflows with email steps" });
+    }
 
     // Check 1: only one active run per workflow
     const activeRun = db.prepare(
@@ -64,10 +79,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     }
 
     const runId = randomUUID();
-    // For backwards compat, store first email account on the run row (may be null for no-email campaigns)
+    // account_id must be NULL (not "") when there is no LinkedIn account — FK to accounts
     db
       .prepare("INSERT INTO runs (id, workflow_id, list_id, account_id, email_account_id) VALUES (?, ?, ?, ?, ?)")
-      .run(runId, workflow_id, list_id, account_id, emailAccountPool[0] ?? null);
+      .run(runId, workflow_id, list_id, linkedInAccountId, emailAccountPool[0] ?? null);
 
     // Create run_profiles — either for selected targets or all targets in the list
     const candidates: { target_id: string }[] = Array.isArray(target_ids) && target_ids.length > 0

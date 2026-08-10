@@ -2,11 +2,12 @@ import { getDb } from "@/lib/db";
 import { randomUUID } from "crypto";
 import { getSessionPage, saveSessionState, getSessionContext } from "@/lib/linkedin/session";
 import { visitProfile } from "@/lib/linkedin/visit";
-import { sendConnectionRequest, WeeklyLimitError, AlreadyConnectedError, PendingInviteError } from "@/lib/linkedin/connect";
+import { sendConnectionRequest, WeeklyLimitError, AlreadyConnectedError, PendingInviteError, NoteLimitError, LINKEDIN_NOTE_MAX_CHARS } from "@/lib/linkedin/connect";
 import { sendMessage, NotConnectedError } from "@/lib/linkedin/message";
 import { shouldSyncAccepted, syncAcceptedConnections } from "@/lib/linkedin/sync-accepted";
 import { sendEmail } from "@/lib/email/sender";
-import { isSuppressed, unsubscribeFooterText, unsubscribeFooterHtml } from "@/lib/email/suppression";
+import { runAICompletion } from "@/lib/ai/client";
+import { isSuppressed, unsubscribeFooterText, unsubscribeFooterHtml, unsubscribeUrl, unsubscribeHeaders } from "@/lib/email/suppression";
 import { openPixelTag, rewriteLinksForTracking } from "@/lib/email/tracking";
 import { scoreEmailSent } from "@/lib/scoring/lead-score";
 import { shouldSyncEmailInbox, syncEmailInbox } from "@/lib/email/inbox";
@@ -32,12 +33,12 @@ function inmailCreditsExhaustedToday(accountId: string): boolean {
 }
 
 // Initial wait before first acceptance check (6h)
-const CONNECTION_RECHECK_HOURS = 6;
+const CONNECTION_RECHECK_HOURS = 3;
 // Max days to wait for acceptance before giving up
 const CONNECTION_MAX_WAIT_DAYS = 7;
 // Delay between profiles (seconds)
-const PROFILE_DELAY_MIN = 8;
-const PROFILE_DELAY_MAX = 20;
+const PROFILE_DELAY_MIN = 6;
+const PROFILE_DELAY_MAX = 15;
 // Poll interval (ms)
 const POLL_INTERVAL_MS = 30_000;
 
@@ -52,6 +53,8 @@ interface AccountLimits extends ScheduleConfig {
   daily_connection_limit: number;
   daily_message_limit: number;
   daily_inmail_limit: number;
+  ramp_up_enabled: number | null;
+  ramp_start_date: string | null;
 }
 
 interface EmailAccountLimits extends ScheduleConfig {
@@ -65,6 +68,17 @@ function effectiveEmailLimit(account: EmailAccountLimits): number {
   const daysActive = Math.max(1, Math.floor((Date.now() - new Date(account.ramp_start_date).getTime()) / 86_400_000) + 1);
   const ramped = daysActive * 2;
   return Math.min(account.daily_email_limit, ramped);
+}
+
+/** LinkedIn connection ramp: day 1 → 5, then +3/day up to the account's daily_connection_limit.
+ *  Disabled by default (ramp_up_enabled=0) so existing accounts keep full limit immediately.
+ *  Enable + set ramp_start_date on the account when warming a new LinkedIn profile. */
+function effectiveConnectionLimit(account: AccountLimits): number {
+  const hard = account.daily_connection_limit ?? 20;
+  if (!account.ramp_up_enabled || !account.ramp_start_date) return hard;
+  const daysActive = Math.max(1, Math.floor((Date.now() - new Date(account.ramp_start_date).getTime()) / 86_400_000) + 1);
+  const ramped = 5 + (daysActive - 1) * 3;
+  return Math.min(hard, ramped);
 }
 
 function getLocalParts(tz: string, date = new Date()): { hour: number; minute: number; isoWeekday: number } {
@@ -547,12 +561,85 @@ async function executeStep(
       }
 
       db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
-      log(db, runId, target.id, "info", `Sending connection request to ${name}`);
+
+      // Resolve optional connection note (template or AI). LinkedIn caps notes at 300 chars
+      // and free accounts have a very low monthly quota for personalised invites (~5).
+      let connectNote: string | null = null;
+      if (step.ai_enabled) {
+        if (!premium?.ai) {
+          log(db, runId, target.id, "warn", `AI writer is a premium feature — sending connect without note for ${name}`);
+        } else {
+          const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as { api_key: string } | undefined;
+          const agentCfg = premium.ai.getAgentConfig();
+          const resolvedModel = step.ai_model || agentCfg.default_model;
+          if (!integration?.api_key || !resolvedModel) {
+            log(db, runId, target.id, "warn", `AI enabled on connect step but OpenRouter key or model missing — sending without note for ${name}`);
+          } else {
+            const contactData = premium.ai.getContactWithCompany(target.id);
+            if (!contactData) {
+              log(db, runId, target.id, "warn", `Could not load contact data for AI connect note — sending without note for ${name}`);
+            } else {
+              log(db, runId, target.id, "info", `Generating AI connection note for ${name} with ${resolvedModel}`);
+              try {
+                const result = await premium.ai.writeLinkedInMessage({
+                  apiKey: decryptSecret(integration.api_key)!,
+                  model: resolvedModel,
+                  stepType: "connect",
+                  stepPrompt: step.ai_prompt || "Write a short, warm LinkedIn connection request note. Be specific to their role/company when possible. No fluff, no hard sell.",
+                  maxWords: step.ai_max_words ?? 40,
+                  language: step.ai_language ?? undefined,
+                  campaignPrompt: campaignPrompt ?? undefined,
+                  contact: contactData.contact,
+                  company: contactData.company,
+                  agentConfig: agentCfg,
+                  runId,
+                  targetId: target.id,
+                  stepId: step.id,
+                });
+                connectNote = (result.body || "").trim().slice(0, LINKEDIN_NOTE_MAX_CHARS);
+              } catch (aiErr) {
+                log(db, runId, target.id, "warn", `AI connect-note generation failed for ${name}: ${aiErr instanceof Error ? aiErr.message : aiErr} — sending without note`);
+              }
+            }
+          }
+        }
+      } else if (step.connect_note) {
+        // Simple template substitution for static notes
+        connectNote = step.connect_note
+          .replace(/\{\{first_name\}\}/gi, target.first_name || "")
+          .replace(/\{\{last_name\}\}/gi, target.last_name || "")
+          .replace(/\{\{full_name\}\}/gi, target.full_name || name)
+          .replace(/\{\{company\}\}/gi, target.company || "")
+          .replace(/\{\{title\}\}/gi, target.title || "")
+          .trim()
+          .slice(0, LINKEDIN_NOTE_MAX_CHARS);
+        if (!connectNote) connectNote = null;
+      }
+
+      log(db, runId, target.id, "info", connectNote
+        ? `Sending connection request with note to ${name} (${connectNote.length} chars)`
+        : `Sending connection request to ${name}`);
       const linkedinUrl = await getLinkedinUrl(db, target, accountId);
       const page = await getSessionPage(accountId);
-      try { await sendConnectionRequest(page, linkedinUrl); } finally { await page.close(); }
+      try {
+        await sendConnectionRequest(page, linkedinUrl, connectNote);
+      } catch (e) {
+        if (e instanceof NoteLimitError) {
+          // Monthly personalised-note quota exhausted — retry once without note so the
+          // invite still lands rather than failing the whole step.
+          log(db, runId, target.id, "warn", `${name}: ${e.message} — retrying without note`);
+          await sendConnectionRequest(page, linkedinUrl, null);
+        } else {
+          throw e;
+        }
+      } finally {
+        await page.close();
+      }
       await saveSessionState(accountId);
       db.prepare("UPDATE targets SET connection_requested_at = ? WHERE id = ?").run(nowIso(), target.id);
+      if (connectNote) {
+        trRecordContext(db, tr, { linkedinMessage: connectNote });
+      }
       trWait(db, tr, CONNECTION_RECHECK_HOURS);
       log(db, runId, target.id, "info", `Connection request sent to ${name} — will recheck in ${CONNECTION_RECHECK_HOURS}h`);
 
@@ -803,60 +890,146 @@ async function executeStep(
 
       let emailSubject = "";
       let emailBody = "";
-      if (step.ai_enabled) {
-        if (!premium?.ai) {
-          log(db, runId, target.id, "warn", `AI writer is a premium feature — not available in this build. Skipping ${name}`);
-          trAdvance(db, tr, steps);
-          return;
+
+      // 1) Premium AI writer (ee/) when available
+      if (step.ai_enabled && premium?.ai) {
+        try {
+          const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as { api_key: string } | undefined;
+          const agentCfgForEmail = premium.ai.getAgentConfig();
+          const resolvedEmailModel = step.ai_model || agentCfgForEmail.default_model;
+          if (!integration?.api_key || !resolvedEmailModel) {
+            log(db, runId, target.id, "warn", `AI enabled but OpenRouter key/model missing — will try open-core AI / template for ${name}`);
+          } else {
+            const contactData = premium.ai.getContactWithCompany(target.id);
+            if (!contactData) {
+              log(db, runId, target.id, "warn", `Could not load contact data for AI — will try open-core AI / template for ${name}`);
+            } else {
+              log(db, runId, target.id, "info", `Generating AI email for ${name} with ${resolvedEmailModel}`);
+              const emailPosition = step.email_position ?? 1;
+              let followupContext: { followupNumber: number; previousSubject: string; previousBody: string } | undefined;
+              if (emailPosition > 1 && (tr.last_email_subject || tr.last_email_body)) {
+                followupContext = {
+                  followupNumber: emailPosition - 1,
+                  previousSubject: tr.last_email_subject ?? "",
+                  previousBody: tr.last_email_body ?? "",
+                };
+              }
+              const result = await premium.ai.writeEmail({
+                apiKey: decryptSecret(integration.api_key)!,
+                model: resolvedEmailModel,
+                stepType: "email",
+                stepPrompt: step.ai_prompt ?? "",
+                maxWords: step.ai_max_words ?? undefined,
+                language: step.ai_language ?? undefined,
+                campaignPrompt: campaignPrompt ?? undefined,
+                contact: contactData.contact,
+                company: contactData.company,
+                agentConfig: agentCfgForEmail,
+                followupContext,
+                replyContext: tr.pending_reply_context ?? undefined,
+                runId,
+                targetId: target.id,
+                stepId: step.id,
+              });
+              emailSubject = result.subject;
+              emailBody = result.body;
+              if (tr.pending_reply_context) {
+                db.prepare("UPDATE run_profile_tracks SET pending_reply_context = NULL WHERE id = ?").run(tr.id);
+              }
+            }
+          }
+        } catch (aiErr) {
+          console.warn("[runner] Premium AI email failed, trying open-core:", aiErr);
+          log(db, runId, target.id, "warn", `Premium AI failed for ${name} — trying open-core AI`);
         }
-        const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as { api_key: string } | undefined;
-        const agentCfgForEmail = premium.ai.getAgentConfig();
-        const resolvedEmailModel = step.ai_model || agentCfgForEmail.default_model;
-        if (!integration?.api_key || !resolvedEmailModel) {
-          log(db, runId, target.id, "warn", `AI enabled on email step but OpenRouter key or model missing — skipping ${name}`);
-          trAdvance(db, tr, steps);
-          return;
+      }
+
+      // 2) Open-core AI (Gemini / OpenRouter via lib/ai/client) — works without ee/
+      if (step.ai_enabled && !emailBody) {
+        try {
+          const firstName = freshTarget.first_name || freshTarget.full_name?.split(" ")[0] || "there";
+          const company = freshTarget.company || "your company";
+          const title = freshTarget.title || "";
+          const instruction = (step.ai_prompt || "").trim()
+            || "Warm B2B outreach. Mention something relevant and propose a short call.";
+          const lang = step.ai_language || "English";
+          const maxWords = step.ai_max_words || 140;
+          // Rotate the opening angle per send so a whole campaign doesn't read as the same
+          // email copy-pasted to every lead.
+          const openCoreAngles = [
+            "a likely operational pain point for their role",
+            "a genuine, low-pressure question about how they currently handle the problem",
+            "a short, concrete observation about their role or seniority",
+            "a light opening that skips the word 'noticed' entirely",
+          ];
+          const openCoreAngle = openCoreAngles[Math.floor(Math.random() * openCoreAngles.length)];
+          log(db, runId, target.id, "info", `Generating open-core AI email for ${name}`);
+          const completion = await runAICompletion({
+            messages: [
+              {
+                role: "system",
+                content: `You are an expert B2B cold-email copywriter.
+Return ONLY raw JSON: {"subject":"...","body":"..."}.
+Personalize for this recipient (use their real name/company in the body — this is the final send, not a template).
+Write in ${lang}. Keep body under ~${maxWords} words. No markdown fences, no safety tags.
+Sign off naturally without bracket placeholders like [Your Name].
+
+GROUNDING — do not invent facts:
+- Only state facts given to you below (recipient name/title/company, campaign brief, instruction).
+- NEVER invent a company name, client/customer name, case study, statistic, integration, or product
+  feature that wasn't given to you — this is the single most important rule. If you don't have a
+  concrete detail to reference, stay general ("teams like yours") instead of making one up.
+- Do not attribute the recipient to any company other than the "Company" field given below.
+
+VARIETY — avoid formulaic, repetitive copy:
+- Lead with ${openCoreAngle}.
+- Don't default to the same stock opening every time; vary sentence length and structure.
+
+Before you output, silently check your draft against the GROUNDING rules and remove anything you can't
+trace back to the fields given below.`,
+              },
+              {
+                role: "user",
+                content: [
+                  `Recipient: ${freshTarget.full_name || firstName}`,
+                  `First name: ${firstName}`,
+                  `Title: ${title || "(unknown)"}`,
+                  `Company: ${company}`,
+                  campaignPrompt ? `Campaign brief: ${campaignPrompt}` : "",
+                  `Instruction: ${instruction}`,
+                ].filter(Boolean).join("\n"),
+              },
+            ],
+            preferredModel: step.ai_model || undefined,
+            temperature: 0.7,
+            max_tokens: 900,
+          });
+          const raw = (completion.content || "").trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/i, "");
+          try {
+            const parsed = JSON.parse(raw);
+            emailSubject = String(parsed.subject || "");
+            emailBody = String(parsed.body || "");
+          } catch {
+            const subj = raw.match(/"subject"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+            const bod = raw.match(/"body"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+            if (subj) emailSubject = JSON.parse(`"${subj[1]}"`);
+            if (bod) emailBody = JSON.parse(`"${bod[1]}"`);
+            if (!emailBody) emailBody = raw;
+          }
+          emailBody = emailBody
+            .replace(/User Safety:\s*safe/gi, "")
+            .replace(/\[Your (Company|Name|Title)\]/gi, "")
+            .trim();
+        } catch (ocErr) {
+          console.warn("[runner] Open-core AI email failed:", ocErr);
+          log(db, runId, target.id, "warn", `Open-core AI failed for ${name} — using step template`);
         }
-        const contactData = premium.ai.getContactWithCompany(target.id);
-        if (!contactData) {
-          log(db, runId, target.id, "warn", `Could not load contact data for AI email — skipping ${name}`);
-          trAdvance(db, tr, steps);
-          return;
-        }
-        log(db, runId, target.id, "info", `Generating AI email for ${name} with ${resolvedEmailModel}`);
-        const emailPosition = step.email_position ?? 1;
-        let followupContext: { followupNumber: number; previousSubject: string; previousBody: string } | undefined;
-        if (emailPosition > 1 && (tr.last_email_subject || tr.last_email_body)) {
-          followupContext = {
-            followupNumber: emailPosition - 1,
-            previousSubject: tr.last_email_subject ?? "",
-            previousBody: tr.last_email_body ?? "",
-          };
-        }
-        const result = await premium.ai.writeEmail({
-          apiKey: decryptSecret(integration.api_key)!,
-          model: resolvedEmailModel,
-          stepType: "email",
-          stepPrompt: step.ai_prompt ?? "",
-          maxWords: step.ai_max_words ?? undefined,
-          language: step.ai_language ?? undefined,
-          campaignPrompt: campaignPrompt ?? undefined,
-          contact: contactData.contact,
-          company: contactData.company,
-          agentConfig: agentCfgForEmail,
-          followupContext,
-          replyContext: tr.pending_reply_context ?? undefined,
-          runId,
-          targetId: target.id,
-          stepId: step.id,
-        });
-        emailSubject = result.subject;
-        emailBody = result.body;
-        // One-shot: consume the OOO reply context so later follow-ups don't re-acknowledge it
-        if (tr.pending_reply_context) {
-          db.prepare("UPDATE run_profile_tracks SET pending_reply_context = NULL WHERE id = ?").run(tr.id);
-        }
-      } else {
+      }
+
+      // 3) Static step template (manual / preview-saved body)
+      if (!emailBody) {
         emailSubject = renderTemplate(step.email_subject ?? "", freshTarget);
         emailBody = renderTemplate(step.email_body ?? "", freshTarget);
       }
@@ -903,8 +1076,9 @@ async function executeStep(
       // triggered this step. Checked as late as possible (right before send) since a target
       // could unsubscribe from an earlier email in this same run.
       if (isSuppressed(freshTarget.email)) {
-        log(db, runId, target.id, "info", `${name} <${freshTarget.email}> is suppressed (unsubscribed) — skipping ${name}`);
-        trAdvance(db, tr, steps);
+        // Unsubscribed — stop the whole email track so no further follow-ups are scheduled.
+        log(db, runId, target.id, "info", `${name} <${freshTarget.email}> is suppressed (unsubscribed) — skipping remaining email follow-ups`);
+        trSkip(db, tr, "Unsubscribed — email track stopped");
         return;
       }
 
@@ -912,21 +1086,60 @@ async function executeStep(
       const sig = (step.email_signature !== null ? step.email_signature : emailAccount.signature)?.trim();
       const finalEmailBody = sig ? `${emailBody}\n\n--\n${sig}` : emailBody;
 
-      // If this step has a beautified HTML body, send that as the HTML part (with tracking
-      // pixel + click-tracked links + HTML unsubscribe footer embedded), and keep the plain
-      // text as the multipart fallback. Otherwise send plain text only, with a text
-      // unsubscribe footer appended — same tracked-open pixel either way.
+      // Prefer step HTML (beautify in UI) when present; otherwise auto-beautify plain body so
+      // AI-generated / plain drafts still go out as proper multipart HTML (not plain-only).
+      // Always personalize {{tokens}} in both text and HTML.
       let finalHtml: string | undefined;
       let plainTextBody = finalEmailBody + unsubscribeFooterText(target.id);
-      if (step.email_use_html && step.email_body_html) {
-        const pixel = openPixelTag(target.id, runId);
-        const trackedHtml = rewriteLinksForTracking(step.email_body_html, target.id, runId);
-        finalHtml = `${trackedHtml}${unsubscribeFooterHtml(target.id)}${pixel}`;
+
+      try {
+        let htmlSource: string | null = null;
+        if (step.email_use_html && step.email_body_html) {
+          htmlSource = renderTemplate(step.email_body_html, freshTarget);
+        } else {
+          // Auto-beautify plain / AI body → consistent card HTML (mood varies by default professional)
+          const { beautifyEmail } = await import("@/lib/ai/beautify-email");
+          log(db, runId, target.id, "info", `Beautifying email HTML for ${name}`);
+          const beautified = await beautifyEmail(emailSubject, finalEmailBody, "professional");
+          htmlSource = beautified.html;
+        }
+        if (htmlSource) {
+          const pixel = openPixelTag(target.id, runId);
+          // Click-track every real link EXCEPT the unsubscribe placeholder — it isn't a real
+          // URL yet (still "{{unsubscribe_url}}"), and even once filled in we don't want an
+          // unsubscribe click routed through the click tracker (skews click stats, adds a
+          // pointless redirect hop before it hits our own endpoint anyway).
+          const trackedHtml = rewriteLinksForTracking(htmlSource, target.id, runId);
+          // Fill the placeholder with the real, working, per-recipient unsubscribe link.
+          // beautifyEmail() already guarantees the template contains exactly one
+          // {{unsubscribe_url}} footer — don't also append unsubscribeFooterHtml() here, or
+          // the email ends up with two unsubscribe links (one dead, one real).
+          let withUnsub = trackedHtml.replace(/\{\{unsubscribe_url\}\}/gi, unsubscribeUrl(target.id));
+          // Safety net for hand-written HTML saved on the step (the email_use_html branch
+          // above) that never included the token — still guarantee one working link exists.
+          if (!/unsubscribe/i.test(withUnsub)) {
+            withUnsub = withUnsub.replace(/<\/body>/i, `${unsubscribeFooterHtml(target.id)}</body>`);
+            if (!/<\/body>/i.test(trackedHtml)) withUnsub += unsubscribeFooterHtml(target.id);
+          }
+          finalHtml = `${withUnsub}${pixel}`;
+        }
+      } catch (htmlErr) {
+        console.warn("[runner] HTML beautify/personalize failed — sending plain text only:", htmlErr);
+        log(db, runId, target.id, "warn", `HTML email build failed for ${name} — sending plain text`);
       }
 
       db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
-      log(db, runId, target.id, "info", `Sending email to ${name} <${freshTarget.email}>`);
-      await sendEmail({ ...emailAccount, password: decryptSecret(emailAccount.password)! }, freshTarget.email, emailSubject, plainTextBody, finalHtml);
+      log(db, runId, target.id, "info", `Sending email to ${name} <${freshTarget.email}>${finalHtml ? " (HTML)" : " (plain)"}`);
+      await sendEmail(
+        { ...emailAccount, password: decryptSecret(emailAccount.password)! },
+        freshTarget.email,
+        emailSubject,
+        plainTextBody,
+        finalHtml,
+        // One-click unsubscribe headers → Gmail/Outlook show their native "Unsubscribe"
+        // chip next to the sender, in addition to the link in the footer.
+        unsubscribeHeaders(target.id)
+      );
       scoreEmailSent(target.id);
       trRecordContext(db, tr, { emailSubject, emailBody });
       trAdvance(db, tr, steps);
@@ -1001,6 +1214,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   const activeRuns = db.prepare(`
     SELECT r.id as run_id, r.workflow_id, r.account_id, r.email_account_id,
            a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
+           a.ramp_up_enabled, a.ramp_start_date,
            a.active_hours_start, a.active_hours_end, a.timezone, a.working_days
     FROM runs r
     LEFT JOIN accounts a ON a.id = r.account_id
@@ -1109,6 +1323,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   const stillActive = db.prepare(`
     SELECT r.id as run_id, r.workflow_id, r.account_id, r.email_account_id,
            a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
+           a.ramp_up_enabled, a.ramp_start_date,
            a.active_hours_start, a.active_hours_end, a.timezone, a.working_days
     FROM runs r
     LEFT JOIN accounts a ON a.id = r.account_id
@@ -1251,7 +1466,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
       // LinkedIn track enrollment — each run gets its own enrollment, but all runs
       // for the same account share the daily slot budget for that action type
       if (!slotsRemaining.has(run.account_id)) {
-        const dailyLimit = isInmailFirst ? (limits.daily_inmail_limit ?? 15) : (limits.daily_connection_limit ?? 20);
+        const dailyLimit = isInmailFirst ? (limits.daily_inmail_limit ?? 15) : effectiveConnectionLimit(limits as AccountLimits);
         const sentToday = isInmailFirst
           ? (inmailsSentToday.get(run.account_id) ?? 0)
           : (connectsSentToday.get(run.account_id) ?? 0);
@@ -1348,7 +1563,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
       }
       const sentToday = connectsSentToday.get(tr.account_id) ?? 0;
       const planned = connectsPlanned.get(tr.account_id) ?? 0;
-      if (sentToday + planned >= (limits.daily_connection_limit ?? 20)) {
+      if (sentToday + planned >= effectiveConnectionLimit(limits as AccountLimits)) {
         toReschedule.push(tr);
       } else {
         connectsPlanned.set(tr.account_id, planned + 1);
@@ -1433,11 +1648,12 @@ function spreadEnrollBatch(
   if (batchSize === 0) return;
   const start = limits.active_hours_start ?? 9;
   const end = limits.active_hours_end ?? 18;
-  const { hour, minute } = getLocalParts(limits.timezone || "UTC");
+  const tz = limits.timezone || "UTC";
+  const { hour, minute } = getLocalParts(tz);
   const nowFrac = hour + minute / 60;
-  const windowMs = (end - start) * 3600_000;
-  const bucketMs = windowMs / batchSize;
-  const dayStartMs = new Date().setHours(start, 0, 0, 0);
+
+  // Outside the working window → first action tomorrow (both tracks).
+  const outsideHours = nowFrac < start || nowFrac >= end - 0.05;
 
   for (let i = 0; i < pending.length; i++) {
     const row = pending[i];
@@ -1445,15 +1661,33 @@ function spreadEnrollBatch(
       "UPDATE run_profile_tracks SET state = 'in_progress' WHERE id = ? AND state = 'pending'"
     ).run(row.id);
     if (claimed.changes === 0) continue;
-    const slot = (() => {
-      if (nowFrac >= end - 0.25) return rescheduleToTomorrow(limits);
-      const bucketStart = dayStartMs + i * bucketMs;
-      const bucketEnd = bucketStart + bucketMs;
-      return new Date(bucketStart + Math.random() * (bucketEnd - bucketStart)).toISOString();
-    })();
+
+    let slot: string;
+    if (outsideHours) {
+      slot = rescheduleToTomorrow(limits);
+    } else if (track === "email") {
+      // First cold email: send ASAP (tiny stagger to avoid SMTP bursts).
+      // Follow-ups still wait via delay_seconds after trAdvance.
+      slot = new Date(Date.now() + (2 + i * 6 + Math.random() * 4) * 1000).toISOString();
+    } else {
+      // LinkedIn first action: near-term human stagger, NOT a random slot hours later.
+      // ~20–90s base + ~25s per index so a batch of 10 still finishes within ~5 min.
+      const delaySec = 20 + i * 25 + Math.random() * 40;
+      slot = new Date(Date.now() + delaySec * 1000).toISOString();
+    }
+
     db.prepare("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?").run(slot, row.id);
-    const tgt = db.prepare("SELECT full_name, linkedin_url FROM targets WHERE id = (SELECT target_id FROM run_profiles WHERE id = ?)").get(row.run_profile_id) as { full_name: string | null; linkedin_url: string } | undefined;
-    log(db, runId, null, "info", `[${track}] Scheduled ${tgt?.full_name ?? tgt?.linkedin_url ?? row.run_profile_id} within active window`);
+    const tgt = db.prepare(
+      "SELECT full_name, linkedin_url FROM targets WHERE id = (SELECT target_id FROM run_profiles WHERE id = ?)"
+    ).get(row.run_profile_id) as { full_name: string | null; linkedin_url: string } | undefined;
+    const label = tgt?.full_name ?? tgt?.linkedin_url ?? row.run_profile_id;
+    if (outsideHours) {
+      log(db, runId, null, "info", `[${track}] Outside active hours — scheduled ${label} for next window`);
+    } else if (track === "email") {
+      log(db, runId, null, "info", `[${track}] First email for ${label} queued immediately`);
+    } else {
+      log(db, runId, null, "info", `[${track}] First action for ${label} queued in ~${Math.round((new Date(slot).getTime() - Date.now()) / 1000)}s`);
+    }
   }
 }
 

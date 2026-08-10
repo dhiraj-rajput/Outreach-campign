@@ -15,7 +15,7 @@
         "driver.js": "^1.8.0",
         "imap-simple": "^5.1.0",
         "jsonwebtoken": "^9.0.3",
-        "mailparser": "^3.9.14",
+        "mailparser": "^3.9.15",
         "next": "16.1.6",
         "next-auth": "^4.24.15",
         "nodemailer": "^7.0.13",
@@ -29,7 +29,7 @@
         "react-icons": "^5.7.0",
         "react-markdown": "^10.1.0",
         "remark-gfm": "^4.0.1",
-        "sonner": "^2.0.7",
+        "sonner": "^2.0.8",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -351,7 +351,7 @@
 
     "@unrs/resolver-binding-win32-x64-msvc": ["@unrs/resolver-binding-win32-x64-msvc@1.11.1", "", { "os": "win32", "cpu": "x64" }, "sha512-lrW200hZdbfRtztbygyaq/6jP6AKE8qQN2KvPcJ+x7wiD038YtnYtZ82IMNJ69GJibV7bwL3y9FgK+5w/pYt6g=="],
 
-    "@zone-eu/mailsplit": ["@zone-eu/mailsplit@5.4.14", "", { "dependencies": { "libbase64": "1.3.0", "libmime": "5.4.1", "libqp": "2.1.1" } }, "sha512-rz0FQOhN3Vq1XrSeSSa9+dPcaFbBxmQPjiZm6zS9oxdVHV7rOWIAYX3yP2YAUf0qBncY8CI+NogzPCmMVrMXcw=="],
+    "@zone-eu/mailsplit": ["@zone-eu/mailsplit@5.4.15", "", { "dependencies": { "libbase64": "1.3.0", "libmime": "5.4.2", "libqp": "2.1.1" } }, "sha512-c7ZpxauvF4AEkDJlKDYO7iMUtMuqJMBnDWNff1cyx+d7zaBVR3iFEmXhNHOVoMmVyVF3pTZLsLIJsEFKDldOAA=="],
 
     "accepts": ["accepts@2.0.0", "", { "dependencies": { "mime-types": "^3.0.0", "negotiator": "^1.0.0" } }, "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=="],
 
@@ -883,7 +883,7 @@
 
     "libbase64": ["libbase64@1.3.0", "", {}, "sha512-GgOXd0Eo6phYgh0DJtjQ2tO8dc0IVINtZJeARPeiIJqge+HdsWSuaDTe8ztQ7j/cONByDZ3zeB325AHiv5O0dg=="],
 
-    "libmime": ["libmime@5.4.1", "", { "dependencies": { "encoding-japanese": "2.2.0", "iconv-lite": "0.7.3", "libbase64": "1.3.0", "libqp": "2.1.1" } }, "sha512-0wHGhsofo9IdQPenr3BBHXuxcwMq4atFUTsZ9Ogc1OvI5h4rUdDIrBQEN9JHjCXfDMrE59LUMJWsTD82wTYk8A=="],
+    "libmime": ["libmime@5.4.2", "", { "dependencies": { "encoding-japanese": "2.2.0", "iconv-lite": "0.7.3", "libbase64": "1.3.0", "libqp": "2.1.1" } }, "sha512-+IQnCOdPiufGBkOii+Ze8F7iniyBzOwvWDbn1DyExBpc9pT2B3IEMQi7GUc/PpqhNUh/sr1SG9UXDITQoR0VIA=="],
 
     "libqp": ["libqp@2.1.1", "", {}, "sha512-0Wd+GPz1O134cP62YU2GTOPNA7Qgl09XwCqM5zpBv87ERCXdfDtyKXvV7c9U22yWJh44QZqBocFnXN11K96qow=="],
 
@@ -939,7 +939,7 @@
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
-    "mailparser": ["mailparser@3.9.14", "", { "dependencies": { "@zone-eu/mailsplit": "5.4.14", "encoding-japanese": "2.2.0", "he": "1.2.0", "html-to-text": "10.0.0", "iconv-lite": "0.7.3", "libmime": "5.4.1", "linkify-it": "5.0.2", "nodemailer": "9.0.3", "punycode.js": "2.3.1", "tlds": "1.261.0" } }, "sha512-3QD6TRXcyXtq2NCuyA2AEjqmallQkyxYmZI9GMCIvQDCaB9Uc034WUI1x8RUBYFnk5+p7h14JEz4O/lrxQmttw=="],
+    "mailparser": ["mailparser@3.9.15", "", { "dependencies": { "@zone-eu/mailsplit": "5.4.15", "encoding-japanese": "2.2.0", "he": "1.2.0", "html-to-text": "10.0.0", "iconv-lite": "0.7.3", "libmime": "5.4.2", "linkify-it": "5.0.2", "nodemailer": "9.0.5", "punycode.js": "2.3.1", "tlds": "1.261.0" } }, "sha512-/5hgybKDMKFS05jAh8OPeEE7N53lj8nF6ywlo89VPjF2TtwqIQbjaxumQWnJIkmaagnJ6u1eansMOViHFxIXwQ=="],
 
     "markdown-table": ["markdown-table@3.0.4", "", {}, "sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw=="],
 
@@ -1289,7 +1289,7 @@
 
     "simple-get": ["simple-get@4.0.1", "", { "dependencies": { "decompress-response": "^6.0.0", "once": "^1.3.1", "simple-concat": "^1.0.0" } }, "sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA=="],
 
-    "sonner": ["sonner@2.0.7", "", { "peerDependencies": { "react": "^18.0.0 || ^19.0.0 || ^19.0.0-rc", "react-dom": "^18.0.0 || ^19.0.0 || ^19.0.0-rc" } }, "sha512-W6ZN4p58k8aDKA4XPcx2hpIQXBRAgyiWVkYhT7CvK6D3iAu7xjvVyhQHg2/iaKJZ1XVJ4r7XuwGL+WGEK37i9w=="],
+    "sonner": ["sonner@2.0.8", "", { "peerDependencies": { "@types/react": "^18.0.0 || ^19.0.0", "react": "^18.0.0 || ^19.0.0 || ^19.0.0-rc", "react-dom": "^18.0.0 || ^19.0.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-UM/ByIoFra8yzV75n1o0Puu0bw5U/9UNnDacrJNspekBewIfsQ3D6ez1nvlWpt7aTsO6rujQtifBpycwIivqlg=="],
 
     "source-map-js": ["source-map-js@1.2.1", "", {}, "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="],
 
@@ -1523,7 +1523,7 @@
 
     "mailparser/iconv-lite": ["iconv-lite@0.7.3", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ=="],
 
-    "mailparser/nodemailer": ["nodemailer@9.0.3", "", {}, "sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw=="],
+    "mailparser/nodemailer": ["nodemailer@9.0.5", "", {}, "sha512-wvjiKvjczmsN7U/8006JOdXubgBk2XFAbioDMbT+sM7cPs0QrhJTa6KBRX7P5REGGkDcLUz/EarWidb8G8C1jQ=="],
 
     "mdast-util-find-and-replace/escape-string-regexp": ["escape-string-regexp@5.0.0", "", {}, "sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw=="],
 

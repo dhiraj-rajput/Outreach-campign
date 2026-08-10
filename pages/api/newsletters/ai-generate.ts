@@ -1,14 +1,28 @@
 /**
  * POST /api/newsletters/ai-generate
  *
- * Uses the unified AI Client (Gemini or OpenRouter) to write or polish
- * newsletter issues/editions based on a title/topic prompt.
- *
  * Body: { title: string; prompt?: string; style?: string; bannerUrl?: string }
  * Returns: { subject: string; content_html: string }
  */
 import type { NextApiRequest, NextApiResponse } from "next";
 import { runAICompletion } from "@/lib/ai/client";
+
+type NewsletterStyle = "professional" | "friendly" | "bold";
+
+const STYLE_HEADER: Record<NewsletterStyle, string> = {
+  professional: "linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #334155 100%)",
+  friendly: "linear-gradient(135deg, #0f766e 0%, #0d9488 100%)",
+  bold: "linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4f46e5 100%)",
+};
+
+const STYLE_COPY: Record<NewsletterStyle, string> = {
+  professional:
+    "Tone: authoritative, clear, executive-friendly B2B. Short paragraphs. No hype, no emojis, no slang.",
+  friendly:
+    "Tone: warm and human but still professional. Conversational without being casual or salesy.",
+  bold:
+    "Tone: confident and direct. Strong headlines, tight copy, one clear takeaway per section.",
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -25,15 +39,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!title) return res.status(400).json({ error: "title is required" });
 
-  const SYSTEM_PROMPT = `You are an expert B2B newsletter copywriter. Write a short, engaging, professional newsletter issue body.
+  const mood = (["professional", "friendly", "bold"].includes(style)
+    ? style
+    : "professional") as NewsletterStyle;
 
-CRITICAL INSTRUCTIONS:
-- You MUST respond with ONLY a raw JSON object.
-- NO inner monologue, NO reasoning, NO explanation, NO preamble, NO markdown fences.
-- JSON structure: {"subject": "<Catchy subject line under 60 chars>", "content_html": "<Clean HTML body paragraphs, bullet points, and callout box>"}`;
+  const SYSTEM_PROMPT = `You are a senior B2B newsletter editor and copywriter.
 
-  const USER_PROMPT = `Newsletter Topic / Title: "${title}"
-Guidelines / Context: "${prompt || "Provide a warm greeting, concise introduction, 3 key takeaways with bold highlights, and a brief closing."}"`;
+Return ONLY a raw JSON object. No markdown fences, no reasoning, no preamble.
+
+JSON shape:
+{
+  "subject": "Subject line under 60 characters, specific and professional",
+  "content_html": "HTML fragment for the body only (not a full document). Use <p>, <h2>, <ul><li>, <strong>. Optional one callout as a simple bordered div. No scripts, no external CSS, no images unless described in text."
+}
+
+Editorial standards:
+- Professional newsletter quality suitable for founders, operators, and sales leaders
+- 3–5 short sections max; scannable
+- One clear idea per section
+- Avoid clickbait, hype adjectives, and filler
+- ${STYLE_COPY[mood]}`;
+
+  const USER_PROMPT = `Newsletter working title: ${title}
+
+Editor brief / angle:
+${prompt || "Open with a short context paragraph, then 3 concrete takeaways with bold labels, then a brief closing line and optional soft CTA."}
+
+Write the subject and body HTML fragment now.`;
 
   try {
     const result = await runAICompletion({
@@ -41,14 +73,13 @@ Guidelines / Context: "${prompt || "Provide a warm greeting, concise introductio
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: USER_PROMPT },
       ],
-      max_tokens: 500,
-      temperature: 0.5,
+      max_tokens: 2048,
+      temperature: 0.45,
     });
 
     const raw = result.content;
     let parsed: { subject?: string; content_html?: string } = {};
 
-    // Robust JSON extraction — strip any leading/trailing reasoning or thinking text
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
@@ -60,63 +91,51 @@ Guidelines / Context: "${prompt || "Provide a warm greeting, concise introductio
       parsed = { subject: title, content_html: `<p>${raw}</p>` };
     }
 
-    let finalHtml = parsed.content_html || `<p>${title}</p>`;
-
-    // Clean up any leaked reasoning artifacts if present in content_html
-    if (finalHtml.includes("We need to output JSON") || finalHtml.includes("Let's draft")) {
-      finalHtml = finalHtml.replace(/We need to output JSON[\s\S]*?content_html":\s*"/i, "").replace(/"\s*\}\s*$/i, "");
+    let bodyHtml = parsed.content_html || `<p>${title}</p>`;
+    if (bodyHtml.includes("We need to output JSON") || bodyHtml.includes("Let's draft")) {
+      bodyHtml = bodyHtml
+        .replace(/We need to output JSON[\s\S]*?content_html":\s*"/i, "")
+        .replace(/"\s*\}\s*$/i, "");
     }
 
-    // Embed header banner image if provided
     if (bannerUrl && bannerUrl.trim()) {
       const bannerHtml = `
-<div style="text-align: center; margin-bottom: 24px;">
-  <img src="${bannerUrl.trim()}" alt="Newsletter Banner" style="max-width: 100%; height: auto; border-radius: 12px; border: 1px solid #e2e8f0; display: block; margin: 0 auto;" />
+<div style="text-align:center;margin:0 0 24px 0;">
+  <img src="${bannerUrl.trim()}" alt="" width="600" style="max-width:100%;height:auto;display:block;margin:0 auto;border:0;border-radius:8px;" />
 </div>`.trim();
-      finalHtml = `${bannerHtml}\n${finalHtml}`;
+      bodyHtml = `${bannerHtml}\n${bodyHtml}`;
     }
 
-    // Pick a dynamic, professional header gradient based on topic or style
-    const getDynamicHeaderGradient = (topicStr: string, styleStr: string) => {
-      const lower = (topicStr + " " + styleStr).toLowerCase();
-      if (lower.includes("eco") || lower.includes("green") || lower.includes("nature") || lower.includes("dolphin") || lower.includes("ocean") || lower.includes("friendly")) {
-        return "linear-gradient(135deg, #064e3b 0%, #0d9488 100%)"; // Emerald Teal
-      }
-      if (lower.includes("tech") || lower.includes("ai") || lower.includes("future") || lower.includes("bold")) {
-        return "linear-gradient(135deg, #09090b 0%, #4338ca 100%)"; // Midnight Indigo
-      }
-      if (lower.includes("finance") || lower.includes("money") || lower.includes("invest") || lower.includes("executive")) {
-        return "linear-gradient(135deg, #4c0519 0%, #881337 100%)"; // Royal Burgundy
-      }
-      // Default: Sleek Corporate Dark Slate
-      return "linear-gradient(135deg, #0f172a 0%, #334155 100%)";
-    };
+    const headerGradient = STYLE_HEADER[mood];
+    const subjectLine = (parsed.subject || title).replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-    const headerGradient = getDynamicHeaderGradient(title, style);
-
-    // Wrap in standard responsive card container if not wrapped
+    let finalHtml = bodyHtml;
     if (!finalHtml.includes("<!DOCTYPE html>")) {
       finalHtml = `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:30px 15px;">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:28px 14px;">
   <tr>
     <td align="center">
-      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:1px solid #e2e8f0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
         <tr>
-          <td style="background:${headerGradient};padding:32px 36px;">
-            <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;">${parsed.subject || title}</h1>
+          <td style="background:${headerGradient};padding:28px 32px;">
+            <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;font-family:Arial,Helvetica,sans-serif;">${subjectLine}</h1>
           </td>
         </tr>
         <tr>
-          <td style="padding:32px 36px;color:#334155;font-size:15px;line-height:1.7;">
-            ${finalHtml}
+          <td style="padding:28px 32px;color:#334155;font-size:15px;line-height:1.7;font-family:Arial,Helvetica,sans-serif;">
+            ${bodyHtml}
           </td>
         </tr>
         <tr>
-          <td style="padding:16px 36px;background:#f1f5f9;border-top:1px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b;">
-            <a href="{{unsubscribe_url}}" style="color:#64748b;text-decoration:none;font-weight:500;">Unsubscribe</a>
+          <td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;font-size:12px;color:#64748b;font-family:Arial,Helvetica,sans-serif;">
+            <a href="{{unsubscribe_url}}" style="color:#64748b;text-decoration:underline;">Unsubscribe</a>
           </td>
         </tr>
       </table>

@@ -19,6 +19,8 @@ import {
   RiCompassLine,
   RiPlayCircleLine,
   RiNewspaperLine,
+  RiLinkedinBoxLine,
+  RiMailSendLine,
 } from "react-icons/ri";
 import { pathToTourPage, replayPageTour } from "@/lib/tour";
 
@@ -30,6 +32,8 @@ const mainNav = [
   { href: "/contacts", label: "Contacts", icon: RiContactsLine, color: "#34d399", tour: "nav-contacts" },
   { href: "/companies", label: "Companies", icon: RiBuildingLine, color: "#a78bfa", tour: "nav-companies" },
   { href: "/workflows", label: "Campaigns", icon: RiFlowChart, color: "#f4b740", tour: "nav-workflows" },
+  { href: "/linkedin", label: "LinkedIn", icon: RiLinkedinBoxLine, color: "#5aa2ff", tour: "nav-linkedin" },
+  { href: "/email", label: "Email", icon: RiMailSendLine, color: "#38bdf8", tour: "nav-email" },
   { href: "/newsletters", label: "Newsletters", icon: RiNewspaperLine, color: "#e879f9", tour: "nav-newsletters" },
   { href: "/inbox", label: "Inbox", icon: RiInboxLine, color: "#38bdf8", tour: "nav-inbox" },
   { href: "/email-health", label: "Email Health", icon: RiMailCheckLine, color: "#f4b740", tour: "nav-email-health" },
@@ -92,6 +96,8 @@ export default function Sidebar({ onCollapse }: { onCollapse?: (collapsed: boole
     if (href === "/settings") {
       return ["/settings", "/accounts"].some((p) => router.pathname.startsWith(p));
     }
+    // "/email" would otherwise also match "/email-health" via startsWith — keep it exact.
+    if (href === "/email") return router.pathname === "/email";
     return router.pathname.startsWith(href);
   }
 

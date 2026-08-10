@@ -4,6 +4,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
 import { randomUUID } from "crypto";
+import { isSuppressed } from "@/lib/email/suppression";
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   const db = getDb();
@@ -43,16 +44,21 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         VALUES (?, ?, ?, ?)
       `);
 
+      // Never (re-)add someone who's unsubscribed/suppressed anywhere — that's the whole point
+      // of a global suppression list. They're excluded here rather than inserted-then-skipped-
+      // at-send-time so they don't even show up as a pending subscriber.
       let added = 0;
+      let blocked = 0;
       const transaction = db.transaction((items: Array<{ email: string; full_name: string | null }>) => {
         for (const item of items) {
+          if (isSuppressed(item.email)) { blocked++; continue; }
           const res = insertStmt.run(randomUUID(), id, item.email.trim().toLowerCase(), item.full_name?.trim() ?? null);
           if (res.changes > 0) added++;
         }
       });
 
       transaction(targets);
-      return res.status(201).json({ added, total: targets.length });
+      return res.status(201).json({ added, blocked, total: targets.length });
     }
 
     if (Array.isArray(subscribers) && subscribers.length > 0) {
@@ -63,20 +69,26 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       `);
 
       let added = 0;
+      let blocked = 0;
       const transaction = db.transaction((items: Array<{ email: string; full_name?: string }>) => {
         for (const item of items) {
           if (!item.email || !item.email.includes("@")) continue;
+          if (isSuppressed(item.email)) { blocked++; continue; }
           const res = insertStmt.run(randomUUID(), id, item.email.trim().toLowerCase(), item.full_name?.trim() ?? null);
           if (res.changes > 0) added++;
         }
       });
 
       transaction(subscribers);
-      return res.status(201).json({ added, total: subscribers.length });
+      return res.status(201).json({ added, blocked, total: subscribers.length });
     }
 
     if (!email || !email.includes("@")) {
       return res.status(400).json({ error: "Valid email is required" });
+    }
+
+    if (isSuppressed(email)) {
+      return res.status(400).json({ error: "This email has unsubscribed/is suppressed and can't be re-added." });
     }
 
     const subId = randomUUID();

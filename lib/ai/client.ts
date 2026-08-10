@@ -29,17 +29,26 @@ export function getAllAIProviders(preferredModel?: string): AIProviderConfig[] {
     const geminiKey = geminiRow?.api_key ? (decryptSecret(geminiRow.api_key) ?? geminiRow.api_key) : undefined;
 
     if (geminiKey && geminiKey.trim()) {
-      let activeModel = preferredModel || geminiRow?.model || "gemini-2.0-flash";
+      // Default: 2.5 Flash-Lite — current free-tier friendly text model (2.0 Flash is shut down).
+      // See https://ai.google.dev/gemini-api/docs/models
+      let activeModel = preferredModel || geminiRow?.model || "gemini-2.5-flash-lite";
       if (activeModel.includes("/") || activeModel.includes("openrouter") || activeModel.includes("llama") || activeModel.includes("deepseek") || activeModel.includes("qwen")) {
-        activeModel = geminiRow?.model || "gemini-2.0-flash";
+        activeModel = geminiRow?.model || "gemini-2.5-flash-lite";
       }
+      // Map shut-down / renamed IDs → current stable endpoints
+      // Prefer flash-lite for free-tier stability; gemini-2.5-flash can 404 on some keys.
       const deprecatedOrInvalid: Record<string, string> = {
-        "gemini-pro": "gemini-1.5-flash",
-        "gemini-1.0-pro": "gemini-1.5-flash",
-        "gemini-2.5-flash": "gemini-2.0-flash",
-        "gemini-2.5-pro": "gemini-1.5-pro",
-        "gemini-3-flash-preview": "gemini-2.0-flash",
-        "gemini-2.5-flash-lite": "gemini-2.0-flash-lite",
+        "gemini-pro": "gemini-2.5-flash-lite",
+        "gemini-1.0-pro": "gemini-2.5-flash-lite",
+        "gemini-1.5-flash": "gemini-2.5-flash-lite",
+        "gemini-1.5-pro": "gemini-2.5-pro",
+        "gemini-2.0-flash": "gemini-2.5-flash-lite",
+        "gemini-2.0-flash-lite": "gemini-2.5-flash-lite",
+        "gemini-2.0-flash-exp": "gemini-2.5-flash-lite",
+        "gemini-2.5-flash": "gemini-2.5-flash-lite",
+        "gemini-3-flash-preview": "gemini-3.5-flash-lite",
+        "gemini-3-pro-preview": "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite",
       };
       if (deprecatedOrInvalid[activeModel]) {
         activeModel = deprecatedOrInvalid[activeModel];
@@ -67,9 +76,10 @@ export function getAllAIProviders(preferredModel?: string): AIProviderConfig[] {
     const openrouterKey = openrouterRow?.api_key ? (decryptSecret(openrouterRow.api_key) ?? openrouterRow.api_key) : undefined;
 
     if (openrouterKey && openrouterKey.trim()) {
-      let activeModel = preferredModel || openrouterRow?.model || "google/gemini-2.0-flash-exp:free";
+      let activeModel = preferredModel || openrouterRow?.model || "openrouter/free";
       if (activeModel.startsWith("gemini-") && !activeModel.includes("/")) {
-        activeModel = "google/gemini-2.0-flash-exp:free";
+        // Bare Gemini IDs are for Google AI Studio, not OpenRouter
+        activeModel = openrouterRow?.model || "openrouter/free";
       }
       providers.push({
         provider: "openrouter",

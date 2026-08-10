@@ -1434,11 +1434,16 @@ const INTEGRATIONS: IntegrationDef[] = [
     placeholder: "AIzaSy...",
     // Google moved Pro-series models to paid-only in the AI Studio free tier (Apr 2026) — only
     // Flash / Flash-Lite models keep a no-billing free quota, so those are what we offer here.
+    // Model IDs from https://ai.google.dev/gemini-api/docs/models (Aug 2026).
+    // gemini-2.0-flash / 2.0-flash-lite are SHUT DOWN — do not offer them.
     models: [
-      { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash (Recommended - Fast & Free)" },
-      { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash-Lite (Lowest Latency, Free)" },
-      { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash (Standard, Free)" },
-      { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro (High Reasoning)" },
+      { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite (Recommended — fast, free-tier friendly)" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (Balanced speed & quality)" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (Higher reasoning)" },
+      { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash-Lite (Newest lite)" },
+      { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash (Newest balanced)" },
+      { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash (Latest stable)" },
+      { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash-Lite" },
     ],
   },
   {

@@ -8,7 +8,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
 import { sendEmail } from "@/lib/email/sender";
 import { decryptSecret } from "@/lib/crypto";
-import { unsubscribeUrl } from "@/lib/email/suppression";
+import { unsubscribeUrl, isSuppressed } from "@/lib/email/suppression";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -59,14 +59,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 
-  // 3. Fetch all active subscribers
-  const subscribers = db.prepare(`
+  // 3. Fetch all active subscribers. Never trust newsletter_subscribers.status alone — the
+  // global suppression list (lib/email/suppression.ts) is the single source of truth for "must
+  // never be emailed again" across every channel, so double-check it here too (belt-and-braces,
+  // same pattern the cold-email/LinkedIn runner uses). Anyone found suppressed gets their local
+  // status synced to 'unsubscribed' and is skipped rather than sent to.
+  const candidateSubscribers = db.prepare(`
     SELECT * FROM newsletter_subscribers
     WHERE newsletter_id = ? AND status = 'subscribed'
   `).all(newsletterId) as Array<{ id: string; email: string; full_name: string | null }>;
 
+  const subscribers: typeof candidateSubscribers = [];
+  let suppressedCount = 0;
+  for (const sub of candidateSubscribers) {
+    if (isSuppressed(sub.email)) {
+      db.prepare(
+        "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE id = ?"
+      ).run(sub.id);
+      suppressedCount++;
+      continue;
+    }
+    subscribers.push(sub);
+  }
+
   if (subscribers.length === 0) {
-    return res.status(400).json({ error: "No active subscribers found for this newsletter" });
+    return res.status(400).json({
+      error: suppressedCount > 0
+        ? `All ${suppressedCount} subscriber(s) on this newsletter are unsubscribed/suppressed — nothing to send.`
+        : "No active subscribers found for this newsletter",
+    });
   }
 
   // Update edition status to sending
@@ -132,6 +153,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     message: "Newsletter edition dispatched successfully",
     sent_count: sentCount,
     failed_count: failedCount,
+    suppressed_count: suppressedCount,
     total_subscribers: subscribers.length,
   });
 }
