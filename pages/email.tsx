@@ -9,7 +9,7 @@ import {
   RiShieldCheckLine, RiAlertLine, RiCursorLine, RiReplyLine, RiBarChart2Line,
 } from "react-icons/ri";
 import {
-  ActivityAreaChart, GroupedBarChart, RateBars, DonutChart, FunnelBars, HourBarChart, RateKpi,
+  ActivityAreaChart, GroupedBarChart, RateBars, DonutChart, FunnelBars, HourBarChart, RateKpi, DailyBreakdownTable,
 } from "@/components/analytics/Charts";
 
 interface Totals {
@@ -126,6 +126,8 @@ export default function EmailPage() {
   const [newsletterActivity, setNewsletterActivity] = useState<ActivityRow[]>([]);
   const [unsubscribed, setUnsubscribed] = useState<UnsubRow[]>([]);
   const [tab, setTab] = useState<"activity" | "unsubscribed">(highlight ? "unsubscribed" : "activity");
+  const [replyKinds, setReplyKinds] = useState<{ kind: string; count: number }[]>([]);
+  const [emailPipeline, setEmailPipeline] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -138,6 +140,7 @@ export default function EmailPage() {
         setHourSeries(d.hourSeries ?? []);
         setCampaignActivity(d.campaignActivity ?? []); setNewsletterActivity(d.newsletterActivity ?? []);
         setUnsubscribed(d.unsubscribed ?? []);
+        setReplyKinds(d.replyKinds ?? []); setEmailPipeline(d.pipeline ?? null);
       })
       .catch(() => toast.error("Failed to load email history"))
       .finally(() => setLoading(false));
@@ -268,6 +271,21 @@ export default function EmailPage() {
                 <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
                   <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Email activity over time ({days}d)</p>
                   <ActivityAreaChart data={daily} series={SERIES} height={260} />
+                  <div className="mt-5 pt-4 border-t border-base-300/30">
+                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Daily breakdown</p>
+                    <DailyBreakdownTable
+                      data={daily}
+                      columns={[
+                        { key: "campaign_sent", label: "Campaign sent", color: "#f4b740" },
+                        { key: "campaign_opens", label: "Opens", color: "#38bdf8" },
+                        { key: "campaign_clicks", label: "Clicks", color: "#32d583" },
+                        { key: "campaign_replies", label: "Replies", color: "#a78bfa" },
+                        { key: "newsletter_sent", label: "Newsletter sent", color: "#e879f9" },
+                        { key: "newsletter_opens", label: "NL opens", color: "#5aa2ff" },
+                        { key: "newsletter_clicks", label: "NL clicks", color: "#fb923c" },
+                      ]}
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -605,6 +623,54 @@ export default function EmailPage() {
             </div>
           </div>
         )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-base-200 border border-base-300/50 rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-3">Email engagement pipeline</h3>
+            {emailPipeline ? (
+              <ul className="space-y-2.5">
+                {[
+                  { k: "with_email", label: "Contacts with email", c: "#94a3b8" },
+                  { k: "opened", label: "Opened", c: "#38bdf8" },
+                  { k: "clicked", label: "Clicked", c: "#32d583" },
+                  { k: "replied", label: "Replied", c: "#a78bfa" },
+                  { k: "suppressed", label: "Suppressed / unsubscribed", c: "#f87171" },
+                ].map((row) => {
+                  const v = Number(emailPipeline[row.k] ?? 0);
+                  const max = Math.max(1, Number(emailPipeline.with_email ?? 1));
+                  const pct = Math.max(2, Math.min(100, (v / max) * 100));
+                  return (
+                    <li key={row.k}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-base-content/55">{row.label}</span>
+                        <span className="tabular-nums font-medium">{v.toLocaleString()}</span>
+                      </div>
+                      <div className="h-1.5 bg-base-300/40 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: row.c }} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : <p className="text-sm text-base-content/40">No pipeline data yet</p>}
+          </div>
+          <div className="bg-base-200 border border-base-300/50 rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-3">Reply classifier breakdown</h3>
+            {replyKinds.length === 0 ? (
+              <p className="text-sm text-base-content/40">Email replies classified in the Inbox will appear here.</p>
+            ) : (
+              <ul className="space-y-2">
+                {replyKinds.map((row) => (
+                  <li key={row.kind} className="flex items-center justify-between text-sm">
+                    <span className="capitalize text-base-content/60">{String(row.kind).replace(/_/g, " ")}</span>
+                    <span className="tabular-nums font-medium">{row.count}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
       </div>
     </>
   );

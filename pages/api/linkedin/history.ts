@@ -155,8 +155,34 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         ? Math.round((Number(c.connections_accepted) / Number(c.connections_sent)) * 1000) / 10 : 0,
     }));
 
+    const intentRows = db.prepare(`
+      SELECT li_intent AS intent, COUNT(*) AS count
+      FROM targets WHERE li_intent IS NOT NULL AND li_intent != ''
+      GROUP BY li_intent ORDER BY count DESC
+    `).all() as { intent: string; count: number }[];
+
+    const pipeline = db.prepare(`
+      SELECT
+        SUM(CASE WHEN connection_requested_at IS NULL AND message_sent_at IS NULL THEN 1 ELSE 0 END) AS not_contacted,
+        SUM(CASE WHEN connection_requested_at IS NOT NULL AND (degree IS NULL OR degree != 1) AND message_sent_at IS NULL THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN degree = 1 AND message_sent_at IS NULL THEN 1 ELSE 0 END) AS connected_unmessaged,
+        SUM(CASE WHEN message_sent_at IS NOT NULL AND last_replied_at IS NULL THEN 1 ELSE 0 END) AS messaged_no_reply,
+        SUM(CASE WHEN last_replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied,
+        SUM(CASE WHEN inmail_sent_at IS NOT NULL THEN 1 ELSE 0 END) AS inmailed
+      FROM targets
+      WHERE id IN (SELECT DISTINCT target_id FROM list_targets)
+    `).get() as Record<string, number>;
+
+    const topCompanies = db.prepare(`
+      SELECT COALESCE(company, 'Unknown') AS company, COUNT(*) AS accepted
+      FROM targets
+      WHERE connected_at IS NOT NULL AND company IS NOT NULL AND company != ''
+      GROUP BY company ORDER BY accepted DESC LIMIT 10
+    `).all() as { company: string; accepted: number }[];
+
     return res.json({
       totals, rates, funnel, campaigns, campaignBars, daily, hourSeries, activity, optedOut, days,
+      intentBreakdown: intentRows, pipeline, topCompanies,
     });
   } catch (err) {
     console.error("[linkedin/history]", err);

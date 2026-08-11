@@ -60,7 +60,18 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       `).all() as { day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }[];
 
       const filled = fillDays(activity, days);
-      return res.json({ totals, today, activity: filled, lists, workflows });
+      
+    let crm = { open_todos: 0, overdue_todos: 0, due_today: 0, inbox_replies: 0 };
+    try {
+      crm = db.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM todos WHERE status = 'open') AS open_todos,
+          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) < date('now')) AS overdue_todos,
+          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) = date('now')) AS due_today,
+          (SELECT COUNT(*) FROM targets WHERE email_replied_at IS NOT NULL OR last_replied_at IS NOT NULL) AS inbox_replies
+      `).get() as typeof crm;
+    } catch { /* ok */ }
+    return res.json({ totals, today, activity: filled, lists, workflows, crm });
     }
 
     // ── Filtered by workflow or list: use logs as source of truth ─────────────
@@ -146,7 +157,18 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     `).all(runsArg) as { day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }[];
 
     const filled = fillDays(activity, days);
-    return res.json({ totals, today, activity: filled, lists, workflows });
+    
+    let crm = { open_todos: 0, overdue_todos: 0, due_today: 0, inbox_replies: 0 };
+    try {
+      crm = db.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM todos WHERE status = 'open') AS open_todos,
+          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) < date('now')) AS overdue_todos,
+          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) = date('now')) AS due_today,
+          (SELECT COUNT(*) FROM targets WHERE email_replied_at IS NOT NULL OR last_replied_at IS NOT NULL) AS inbox_replies
+      `).get() as typeof crm;
+    } catch { /* ok */ }
+    return res.json({ totals, today, activity: filled, lists, workflows, crm });
 
   } catch (err) {
     console.error(err);

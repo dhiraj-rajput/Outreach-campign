@@ -195,10 +195,29 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       count: byHour.find((r) => r.hour === h)?.count ?? 0,
     }));
 
+    let replyKinds: { kind: string; count: number }[] = [];
+    try {
+      replyKinds = db.prepare(`
+        SELECT COALESCE(json_extract(classification_json, '$.kind'), reply_kind, 'unknown') AS kind, COUNT(*) AS count
+        FROM email_replies GROUP BY kind ORDER BY count DESC
+      `).all() as { kind: string; count: number }[];
+    } catch { replyKinds = []; }
+
+    const pipeline = db.prepare(`
+      SELECT
+        SUM(CASE WHEN email IS NOT NULL AND email != '' THEN 1 ELSE 0 END) AS with_email,
+        SUM(CASE WHEN email_opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened,
+        SUM(CASE WHEN email_clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS clicked,
+        SUM(CASE WHEN email_replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied,
+        (SELECT COUNT(*) FROM suppressions) AS suppressed
+      FROM targets
+    `).get() as Record<string, number>;
+
     return res.json({
       totals, rates, funnel, campaigns, campaignBars, newsletterEditions,
       daily, hourSeries, campaignActivity, newsletterActivity,
       unsubscribed: listSuppressions(), days,
+      replyKinds, pipeline,
     });
   } catch (err) {
     console.error("[email/history]", err);

@@ -2,7 +2,7 @@ import Head from "next/head";
 import { useEffect, useState, useRef } from "react";
 import { FiUserPlus, FiMessageSquare, FiEye, FiRepeat, FiUsers, FiRefreshCw } from "react-icons/fi";
 import { RiMailSendLine, RiReplyLine, RiRobot2Line, RiLinkedinBoxLine, RiFilterLine } from "react-icons/ri";
-import { ActivityAreaChart, RateKpi } from "@/components/analytics/Charts";
+import { ActivityAreaChart, RateKpi, DailyBreakdownTable } from "@/components/analytics/Charts";
 
 interface DashboardStats {
   totals: {
@@ -27,6 +27,7 @@ interface DashboardStats {
   activity: { day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }[];
   lists: { id: string; name: string }[];
   workflows: { id: string; name: string }[];
+  crm?: { open_todos: number; overdue_todos: number; due_today: number; inbox_replies: number };
 }
 
 interface AgentStats {
@@ -204,6 +205,20 @@ function ActivityChart({
         </div>
       </div>
       <ActivityAreaChart data={data} series={SERIES} height={220} />
+      {/* Day-by-day breakdown — exact numbers + day-over-day deltas under the chart's shape */}
+      <div className="mt-5 pt-4 border-t border-base-300/30">
+        <p className="text-xs font-medium text-base-content/30 uppercase tracking-widest mb-2">Daily breakdown</p>
+        <DailyBreakdownTable
+          data={data}
+          columns={[
+            { key: "visits", label: "Visits", color: "#5aa2ff" },
+            { key: "connections", label: "Connects", color: "#32d583" },
+            { key: "messages", label: "Messages", color: "#f4b740" },
+            { key: "inmails", label: "InMails", color: "#c084fc" },
+            { key: "emails", label: "Emails", color: "#fb923c" },
+          ]}
+        />
+      </div>
     </div>
   );
 }
@@ -507,7 +522,28 @@ export default function Dashboard() {
       <div className="space-y-3">
         {/* LinkedIn */}
         <div>
-          <ChannelHeader
+                {stats?.crm && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <a href="/todos" className="bg-base-200 border border-base-300/50 rounded-xl p-3 hover:border-primary/40 transition-colors">
+            <div className="text-[11px] text-base-content/40 uppercase tracking-wide mb-1">Open todos</div>
+            <div className="text-xl font-semibold tabular-nums">{stats.crm.open_todos}</div>
+          </a>
+          <a href="/todos" className="bg-base-200 border border-base-300/50 rounded-xl p-3 hover:border-error/40 transition-colors">
+            <div className="text-[11px] text-base-content/40 uppercase tracking-wide mb-1">Overdue</div>
+            <div className="text-xl font-semibold tabular-nums text-error">{stats.crm.overdue_todos}</div>
+          </a>
+          <a href="/todos" className="bg-base-200 border border-base-300/50 rounded-xl p-3 hover:border-warning/40 transition-colors">
+            <div className="text-[11px] text-base-content/40 uppercase tracking-wide mb-1">Due today</div>
+            <div className="text-xl font-semibold tabular-nums text-warning">{stats.crm.due_today}</div>
+          </a>
+          <a href="/inbox" className="bg-base-200 border border-base-300/50 rounded-xl p-3 hover:border-info/40 transition-colors">
+            <div className="text-[11px] text-base-content/40 uppercase tracking-wide mb-1">Inbox replies</div>
+            <div className="text-xl font-semibold tabular-nums">{stats.crm.inbox_replies}</div>
+          </a>
+        </div>
+      )}
+
+<ChannelHeader
             icon={<RiLinkedinBoxLine size={11} />}
             label="LinkedIn"
             color="#5aa2ff"

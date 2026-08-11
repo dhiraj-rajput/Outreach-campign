@@ -170,8 +170,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
   if (search && typeof search === "string" && search.trim()) {
     const like = `%${search.trim()}%`;
-    extraClauses.push("(t.full_name LIKE ? OR t.company LIKE ? OR t.title LIKE ?)");
-    extraParams.push(like, like, like);
+    extraClauses.push(
+      "(t.full_name LIKE ? OR t.company LIKE ? OR t.title LIKE ? OR t.email LIKE ?)"
+    );
+    extraParams.push(like, like, like, like);
   }
 
   const filters = parseFilters(req.query);

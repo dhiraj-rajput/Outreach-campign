@@ -489,6 +489,8 @@ function runMigrations(db: Database.Database) {
     "ALTER TABLE targets ADD COLUMN li_intent_action TEXT",
     // Track last LinkedIn message WE sent per target — used as context for intent classification
     "ALTER TABLE targets ADD COLUMN li_last_message_sent TEXT",
+    // User profile fields for signup/auth
+    "ALTER TABLE users ADD COLUMN name TEXT",
     // Newsletter core tables
     `CREATE TABLE IF NOT EXISTS newsletters (
       id TEXT PRIMARY KEY,

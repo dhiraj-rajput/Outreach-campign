@@ -7,7 +7,7 @@ import {
   RiForbidLine, RiCheckboxCircleLine, RiCloseCircleLine, RiReplyLine, RiEyeLine, RiBarChart2Line,
 } from "react-icons/ri";
 import {
-  ActivityAreaChart, GroupedBarChart, RateBars, DonutChart, FunnelBars, HourBarChart, RateKpi,
+  ActivityAreaChart, GroupedBarChart, RateBars, DonutChart, FunnelBars, HourBarChart, RateKpi, DailyBreakdownTable,
 } from "@/components/analytics/Charts";
 
 interface Totals {
@@ -80,6 +80,9 @@ export default function LinkedInHistoryPage() {
   const [activity, setActivity] = useState<ActivityRow[]>([]);
   const [optedOut, setOptedOut] = useState<OptedOutRow[]>([]);
   const [tab, setTab] = useState<"activity" | "optedout">("activity");
+  const [intentBreakdown, setIntentBreakdown] = useState<{ intent: string; count: number }[]>([]);
+  const [pipeline, setPipeline] = useState<Record<string, number> | null>(null);
+  const [topCompanies, setTopCompanies] = useState<{ company: string; accepted: number }[]>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -90,6 +93,7 @@ export default function LinkedInHistoryPage() {
         setCampaigns(d.campaigns ?? []); setCampaignBars(d.campaignBars ?? []);
         setDaily(d.daily ?? []); setHourSeries(d.hourSeries ?? []);
         setActivity(d.activity ?? []); setOptedOut(d.optedOut ?? []);
+        setIntentBreakdown(d.intentBreakdown ?? []); setPipeline(d.pipeline ?? null); setTopCompanies(d.topCompanies ?? []);
       })
       .catch(() => toast.error("Failed to load LinkedIn history"))
       .finally(() => setLoading(false));
@@ -179,6 +183,19 @@ export default function LinkedInHistoryPage() {
             <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
               <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Activity over time ({days}d)</p>
               <ActivityAreaChart data={daily} series={SERIES} height={260} />
+              <div className="mt-5 pt-4 border-t border-base-300/30">
+                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Daily breakdown</p>
+                <DailyBreakdownTable
+                  data={daily}
+                  columns={[
+                    { key: "visits", label: "Visits", color: "#5aa2ff" },
+                    { key: "connections", label: "Connects", color: "#60a5fa" },
+                    { key: "accepts", label: "Accepted", color: "#32d583" },
+                    { key: "messages", label: "Messages", color: "#f4b740" },
+                    { key: "inmails", label: "InMails", color: "#e879f9" },
+                  ]}
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -295,6 +312,70 @@ export default function LinkedInHistoryPage() {
             </div>
           </>
         )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="bg-base-200 border border-base-300/50 rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-3">Outreach pipeline</h3>
+            {pipeline ? (
+              <ul className="space-y-2.5">
+                {[
+                  { k: "not_contacted", label: "Not contacted", c: "#94a3b8" },
+                  { k: "pending", label: "Pending accept", c: "#f4b740" },
+                  { k: "connected_unmessaged", label: "Connected · no message", c: "#5aa2ff" },
+                  { k: "messaged_no_reply", label: "Messaged · awaiting reply", c: "#a78bfa" },
+                  { k: "replied", label: "Replied", c: "#32d583" },
+                  { k: "inmailed", label: "InMailed", c: "#e879f9" },
+                ].map((row) => {
+                  const v = Number(pipeline[row.k] ?? 0);
+                  const max = Math.max(1, ...Object.values(pipeline).map(Number));
+                  const pct = Math.max(2, (v / max) * 100);
+                  return (
+                    <li key={row.k}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-base-content/55">{row.label}</span>
+                        <span className="tabular-nums font-medium">{v.toLocaleString()}</span>
+                      </div>
+                      <div className="h-1.5 bg-base-300/40 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: row.c }} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : <p className="text-sm text-base-content/40">No pipeline data yet</p>}
+          </div>
+          <div className="bg-base-200 border border-base-300/50 rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-3">Reply intents</h3>
+            {intentBreakdown.length === 0 ? (
+              <p className="text-sm text-base-content/40">Classify LinkedIn replies from the Inbox to populate this.</p>
+            ) : (
+              <ul className="space-y-2">
+                {intentBreakdown.map((row) => (
+                  <li key={row.intent} className="flex items-center justify-between text-sm">
+                    <span className="capitalize text-base-content/60">{row.intent.replace(/_/g, " ")}</span>
+                    <span className="tabular-nums font-medium">{row.count}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="bg-base-200 border border-base-300/50 rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-3">Top companies (accepted)</h3>
+            {topCompanies.length === 0 ? (
+              <p className="text-sm text-base-content/40">Acceptances will show here by company.</p>
+            ) : (
+              <ul className="space-y-2">
+                {topCompanies.map((row) => (
+                  <li key={row.company} className="flex items-center justify-between text-sm gap-2">
+                    <span className="truncate text-base-content/60">{row.company}</span>
+                    <span className="tabular-nums font-medium shrink-0">{row.accepted}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
       </div>
     </>
   );
