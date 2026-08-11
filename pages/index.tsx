@@ -2,6 +2,7 @@ import Head from "next/head";
 import { useEffect, useState, useRef } from "react";
 import { FiUserPlus, FiMessageSquare, FiEye, FiRepeat, FiUsers, FiRefreshCw } from "react-icons/fi";
 import { RiMailSendLine, RiReplyLine, RiRobot2Line, RiLinkedinBoxLine, RiFilterLine } from "react-icons/ri";
+import { ActivityAreaChart, RateKpi } from "@/components/analytics/Charts";
 
 interface DashboardStats {
   totals: {
@@ -160,61 +161,34 @@ function FunnelRow({
 // ── Activity chart ────────────────────────────────────────────────────────────
 
 const SERIES = [
-  { key: "visits" as const,      color: "#5aa2ff", label: "Visits" },
-  { key: "connections" as const, color: "#32d583", label: "Connects" },
-  { key: "messages" as const,    color: "#f4b740", label: "Messages" },
-  { key: "inmails" as const,     color: "#e879f9", label: "InMails" },
-  { key: "emails" as const,      color: "#fb923c", label: "Emails" },
+  { key: "visits", color: "#5aa2ff", label: "Visits" },
+  { key: "connections", color: "#32d583", label: "Connects" },
+  { key: "messages", color: "#f4b740", label: "Messages" },
+  { key: "inmails", color: "#e879f9", label: "InMails" },
+  { key: "emails", color: "#fb923c", label: "Emails" },
 ];
 
 const DAY_OPTIONS = [7, 14, 30, 90];
 
 function ActivityChart({
-  data, days, onDaysChange,
+  data,
+  days,
+  onDaysChange,
 }: {
   data: DashboardStats["activity"];
   days: number;
   onDaysChange: (d: number) => void;
 }) {
-  const [activeSeries, setActiveSeries] = useState<Set<string>>(new Set(SERIES.map(s => s.key)));
-  const maxVal = Math.max(
-    ...data.flatMap(d => SERIES.filter(s => activeSeries.has(s.key)).map(s => d[s.key])),
-    1
-  );
-  const labelEvery = days <= 7 ? 1 : days <= 14 ? 2 : days <= 30 ? 5 : 15;
-  const gridLines = [0.25, 0.5, 0.75, 1];
-
-  function toggleSeries(key: string) {
-    setActiveSeries(prev => {
-      const next = new Set(prev);
-      if (next.has(key) && next.size > 1) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
   return (
-    <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 flex flex-col" style={{ minHeight: 260 }} data-tour="dashboard-chart">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-4">
-          <span className="text-sm font-medium text-base-content">Activity</span>
-          <div className="flex items-center gap-2">
-            {SERIES.map(s => (
-              <button
-                key={s.key}
-                onClick={() => toggleSeries(s.key)}
-                className="flex items-center gap-1.5 text-xs transition-opacity"
-                style={{ opacity: activeSeries.has(s.key) ? 1 : 0.3 }}
-              >
-                <span className="w-2 h-2 rounded-sm inline-block" style={{ background: s.color }} />
-                <span style={{ color: activeSeries.has(s.key) ? s.color : undefined }} className="text-base-content/35">{s.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+    <div
+      className="bg-base-200 border border-base-300/50 rounded-xl p-5 flex flex-col"
+      style={{ minHeight: 280 }}
+      data-tour="dashboard-chart"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-medium text-base-content">Activity over time</span>
         <div className="flex items-center gap-0.5 bg-base-300/50 rounded-lg p-0.5">
-          {DAY_OPTIONS.map(d => (
+          {DAY_OPTIONS.map((d) => (
             <button
               key={d}
               onClick={() => onDaysChange(d)}
@@ -229,56 +203,7 @@ function ActivityChart({
           ))}
         </div>
       </div>
-
-      {/* Chart */}
-      <div className="relative flex-1" style={{ minHeight: 140 }}>
-        {gridLines.map(g => (
-          <div
-            key={g}
-            className="absolute left-0 right-0 border-t border-base-300/20"
-            style={{ bottom: `${g * 100}%` }}
-          />
-        ))}
-
-        <div className="absolute inset-0 flex items-end gap-0.5">
-          {data.map((d, i) => {
-            const showLabel = i % labelEvery === 0;
-            return (
-              <div key={d.day} className="flex flex-col items-center flex-1 group relative h-full justify-end">
-                {/* Tooltip */}
-                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-base-300 border border-base-300 rounded-lg px-3 py-2 text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-10 shadow-xl transition-opacity">
-                  <div className="text-base-content/40 mb-1.5 font-medium">{d.day}</div>
-                  {SERIES.filter(s => activeSeries.has(s.key)).map(s => (
-                    <div key={s.key} className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
-                      <span style={{ color: s.color }}>{d[s.key]} {s.label.toLowerCase()}</span>
-                    </div>
-                  ))}
-                </div>
-                {/* Bars */}
-                <div className="flex items-end gap-px w-full">
-                  {SERIES.filter(s => activeSeries.has(s.key)).map(s => (
-                    <div
-                      key={s.key}
-                      className="flex-1 rounded-t-sm transition-all duration-300"
-                      style={{
-                        height: `${Math.max(2, (d[s.key] / maxVal) * 120)}px`,
-                        background: s.color,
-                        opacity: d[s.key] === 0 ? 0.08 : 0.75,
-                      }}
-                    />
-                  ))}
-                </div>
-                {showLabel && (
-                  <span className="text-[9px] text-base-content/20 mt-1 leading-none shrink-0">
-                    {d.day.slice(5)}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <ActivityAreaChart data={data} series={SERIES} height={220} />
     </div>
   );
 }
@@ -659,6 +584,29 @@ export default function Dashboard() {
             />
           </div>
         </div>
+      </div>
+
+
+      {/* Rate strip */}
+      <div className="grid grid-cols-3 gap-3">
+        <RateKpi
+          label="Connection acceptance"
+          value={acceptanceRate}
+          color="#32d583"
+          sub={`${totals.connected} of ${totals.connections_requested} accepted`}
+        />
+        <RateKpi
+          label="LinkedIn reply rate"
+          value={replyRate}
+          color="#a78bfa"
+          sub={`${totals.replies_received} replies on ${totals.messages_sent} messages`}
+        />
+        <RateKpi
+          label="Email reply rate"
+          value={emailReplyRate}
+          color="#fb923c"
+          sub={`${totals.email_replies} replies on ${totals.emails_sent} emails`}
+        />
       </div>
 
       {/* ── Second row: funnel left, chart right ── */}
