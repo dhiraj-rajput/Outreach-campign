@@ -1,12 +1,29 @@
 import Head from "next/head";
 import Link from "next/link";
+import { useState } from "react";
 import { GetServerSideProps } from "next";
 import { getDb } from "@/lib/db";
+import { toast } from "sonner";
 import {
-  RiArrowLeftLine, RiExternalLinkLine, RiGlobalLine,
-  RiMapPinLine, RiBuildingLine, RiLinkedinBoxLine, RiUserLine,
-  RiMailLine, RiPhoneLine, RiMoneyDollarCircleLine, RiCalendarLine,
-  RiGroupLine, RiCodeBoxLine, RiPriceTagLine, RiErrorWarningLine,
+  RiArrowLeftLine,
+  RiExternalLinkLine,
+  RiGlobalLine,
+  RiMapPinLine,
+  RiBuildingLine,
+  RiLinkedinBoxLine,
+  RiUserLine,
+  RiMailLine,
+  RiPhoneLine,
+  RiMoneyDollarCircleLine,
+  RiCalendarLine,
+  RiGroupLine,
+  RiCodeBoxLine,
+  RiPriceTagLine,
+  RiErrorWarningLine,
+  RiNodeTree,
+  RiAddLine,
+  RiDeleteBinLine,
+  RiFolderLine,
 } from "react-icons/ri";
 
 interface Contact {
@@ -19,6 +36,28 @@ interface Contact {
   linkedin_url: string | null;
   degree: number | null;
   connected_at: string | null;
+}
+
+interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  url: string | null;
+  status: string | null;
+  created_at: string;
+}
+
+interface ChildCompany {
+  id: string;
+  name: string;
+  domain: string | null;
+  industry: string | null;
+}
+
+interface ParentCompany {
+  id: string;
+  name: string;
+  domain: string | null;
 }
 
 interface Company {
@@ -40,25 +79,63 @@ interface Company {
   keywords: string | null;
   notes: string | null;
   email_domain_invalid: number | null;
+  parent_company_id: string | null;
   created_at: string;
   contacts: Contact[];
+  projects: Project[];
+  children: ChildCompany[];
+  parent: ParentCompany | null;
 }
 
 export const getServerSideProps: GetServerSideProps = async ({ params }) => {
   const db = getDb();
   const id = params?.id as string;
-  const company = db.prepare(`
+  const company = db
+    .prepare(
+      `
     SELECT id, name, domain, industry, location, city, country, linkedin_url, website,
            description, employee_count, founded_year, annual_revenue, phone,
-           technology_names, keywords, notes, email_domain_invalid, created_at
+           technology_names, keywords, notes, email_domain_invalid, parent_company_id, created_at
     FROM companies WHERE id = ?
-  `).get(id) as Company | undefined;
+  `
+    )
+    .get(id) as Company | undefined;
   if (!company) return { notFound: true };
-  const contacts = db.prepare(`
+
+  const contacts = db
+    .prepare(
+      `
     SELECT id, full_name, title, email, email_status, seniority, linkedin_url, degree, connected_at
     FROM targets WHERE company_id = ? ORDER BY full_name COLLATE NOCASE
-  `).all(id) as Contact[];
-  return { props: { company: { ...company, contacts } } };
+  `
+    )
+    .all(id) as Contact[];
+
+  const projects = db
+    .prepare(
+      `SELECT id, name, description, url, status, created_at FROM projects WHERE company_id = ? ORDER BY name COLLATE NOCASE`
+    )
+    .all(id) as Project[];
+
+  const children = db
+    .prepare(
+      `SELECT id, name, domain, industry FROM companies WHERE parent_company_id = ? ORDER BY name COLLATE NOCASE`
+    )
+    .all(id) as ChildCompany[];
+
+  let parent: ParentCompany | null = null;
+  if (company.parent_company_id) {
+    parent =
+      (db
+        .prepare(`SELECT id, name, domain FROM companies WHERE id = ?`)
+        .get(company.parent_company_id) as ParentCompany | undefined) ?? null;
+  }
+
+  return {
+    props: {
+      company: { ...company, contacts, projects, children, parent },
+    },
+  };
 };
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -71,7 +148,53 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default function CompanyDetailPage({ company }: { company: Company }) {
+export default function CompanyDetailPage({ company: initial }: { company: Company }) {
+  const [company, setCompany] = useState(initial);
+  const [newProject, setNewProject] = useState({ name: "", description: "", url: "" });
+  const [addingProject, setAddingProject] = useState(false);
+
+  async function refresh() {
+    const res = await fetch(`/api/companies/${company.id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setCompany((prev) => ({ ...prev, ...data }));
+    }
+  }
+
+  async function addProject(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newProject.name.trim()) return;
+    setAddingProject(true);
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company_id: company.id,
+        name: newProject.name.trim(),
+        description: newProject.description.trim() || null,
+        url: newProject.url.trim() || null,
+      }),
+    });
+    setAddingProject(false);
+    if (!res.ok) {
+      toast.error((await res.json()).error ?? "Failed");
+      return;
+    }
+    toast.success("Project added");
+    setNewProject({ name: "", description: "", url: "" });
+    refresh();
+  }
+
+  async function deleteProject(id: string) {
+    if (!confirm("Delete this project?")) return;
+    await fetch(`/api/projects/${id}`, { method: "DELETE" });
+    toast.success("Project deleted");
+    setCompany((prev) => ({
+      ...prev,
+      projects: prev.projects.filter((p) => p.id !== id),
+    }));
+  }
+
   return (
     <>
       <Head>
@@ -79,15 +202,16 @@ export default function CompanyDetailPage({ company }: { company: Company }) {
         <meta name="robots" content="noindex, nofollow" />
       </Head>
       <div className="max-w-2xl">
-        {/* Back */}
         <div className="flex items-center gap-3 mb-6">
-          <Link href="/companies" className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-base-content/50 hover:text-base-content hover:bg-base-300/50 transition-colors">
+          <Link
+            href="/companies"
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-base-content/50 hover:text-base-content hover:bg-base-300/50 transition-colors"
+          >
             <RiArrowLeftLine size={16} />
           </Link>
           <span className="text-base-content/40 text-sm">Companies</span>
         </div>
 
-        {/* Header */}
         <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-3 flex-1">
@@ -96,8 +220,19 @@ export default function CompanyDetailPage({ company }: { company: Company }) {
               </div>
               <div>
                 <h1 className="text-xl font-semibold">{company.name}</h1>
+                {company.parent && (
+                  <p className="text-xs text-base-content/50 mt-1 flex items-center gap-1">
+                    <RiNodeTree size={12} />
+                    Child of{" "}
+                    <Link href={`/companies/${company.parent.id}`} className="text-primary hover:underline">
+                      {company.parent.name}
+                    </Link>
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                  {company.industry && <span className="text-sm text-base-content/50">{company.industry}</span>}
+                  {company.industry && (
+                    <span className="text-sm text-base-content/50">{company.industry}</span>
+                  )}
                   {company.location && (
                     <span className="text-sm text-base-content/40 flex items-center gap-1">
                       <RiMapPinLine size={12} /> {company.location}
@@ -106,20 +241,32 @@ export default function CompanyDetailPage({ company }: { company: Company }) {
                 </div>
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {company.domain && (
-                    <a href={`https://${company.domain}`} target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors">
+                    <a
+                      href={`https://${company.domain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors"
+                    >
                       <RiGlobalLine size={12} /> {company.domain}
                     </a>
                   )}
                   {company.linkedin_url && (
-                    <a href={company.linkedin_url} target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors">
+                    <a
+                      href={company.linkedin_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors"
+                    >
                       <RiLinkedinBoxLine size={12} /> LinkedIn
                     </a>
                   )}
                   {company.website && company.website !== `https://${company.domain}` && (
-                    <a href={company.website} target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors">
+                    <a
+                      href={company.website}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors"
+                    >
                       <RiExternalLinkLine size={12} /> Website
                     </a>
                   )}
@@ -132,25 +279,33 @@ export default function CompanyDetailPage({ company }: { company: Company }) {
           </div>
         </div>
 
-        {/* Email domain invalid warning */}
         {!!company.email_domain_invalid && (
           <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-warning/10 border border-warning/20 mb-4 text-sm text-warning">
             <RiErrorWarningLine size={16} className="shrink-0 mt-0.5" />
-            <span>Email domain flagged invalid — bounce detected for a contact at this company. All contacts have been unenrolled from email steps.</span>
+            <span>
+              Email domain flagged invalid — bounce detected for a contact at this company. All
+              contacts have been unenrolled from email steps.
+            </span>
           </div>
         )}
 
-        {/* Description */}
         {company.description && (
           <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
             <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">About</p>
-            <p className="text-sm text-base-content/70 leading-relaxed whitespace-pre-line">{company.description}</p>
+            <p className="text-sm text-base-content/70 leading-relaxed whitespace-pre-line">
+              {company.description}
+            </p>
           </div>
         )}
 
-        {/* Details grid */}
-        {(company.employee_count || company.founded_year || company.annual_revenue || company.phone ||
-          company.city || company.country || company.technology_names || company.keywords) && (
+        {(company.employee_count ||
+          company.founded_year ||
+          company.annual_revenue ||
+          company.phone ||
+          company.city ||
+          company.country ||
+          company.technology_names ||
+          company.keywords) && (
           <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
             <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Details</p>
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
@@ -186,57 +341,179 @@ export default function CompanyDetailPage({ company }: { company: Company }) {
               )}
             </div>
 
-            {company.technology_names && (() => {
-              try {
-                const tech: string[] = JSON.parse(company.technology_names!);
-                if (!tech.length) return null;
-                return (
-                  <div className="mt-4">
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <RiCodeBoxLine size={12} className="text-base-content/30" />
-                      <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Tech stack</p>
+            {company.technology_names &&
+              (() => {
+                try {
+                  const tech: string[] = JSON.parse(company.technology_names!);
+                  if (!tech.length) return null;
+                  return (
+                    <div className="mt-4">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <RiCodeBoxLine size={12} className="text-base-content/30" />
+                        <p className="text-[11px] text-base-content/40 uppercase tracking-wide">
+                          Tech stack
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {tech.map((t) => (
+                          <span
+                            key={t}
+                            className="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-base-300 text-base-content/50"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {tech.map(t => (
-                        <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-base-300 text-base-content/50">{t}</span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              } catch { return null; }
-            })()}
+                  );
+                } catch {
+                  return null;
+                }
+              })()}
 
-            {company.keywords && (() => {
-              try {
-                const kw: string[] = JSON.parse(company.keywords!);
-                if (!kw.length) return null;
-                return (
-                  <div className="mt-4">
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <RiPriceTagLine size={12} className="text-base-content/30" />
-                      <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Keywords</p>
+            {company.keywords &&
+              (() => {
+                try {
+                  const kw: string[] = JSON.parse(company.keywords!);
+                  if (!kw.length) return null;
+                  return (
+                    <div className="mt-4">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <RiPriceTagLine size={12} className="text-base-content/30" />
+                        <p className="text-[11px] text-base-content/40 uppercase tracking-wide">
+                          Keywords
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {kw.map((k) => (
+                          <span
+                            key={k}
+                            className="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-base-300 text-base-content/50"
+                          >
+                            {k}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {kw.map(k => (
-                        <span key={k} className="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-base-300 text-base-content/50">{k}</span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              } catch { return null; }
-            })()}
+                  );
+                } catch {
+                  return null;
+                }
+              })()}
           </div>
         )}
 
-        {/* Notes */}
+        {/* Projects */}
+        <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
+          <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">
+            Projects ({company.projects.length})
+          </p>
+          {company.projects.length === 0 ? (
+            <p className="text-sm text-base-content/30 mb-3">No projects yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2 mb-3">
+              {company.projects.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-start justify-between gap-2 py-2 px-2 rounded-md hover:bg-base-300/30"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <RiFolderLine size={14} className="text-base-content/40 shrink-0" />
+                      {p.name}
+                      {p.status && p.status !== "active" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-base-300 text-base-content/50">
+                          {p.status}
+                        </span>
+                      )}
+                    </div>
+                    {p.description && (
+                      <p className="text-xs text-base-content/50 mt-0.5 ml-5">{p.description}</p>
+                    )}
+                    {p.url && (
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline mt-0.5 ml-5 inline-block truncate max-w-full"
+                      >
+                        {p.url}
+                      </a>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs text-error shrink-0"
+                    onClick={() => deleteProject(p.id)}
+                  >
+                    <RiDeleteBinLine size={13} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form onSubmit={addProject} className="flex flex-col gap-2">
+            <input
+              className="input input-bordered input-sm w-full bg-base-300/50"
+              placeholder="Project name *"
+              value={newProject.name}
+              onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
+            />
+            <input
+              className="input input-bordered input-sm w-full bg-base-300/50"
+              placeholder="Description"
+              value={newProject.description}
+              onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
+            />
+            <input
+              className="input input-bordered input-sm w-full bg-base-300/50"
+              placeholder="URL (https://...)"
+              value={newProject.url}
+              onChange={(e) => setNewProject({ ...newProject, url: e.target.value })}
+            />
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm gap-1 self-end"
+              disabled={addingProject || !newProject.name.trim()}
+            >
+              <RiAddLine size={14} /> Add project
+            </button>
+          </form>
+        </div>
+
+        {/* Child companies */}
+        {company.children.length > 0 && (
+          <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
+            <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">
+              Child companies ({company.children.length})
+            </p>
+            <div className="flex flex-col divide-y divide-base-300/30">
+              {company.children.map((ch) => (
+                <Link
+                  key={ch.id}
+                  href={`/companies/${ch.id}`}
+                  className="flex items-center gap-2 py-2.5 first:pt-0 last:pb-0 hover:text-primary"
+                >
+                  <RiBuildingLine size={14} className="text-base-content/40" />
+                  <span className="text-sm font-medium">{ch.name}</span>
+                  {ch.domain && (
+                    <span className="text-xs text-base-content/40">{ch.domain}</span>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         {company.notes && (
           <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
             <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Notes</p>
-            <p className="text-sm text-base-content/70 leading-relaxed whitespace-pre-line">{company.notes}</p>
+            <p className="text-sm text-base-content/70 leading-relaxed whitespace-pre-line">
+              {company.notes}
+            </p>
           </div>
         )}
 
-        {/* Contacts */}
         <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
           <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">
             Contacts ({company.contacts.length})
@@ -246,35 +523,59 @@ export default function CompanyDetailPage({ company }: { company: Company }) {
           ) : (
             <div className="flex flex-col divide-y divide-base-300/30">
               {company.contacts.map((c) => (
-                <div key={c.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+                >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-7 h-7 rounded-full bg-base-300 flex items-center justify-center shrink-0">
                       <RiUserLine size={13} className="text-base-content/40" />
                     </div>
                     <div className="min-w-0">
-                      <Link href={`/contacts/${c.id}`} className="text-sm font-medium hover:text-primary transition-colors truncate block">
+                      <Link
+                        href={`/contacts/${c.id}`}
+                        className="text-sm font-medium hover:text-primary transition-colors truncate block"
+                      >
                         {c.full_name ?? "—"}
                       </Link>
                       <div className="flex items-center gap-2 mt-0.5">
-                        {c.title && <span className="text-xs text-base-content/40 truncate">{c.title}</span>}
+                        {c.title && (
+                          <span className="text-xs text-base-content/40 truncate">{c.title}</span>
+                        )}
                         {c.seniority && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-base-300 text-base-content/40 capitalize shrink-0">{c.seniority}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-base-300 text-base-content/40 capitalize shrink-0">
+                            {c.seniority}
+                          </span>
                         )}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {c.email && (
-                      <a href={`mailto:${c.email}`} title={c.email}
-                        className={c.email_status === "invalid" ? "text-error/60 hover:text-error transition-colors" : "text-success/60 hover:text-success transition-colors"}>
+                      <a
+                        href={`mailto:${c.email}`}
+                        title={c.email}
+                        className={
+                          c.email_status === "invalid"
+                            ? "text-error/60 hover:text-error transition-colors"
+                            : "text-success/60 hover:text-success transition-colors"
+                        }
+                      >
                         <RiMailLine size={14} />
                       </a>
                     )}
                     {c.degree === 1 && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success">1st</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success">
+                        1st
+                      </span>
                     )}
                     {c.linkedin_url && (
-                      <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-base-content/30 hover:text-base-content/60 transition-colors">
+                      <a
+                        href={c.linkedin_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-base-content/30 hover:text-base-content/60 transition-colors"
+                      >
                         <RiExternalLinkLine size={13} />
                       </a>
                     )}

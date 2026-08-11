@@ -36,7 +36,6 @@ const mainNav = [
   { href: "/email", label: "Email", icon: RiMailSendLine, color: "#38bdf8", tour: "nav-email" },
   { href: "/newsletters", label: "Newsletters", icon: RiNewspaperLine, color: "#e879f9", tour: "nav-newsletters" },
   { href: "/inbox", label: "Inbox", icon: RiInboxLine, color: "#38bdf8", tour: "nav-inbox" },
-  { href: "/email-health", label: "Email Health", icon: RiMailCheckLine, color: "#f4b740", tour: "nav-email-health" },
 ];
 
 // Nav items that only exist in the commercial build (ee/). Filtered out when premium absent.

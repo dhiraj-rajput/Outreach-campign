@@ -8,8 +8,9 @@ import {
   RiExternalLinkLine, RiArrowLeftSLine, RiArrowRightSLine,
   RiUserFollowLine, RiUserAddLine, RiUserLine,
   RiMessage2Line, RiReplyLine, RiMailCheckLine, RiAtLine, RiMailLine,
-  RiSearchLine, RiAddLine, RiListCheck2, RiDeleteBinLine,
+  RiSearchLine, RiAddLine, RiListCheck2, RiDeleteBinLine, RiUploadCloud2Line,
 } from "react-icons/ri";
+import CsvImportModal from "@/components/csv/CsvImportModal";
 import FilterBar, { ActiveFilter, filtersToParams } from "@/components/ui/FilterBar";
 
 const PAGE_SIZE = 50;
@@ -91,6 +92,7 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showAddToList, setShowAddToList] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [addToListId, setAddToListId] = useState("");
   const [addToListLoading, setAddToListLoading] = useState(false);
 
@@ -222,12 +224,21 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
               {hasActiveFilters ? " matching filters" : " total"}
             </p>
           </div>
-          <button
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
-            onClick={() => setShowNewContact(true)}
-          >
-            <RiAddLine size={15} /> New Contact
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-base-300 hover:bg-base-300/50 transition-colors"
+              onClick={() => setShowImport(true)}
+            >
+              <RiUploadCloud2Line size={15} /> Import CSV
+            </button>
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
+              onClick={() => setShowNewContact(true)}
+            >
+              <RiAddLine size={15} /> New Contact
+            </button>
+          </div>
         </div>
 
         {/* Filter row */}
@@ -580,6 +591,16 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
           <div className="modal-backdrop" onClick={() => !deleteLoading && setShowDeleteConfirm(false)} />
         </div>
       )}
+
+      <CsvImportModal
+        entity="contacts"
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onDone={() => {
+          setPage(0);
+          fetch_(0, listId, debouncedSearch, filters);
+        }}
+      />
     </>
   );
 }

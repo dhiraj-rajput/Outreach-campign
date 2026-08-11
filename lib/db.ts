@@ -584,7 +584,22 @@ function runMigrations(db: Database.Database) {
     "ALTER TABLE workflow_steps ADD COLUMN email_body_html TEXT",
     "ALTER TABLE workflow_steps ADD COLUMN email_use_html INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE integrations ADD COLUMN model TEXT",
-  ];
+  
+    // Parent / child companies + multi-project support
+    "ALTER TABLE companies ADD COLUMN parent_company_id TEXT",
+    `CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      url TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    "ALTER TABLE projects ADD COLUMN url TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)",
+    "CREATE INDEX IF NOT EXISTS idx_companies_parent ON companies(parent_company_id)",
+];
   for (const sql of migrations) {
     try { db.exec(sql); } catch { /* column already exists */ }
   }

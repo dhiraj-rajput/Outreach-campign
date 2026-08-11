@@ -4,7 +4,15 @@ import { GetServerSideProps } from "next";
 import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { toast } from "sonner";
-import { RiAddLine, RiDeleteBinLine, RiBuildingLine, RiGlobalLine } from "react-icons/ri";
+import {
+  RiAddLine,
+  RiDeleteBinLine,
+  RiBuildingLine,
+  RiGlobalLine,
+  RiUploadCloud2Line,
+  RiNodeTree,
+} from "react-icons/ri";
+import CsvImportModal from "@/components/csv/CsvImportModal";
 
 interface Company {
   id: string;
@@ -15,34 +23,71 @@ interface Company {
   linkedin_url: string | null;
   website: string | null;
   notes: string | null;
+  parent_company_id: string | null;
+  parent_name: string | null;
   contact_count: number;
+  project_count: number;
   created_at: string;
 }
 
-const BLANK_FORM = { name: "", domain: "", industry: "", location: "", linkedin_url: "", website: "", notes: "" };
+interface ProjectDraft {
+  key: string;
+  name: string;
+  description: string;
+  url: string;
+}
+
+const BLANK_FORM = {
+  name: "",
+  domain: "",
+  industry: "",
+  location: "",
+  linkedin_url: "",
+  website: "",
+  notes: "",
+  parent_company_id: "",
+};
+
+function emptyProject(): ProjectDraft {
+  return { key: `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: "", description: "", url: "" };
+}
 
 export const getServerSideProps: GetServerSideProps = async () => {
   const db = getDb();
-  const companies = db.prepare(`
-    SELECT c.*, COUNT(t.id) as contact_count
+  const companies = db
+    .prepare(
+      `
+    SELECT c.*,
+           COUNT(DISTINCT t.id) as contact_count,
+           COUNT(DISTINCT p.id) as project_count,
+           parent.name as parent_name
     FROM companies c
     LEFT JOIN targets t ON t.company_id = c.id
+    LEFT JOIN projects p ON p.company_id = c.id
+    LEFT JOIN companies parent ON parent.id = c.parent_company_id
     GROUP BY c.id
     ORDER BY c.name COLLATE NOCASE
-  `).all();
+  `
+    )
+    .all();
   return { props: { initialCompanies: companies } };
 };
 
-export default function CompaniesPage({ initialCompanies }: { initialCompanies: Company[] }) {
+export default function CompaniesPage({
+  initialCompanies,
+}: {
+  initialCompanies: Company[];
+}) {
   const [companies, setCompanies] = useState<Company[]>(initialCompanies);
   const [showModal, setShowModal] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(BLANK_FORM);
+  const [projectDrafts, setProjectDrafts] = useState<ProjectDraft[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
 
   async function refresh() {
-    // full=1 + no paging → full company rows as a single list (page does its own search/filter)
     const res = await fetch("/api/companies?full=1");
     const data = await res.json();
     setCompanies(data.companies ?? data);
@@ -51,6 +96,7 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
   function openCreate() {
     setEditId(null);
     setForm(BLANK_FORM);
+    setProjectDrafts([]);
     setShowModal(true);
   }
 
@@ -64,13 +110,22 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
       linkedin_url: c.linkedin_url ?? "",
       website: c.website ?? "",
       notes: c.notes ?? "",
+      parent_company_id: c.parent_company_id ?? "",
     });
+    setProjectDrafts([]);
     setShowModal(true);
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    const projects = projectDrafts
+      .filter((p) => p.name.trim())
+      .map((p) => ({
+        name: p.name.trim(),
+        description: p.description.trim() || null,
+        url: p.url.trim() || null,
+      }));
     const body = {
       name: form.name,
       domain: form.domain || null,
@@ -79,27 +134,52 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
       linkedin_url: form.linkedin_url || null,
       website: form.website || null,
       notes: form.notes || null,
+      parent_company_id: form.parent_company_id || null,
+      ...(editId ? {} : { projects }),
     };
     const res = editId
-      ? await fetch(`/api/companies/${editId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      : await fetch("/api/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      ? await fetch(`/api/companies/${editId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      : await fetch("/api/companies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
     setLoading(false);
-    if (!res.ok) { toast.error((await res.json()).error ?? "Failed"); return; }
+    if (!res.ok) {
+      toast.error((await res.json()).error ?? "Failed");
+      return;
+    }
     toast.success(editId ? "Company updated" : "Company created");
     setShowModal(false);
     refresh();
   }
 
   async function deleteCompany(id: string) {
-    if (!confirm("Delete this company? Contacts will be unlinked but not deleted.")) return;
+    if (
+      !confirm(
+        "Delete this company? Child companies will be unlinked, contacts unlinked, projects removed."
+      )
+    )
+      return;
     await fetch(`/api/companies/${id}`, { method: "DELETE" });
     toast.success("Deleted");
     setCompanies((prev) => prev.filter((c) => c.id !== id));
   }
 
-  const filtered = companies.filter((c) =>
-    !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.domain ?? "").toLowerCase().includes(search.toLowerCase())
+  const filtered = companies.filter(
+    (c) =>
+      !search ||
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      (c.domain ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (c.parent_name ?? "").toLowerCase().includes(search.toLowerCase())
   );
+
+  // Parent options exclude the company being edited
+  const parentOptions = companies.filter((c) => c.id !== editId);
 
   return (
     <>
@@ -111,14 +191,24 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold">Companies</h1>
-            <p className="text-base-content/50 text-sm mt-0.5">Organisations associated with your contacts</p>
+            <p className="text-base-content/50 text-sm mt-0.5">
+              Organisations, parent/child hierarchy, and projects
+            </p>
           </div>
-          <button
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
-            onClick={openCreate}
-          >
-            <RiAddLine size={15} /> Add Company
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-base-300 hover:bg-base-300/50 transition-colors"
+              onClick={() => setShowImport(true)}
+            >
+              <RiUploadCloud2Line size={15} /> Import CSV
+            </button>
+            <button
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
+              onClick={openCreate}
+            >
+              <RiAddLine size={15} /> Add Company
+            </button>
+          </div>
         </div>
 
         <div className="mb-4">
@@ -140,9 +230,10 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
               <thead>
                 <tr className="border-base-300/50 text-base-content/50 text-xs uppercase tracking-wide">
                   <th>Name</th>
+                  <th>Parent</th>
                   <th>Domain</th>
                   <th>Industry</th>
-                  <th>Location</th>
+                  <th>Projects</th>
                   <th>Contacts</th>
                   <th></th>
                 </tr>
@@ -155,20 +246,36 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
                         <span className="w-6 h-6 rounded-md bg-base-300 flex items-center justify-center shrink-0">
                           <RiBuildingLine size={12} className="text-base-content/40" />
                         </span>
-                        <Link href={`/companies/${c.id}`} className="font-medium hover:text-primary transition-colors cursor-pointer">
+                        <Link
+                          href={`/companies/${c.id}`}
+                          className="font-medium hover:text-primary transition-colors cursor-pointer"
+                        >
                           {c.name}
                         </Link>
                       </div>
+                    </td>
+                    <td className="text-base-content/50 text-xs">
+                      {c.parent_name ? (
+                        <span className="inline-flex items-center gap-1">
+                          <RiNodeTree size={11} /> {c.parent_name}
+                        </span>
+                      ) : (
+                        <span className="text-base-content/25">—</span>
+                      )}
                     </td>
                     <td className="text-base-content/50 text-xs">
                       {c.domain ? (
                         <span className="inline-flex items-center gap-1">
                           <RiGlobalLine size={11} /> {c.domain}
                         </span>
-                      ) : <span className="text-base-content/25">—</span>}
+                      ) : (
+                        <span className="text-base-content/25">—</span>
+                      )}
                     </td>
-                    <td className="text-base-content/60 text-xs">{c.industry ?? <span className="text-base-content/25">—</span>}</td>
-                    <td className="text-base-content/60 text-xs">{c.location ?? <span className="text-base-content/25">—</span>}</td>
+                    <td className="text-base-content/60 text-xs">
+                      {c.industry ?? <span className="text-base-content/25">—</span>}
+                    </td>
+                    <td className="text-base-content/60 text-xs">{c.project_count ?? 0}</td>
                     <td className="text-base-content/60 text-xs">{c.contact_count}</td>
                     <td>
                       <div className="flex justify-end gap-1">
@@ -195,45 +302,198 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
 
         {showModal && (
           <div className="modal modal-open">
-            <div className="modal-box bg-base-200 border border-base-300/50 max-w-md">
-              <h3 className="font-semibold text-base mb-4">{editId ? "Edit Company" : "Add Company"}</h3>
+            <div className="modal-box bg-base-200 border border-base-300/50 max-w-lg">
+              <h3 className="font-semibold text-base mb-4">
+                {editId ? "Edit Company" : "Add Company"}
+              </h3>
               <form onSubmit={submit} className="flex flex-col gap-3">
                 <div>
-                  <label className="label text-xs text-base-content/50 pb-1">Company name <span className="text-error">*</span></label>
-                  <input className="input input-bordered input-sm w-full bg-base-300/50" placeholder="Acme Inc." value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                  <label className="label text-xs text-base-content/50 pb-1">
+                    Company name <span className="text-error">*</span>
+                  </label>
+                  <input
+                    className="input input-bordered input-sm w-full bg-base-300/50"
+                    placeholder="Acme Inc."
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="label text-xs text-base-content/50 pb-1">Domain</label>
-                    <input className="input input-bordered input-sm w-full bg-base-300/50" placeholder="acme.com" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} />
+                    <input
+                      className="input input-bordered input-sm w-full bg-base-300/50"
+                      placeholder="acme.com"
+                      value={form.domain}
+                      onChange={(e) => setForm({ ...form, domain: e.target.value })}
+                    />
                   </div>
                   <div>
                     <label className="label text-xs text-base-content/50 pb-1">Industry</label>
-                    <input className="input input-bordered input-sm w-full bg-base-300/50" placeholder="SaaS" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} />
+                    <input
+                      className="input input-bordered input-sm w-full bg-base-300/50"
+                      placeholder="SaaS"
+                      value={form.industry}
+                      onChange={(e) => setForm({ ...form, industry: e.target.value })}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="label text-xs text-base-content/50 pb-1">Location</label>
-                    <input className="input input-bordered input-sm w-full bg-base-300/50" placeholder="Berlin, Germany" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+                    <input
+                      className="input input-bordered input-sm w-full bg-base-300/50"
+                      placeholder="Berlin, Germany"
+                      value={form.location}
+                      onChange={(e) => setForm({ ...form, location: e.target.value })}
+                    />
                   </div>
                   <div>
                     <label className="label text-xs text-base-content/50 pb-1">Website</label>
-                    <input className="input input-bordered input-sm w-full bg-base-300/50" placeholder="https://acme.com" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />
+                    <input
+                      className="input input-bordered input-sm w-full bg-base-300/50"
+                      placeholder="https://acme.com"
+                      value={form.website}
+                      onChange={(e) => setForm({ ...form, website: e.target.value })}
+                    />
                   </div>
                 </div>
                 <div>
                   <label className="label text-xs text-base-content/50 pb-1">LinkedIn URL</label>
-                  <input className="input input-bordered input-sm w-full bg-base-300/50" placeholder="https://linkedin.com/company/acme" value={form.linkedin_url} onChange={(e) => setForm({ ...form, linkedin_url: e.target.value })} />
+                  <input
+                    className="input input-bordered input-sm w-full bg-base-300/50"
+                    placeholder="https://linkedin.com/company/acme"
+                    value={form.linkedin_url}
+                    onChange={(e) => setForm({ ...form, linkedin_url: e.target.value })}
+                  />
                 </div>
                 <div>
+                  <label className="label text-xs text-base-content/50 pb-1">
+                    Parent company
+                  </label>
+                  <select
+                    className="select select-bordered select-sm w-full bg-base-300/50"
+                    value={form.parent_company_id}
+                    onChange={(e) =>
+                      setForm({ ...form, parent_company_id: e.target.value })
+                    }
+                  >
+                    <option value="">— None (top-level) —</option>
+                    {parentOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {!editId && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="label text-xs text-base-content/50 pb-0">
+                        Projects (optional)
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => setProjectDrafts((prev) => [...prev, emptyProject()])}
+                      >
+                        + Add project
+                      </button>
+                    </div>
+                    {projectDrafts.length === 0 ? (
+                      <p className="text-[11px] text-base-content/40">
+                        No projects yet. Click &quot;+ Add project&quot; to add name, description, and URL.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {projectDrafts.map((p, idx) => (
+                          <div
+                            key={p.key}
+                            className="rounded-lg border border-base-300/50 bg-base-300/20 p-2 space-y-1.5"
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                className="input input-bordered input-xs flex-1 bg-base-300/50"
+                                placeholder="Project name *"
+                                value={p.name}
+                                onChange={(e) =>
+                                  setProjectDrafts((prev) =>
+                                    prev.map((x) =>
+                                      x.key === p.key ? { ...x, name: e.target.value } : x
+                                    )
+                                  )
+                                }
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-xs text-error"
+                                onClick={() =>
+                                  setProjectDrafts((prev) => prev.filter((x) => x.key !== p.key))
+                                }
+                              >
+                                <RiDeleteBinLine size={13} />
+                              </button>
+                            </div>
+                            <input
+                              className="input input-bordered input-xs w-full bg-base-300/50"
+                              placeholder="Description"
+                              value={p.description}
+                              onChange={(e) =>
+                                setProjectDrafts((prev) =>
+                                  prev.map((x) =>
+                                    x.key === p.key ? { ...x, description: e.target.value } : x
+                                  )
+                                )
+                              }
+                            />
+                            <input
+                              className="input input-bordered input-xs w-full bg-base-300/50"
+                              placeholder="URL (https://...)"
+                              value={p.url}
+                              onChange={(e) =>
+                                setProjectDrafts((prev) =>
+                                  prev.map((x) =>
+                                    x.key === p.key ? { ...x, url: e.target.value } : x
+                                  )
+                                )
+                              }
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div>
                   <label className="label text-xs text-base-content/50 pb-1">Notes</label>
-                  <textarea className="textarea textarea-bordered w-full bg-base-300/50 text-sm h-20 resize-none" placeholder="Any notes..." value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                  <textarea
+                    className="textarea textarea-bordered w-full bg-base-300/50 text-sm h-20 resize-none"
+                    placeholder="Any notes..."
+                    value={form.notes}
+                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  />
                 </div>
                 <div className="modal-action mt-1">
-                  <button type="button" className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors" onClick={() => setShowModal(false)}>Cancel</button>
-                  <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50" disabled={loading}>
-                    {loading ? <span className="loading loading-spinner loading-xs" /> : (editId ? "Save Changes" : "Add Company")}
+                  <button
+                    type="button"
+                    className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors"
+                    onClick={() => setShowModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <span className="loading loading-spinner loading-xs" />
+                    ) : editId ? (
+                      "Save Changes"
+                    ) : (
+                      "Add Company"
+                    )}
                   </button>
                 </div>
               </form>
@@ -241,6 +501,13 @@ export default function CompaniesPage({ initialCompanies }: { initialCompanies: 
             <div className="modal-backdrop" onClick={() => setShowModal(false)} />
           </div>
         )}
+
+        <CsvImportModal
+          entity="companies"
+          open={showImport}
+          onClose={() => setShowImport(false)}
+          onDone={() => refresh()}
+        />
       </div>
     </>
   );
