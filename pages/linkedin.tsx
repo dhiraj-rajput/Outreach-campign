@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   RiLinkedinBoxLine, RiUserAddLine, RiUserFollowLine, RiMessage2Line,
   RiForbidLine, RiCheckboxCircleLine, RiCloseCircleLine, RiReplyLine, RiEyeLine, RiBarChart2Line,
+  RiSearchLine, RiLoader4Line, RiExternalLinkLine, RiAddLine,
 } from "react-icons/ri";
 import {
   ActivityAreaChart, GroupedBarChart, RateBars, DonutChart, FunnelBars, HourBarChart, RateKpi, DailyBreakdownTable,
@@ -39,6 +40,18 @@ interface OptedOutRow {
   id: string; full_name: string | null; company: string | null;
   email: string | null; li_intent: string; li_intent_at: string | null;
 }
+
+interface PeopleHit {
+  linkedinUrl: string;
+  vanityName: string | null;
+  fullName: string | null;
+  headline: string | null;
+  location: string | null;
+  degree: number | null;
+  profileImageUrl: string | null;
+}
+interface AccountOpt { id: string; name: string; email: string; is_authenticated: number }
+interface ListOpt { id: string; name: string }
 
 function fmt(s: string | null | undefined) {
   if (!s) return "—";
@@ -84,6 +97,20 @@ export default function LinkedInHistoryPage() {
   const [pipeline, setPipeline] = useState<Record<string, number> | null>(null);
   const [topCompanies, setTopCompanies] = useState<{ company: string; accepted: number }[]>([]);
 
+  // ── People search (keyword → LinkedIn people results → list) ──────────────
+  const [searchQ, setSearchQ] = useState("");
+  const [searchPage, setSearchPage] = useState(1);
+  const [searching, setSearching] = useState(false);
+  const [searchHits, setSearchHits] = useState<PeopleHit[]>([]);
+  const [searchTotal, setSearchTotal] = useState<number | null>(null);
+  const [searchMeta, setSearchMeta] = useState<{ source?: string; warnings?: string[]; searchUrl?: string; durationMs?: number } | null>(null);
+  const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
+  const [accounts, setAccounts] = useState<AccountOpt[]>([]);
+  const [accountId, setAccountId] = useState<string>("");
+  const [lists, setLists] = useState<ListOpt[]>([]);
+  const [listId, setListId] = useState<string>("");
+  const [importing, setImporting] = useState(false);
+
   useEffect(() => {
     setLoading(true);
     fetch(`/api/linkedin/history?days=${days}`)
@@ -98,6 +125,115 @@ export default function LinkedInHistoryPage() {
       .catch(() => toast.error("Failed to load LinkedIn history"))
       .finally(() => setLoading(false));
   }, [days]);
+
+  useEffect(() => {
+    fetch("/api/accounts")
+      .then((r) => r.ok ? r.json() : [])
+      .then((rows: AccountOpt[]) => {
+        const authed = (rows || []).filter((a) => a.is_authenticated);
+        setAccounts(authed.length ? authed : rows || []);
+        if (!accountId && (authed[0] || rows?.[0])) setAccountId((authed[0] || rows[0]).id);
+      })
+      .catch(() => {});
+    fetch("/api/lists")
+      .then((r) => r.ok ? r.json() : [])
+      .then((rows: ListOpt[] | { lists: ListOpt[] }) => {
+        const list = Array.isArray(rows) ? rows : (rows as { lists: ListOpt[] }).lists || [];
+        setLists(list);
+        if (!listId && list[0]) setListId(list[0].id);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function runPeopleSearch(page = 1) {
+    const q = searchQ.trim();
+    if (q.length < 2) { toast.error("Enter at least 2 characters"); return; }
+    if (!accountId) { toast.error("Select an authenticated LinkedIn account"); return; }
+    setSearching(true);
+    setSearchPage(page);
+    setSelectedUrls(new Set());
+    try {
+      const res = await fetch("/api/linkedin/people-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords: q, account_id: accountId, page, limit: 25 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Search failed");
+      setSearchHits(data.hits || []);
+      setSearchTotal(data.totalEstimated ?? null);
+      setSearchMeta({
+        source: data.source,
+        warnings: data.warnings,
+        searchUrl: data.searchUrl,
+        durationMs: data.durationMs,
+      });
+      if ((data.hits || []).length === 0) toast.message("No people found for that query");
+      else toast.success(`Found ${data.hits.length} people`);
+      (data.warnings || []).forEach((w: string) => toast.message(w));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Search failed");
+      setSearchHits([]);
+      setSearchMeta(null);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function toggleUrl(url: string) {
+    setSelectedUrls((prev) => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url); else next.add(url);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selectedUrls.size === searchHits.length) setSelectedUrls(new Set());
+    else setSelectedUrls(new Set(searchHits.map((h) => h.linkedinUrl)));
+  }
+
+  async function importSelected() {
+    if (!listId) { toast.error("Select a list"); return; }
+    if (selectedUrls.size === 0) { toast.error("Select at least one person"); return; }
+    setImporting(true);
+    try {
+      const people = searchHits.filter((h) => selectedUrls.has(h.linkedinUrl));
+      const res = await fetch("/api/linkedin/import-people", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          list_id: listId,
+          people: people.map((h) => ({
+            linkedinUrl: h.linkedinUrl,
+            fullName: h.fullName,
+            headline: h.headline,
+            location: h.location,
+            degree: h.degree,
+            profileImageUrl: h.profileImageUrl,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Import failed");
+      toast.success(
+        [
+          data.created ? `${data.created} new` : null,
+          data.updated ? `${data.updated} existing` : null,
+          data.linked ? `${data.linked} added to list` : null,
+          data.already_on_list ? `${data.already_on_list} already on list` : null,
+          data.deduped_in_batch ? `${data.deduped_in_batch} dupes in selection skipped` : null,
+        ].filter(Boolean).join(" · ") || "Done"
+      );
+      setSelectedUrls(new Set());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  }
+
 
   const compositionData = totals
     ? [
@@ -138,6 +274,148 @@ export default function LinkedInHistoryPage() {
             ))}
           </div>
         </div>
+
+        {/* ── LinkedIn people search ───────────────────────────────────────── */}
+        <div className="bg-base-200 border border-base-300/50 rounded-xl p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-base-content flex items-center gap-2">
+                <RiSearchLine className="text-base-content/40" /> Find people
+              </h2>
+              <p className="text-xs text-base-content/40 mt-0.5">
+                Search LinkedIn people results with your connected account (same session as campaigns). Keep volume low.
+              </p>
+            </div>
+            {accounts.length > 0 && (
+              <select
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className="select select-sm bg-base-300 border-base-300/50 max-w-[220px]"
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}{a.is_authenticated ? "" : " (not auth)"}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <form
+            onSubmit={(e) => { e.preventDefault(); runPeopleSearch(1); }}
+            className="flex flex-col sm:flex-row gap-2"
+          >
+            <div className="relative flex-1">
+              <RiSearchLine size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/30" />
+              <input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                placeholder='Try "ceo in dubai" or "head of sales fintech"'
+                className="input input-sm w-full pl-9 bg-base-300 border-base-300/50 focus:outline-none focus:border-primary/40"
+                disabled={searching}
+              />
+            </div>
+            <button type="submit" disabled={searching || !accountId} className="btn btn-sm btn-primary gap-1.5 min-w-[7rem]">
+              {searching ? <><RiLoader4Line className="animate-spin" size={14} /> Searching…</> : <><RiSearchLine size={14} /> Search</>}
+            </button>
+          </form>
+
+          {(searchHits.length > 0 || searchMeta) && (
+            <div className="space-y-2 pt-1">
+              <div className="flex flex-wrap items-center gap-2 justify-between">
+                <div className="text-xs text-base-content/45">
+                  {searchTotal != null ? `~${searchTotal.toLocaleString()} results · ` : ""}
+                  {searchHits.length} on page {searchPage}
+                  {searchMeta?.source ? ` · via ${searchMeta.source}` : ""}
+                  {searchMeta?.durationMs != null ? ` · ${(searchMeta.durationMs / 1000).toFixed(1)}s` : ""}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="btn btn-xs btn-ghost" disabled={searchPage <= 1 || searching}
+                    onClick={() => runPeopleSearch(searchPage - 1)}>Prev</button>
+                  <button type="button" className="btn btn-xs btn-ghost" disabled={searching || searchHits.length === 0}
+                    onClick={() => runPeopleSearch(searchPage + 1)}>Next</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={toggleAll}>
+                    {selectedUrls.size === searchHits.length && searchHits.length > 0 ? "Clear selection" : "Select page"}
+                  </button>
+                  <select
+                    value={listId}
+                    onChange={(e) => setListId(e.target.value)}
+                    className="select select-xs bg-base-300 border-base-300/50 max-w-[160px]"
+                  >
+                    <option value="">Choose list…</option>
+                    {lists.map((l) => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={importing || selectedUrls.size === 0 || !listId}
+                    onClick={importSelected}
+                    className="btn btn-xs btn-primary gap-1"
+                  >
+                    {importing ? <RiLoader4Line className="animate-spin" size={12} /> : <RiAddLine size={12} />}
+                    Add {selectedUrls.size || ""} to list
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-base-300/40 rounded-xl overflow-hidden max-h-[28rem] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-base-200 z-10">
+                    <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
+                      <th className="px-3 py-2 w-8"></th>
+                      <th className="px-3 py-2">Person</th>
+                      <th className="px-3 py-2">Headline</th>
+                      <th className="px-3 py-2">Location</th>
+                      <th className="px-3 py-2 w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchHits.map((h) => (
+                      <tr key={h.linkedinUrl} className="border-t border-base-300/40 hover:bg-base-300/20">
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            className="checkbox checkbox-xs"
+                            checked={selectedUrls.has(h.linkedinUrl)}
+                            onChange={() => toggleUrl(h.linkedinUrl)}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="font-medium text-base-content">{h.fullName || "—"}</div>
+                          {h.degree != null && (
+                            <span className="text-[10px] text-base-content/40">{h.degree}°</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-base-content/60 max-w-[14rem] truncate">{h.headline || "—"}</td>
+                        <td className="px-3 py-2 text-base-content/50 whitespace-nowrap">{h.location || "—"}</td>
+                        <td className="px-3 py-2">
+                          <a href={h.linkedinUrl} target="_blank" rel="noreferrer" className="text-base-content/40 hover:text-primary">
+                            <RiExternalLinkLine size={14} />
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                    {searchHits.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-8 text-center text-base-content/40 text-sm">
+                          No people on this page
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {searchMeta?.searchUrl && (
+                <p className="text-[11px] text-base-content/30 truncate">
+                  Source: {searchMeta.searchUrl}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+
 
         {loading || !totals ? (
           <div className="flex items-center justify-center py-24"><span className="loading loading-spinner loading-sm text-base-content/40" /></div>
