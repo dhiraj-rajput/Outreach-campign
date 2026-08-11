@@ -321,19 +321,17 @@ export default function LinkedInHistoryPage() {
           </form>
 
           {(searchHits.length > 0 || searchMeta) && (
-            <div className="space-y-2 pt-1">
+            <div className="space-y-3 pt-1">
               <div className="flex flex-wrap items-center gap-2 justify-between">
                 <div className="text-xs text-base-content/45">
-                  {searchTotal != null ? `~${searchTotal.toLocaleString()} results · ` : ""}
-                  {searchHits.length} on page {searchPage}
-                  {searchMeta?.source ? ` · via ${searchMeta.source}` : ""}
-                  {searchMeta?.durationMs != null ? ` · ${(searchMeta.durationMs / 1000).toFixed(1)}s` : ""}
+                  {searchTotal != null ? (
+                    <>About {searchTotal.toLocaleString()} results</>
+                  ) : (
+                    <>{searchHits.length} result{searchHits.length === 1 ? "" : "s"} on this page</>
+                  )}
+                  <span className="text-base-content/30"> · page {searchPage}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" className="btn btn-xs btn-ghost" disabled={searchPage <= 1 || searching}
-                    onClick={() => runPeopleSearch(searchPage - 1)}>Prev</button>
-                  <button type="button" className="btn btn-xs btn-ghost" disabled={searching || searchHits.length === 0}
-                    onClick={() => runPeopleSearch(searchPage + 1)}>Next</button>
                   <button type="button" className="btn btn-xs btn-ghost" onClick={toggleAll}>
                     {selectedUrls.size === searchHits.length && searchHits.length > 0 ? "Clear selection" : "Select page"}
                   </button>
@@ -359,9 +357,9 @@ export default function LinkedInHistoryPage() {
                 </div>
               </div>
 
-              <div className="border border-base-300/40 rounded-xl overflow-hidden max-h-[28rem] overflow-y-auto">
+              <div className="border border-base-300/40 rounded-xl overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-base-200 z-10">
+                  <thead className="bg-base-200/80">
                     <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
                       <th className="px-3 py-2 w-8"></th>
                       <th className="px-3 py-2">Person</th>
@@ -406,11 +404,80 @@ export default function LinkedInHistoryPage() {
                   </tbody>
                 </table>
               </div>
-              {searchMeta?.searchUrl && (
-                <p className="text-[11px] text-base-content/30 truncate">
-                  Source: {searchMeta.searchUrl}
-                </p>
-              )}
+
+              {/* LinkedIn-style page controls */}
+              <div className="flex items-center justify-center gap-1 pt-1 pb-0.5">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost px-3"
+                  disabled={searchPage <= 1 || searching}
+                  onClick={() => runPeopleSearch(searchPage - 1)}
+                >
+                  Previous
+                </button>
+                {(() => {
+                  const PAGE_SIZE = 10;
+                  const estimatedPages = searchTotal != null
+                    ? Math.max(1, Math.min(100, Math.ceil(searchTotal / PAGE_SIZE)))
+                    : null;
+                  // Window of page numbers around current (LinkedIn-like)
+                  const hasNext = searchHits.length >= 8 || (estimatedPages != null && searchPage < estimatedPages);
+                  const maxKnown = estimatedPages ?? (hasNext ? searchPage + 2 : searchPage);
+                  const windowStart = Math.max(1, searchPage - 2);
+                  const windowEnd = Math.min(maxKnown, Math.max(searchPage + 2, windowStart + 4));
+                  const pages: number[] = [];
+                  for (let i = windowStart; i <= windowEnd; i++) pages.push(i);
+                  return (
+                    <>
+                      {windowStart > 1 && (
+                        <>
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${searchPage === 1 ? "btn-primary" : "btn-ghost"} min-w-9`}
+                            disabled={searching}
+                            onClick={() => runPeopleSearch(1)}
+                          >
+                            1
+                          </button>
+                          {windowStart > 2 && <span className="px-1 text-base-content/30">…</span>}
+                        </>
+                      )}
+                      {pages.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={`btn btn-sm min-w-9 ${searchPage === n ? "btn-primary" : "btn-ghost"}`}
+                          disabled={searching}
+                          onClick={() => { if (n !== searchPage) runPeopleSearch(n); }}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                      {estimatedPages != null && windowEnd < estimatedPages && (
+                        <>
+                          {windowEnd < estimatedPages - 1 && <span className="px-1 text-base-content/30">…</span>}
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${searchPage === estimatedPages ? "btn-primary" : "btn-ghost"} min-w-9`}
+                            disabled={searching}
+                            onClick={() => runPeopleSearch(estimatedPages)}
+                          >
+                            {estimatedPages}
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost px-3"
+                        disabled={searching || !hasNext}
+                        onClick={() => runPeopleSearch(searchPage + 1)}
+                      >
+                        Next
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           )}
         </div>

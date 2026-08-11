@@ -12,12 +12,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(429).json({ error: "Too many attempts. Try again later." });
   }
 
-  const { email, password, inviteCode, name } = req.body as {
-    email?: string; password?: string; inviteCode?: string; name?: string;
+  const { email, password, passwordConfirm, inviteCode, name } = req.body as {
+    email?: string; password?: string; passwordConfirm?: string; inviteCode?: string; name?: string;
   };
 
   if (!email || !password || !inviteCode) {
     return res.status(400).json({ error: "Email, password, and invite code are required." });
+  }
+
+  if (typeof passwordConfirm !== "string" || !passwordConfirm) {
+    return res.status(400).json({ error: "Please confirm your password." });
+  }
+  if (password !== passwordConfirm) {
+    return res.status(400).json({ error: "Passwords do not match." });
   }
 
   const emailCheck = validateEmail(email);

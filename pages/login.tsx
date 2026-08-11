@@ -37,12 +37,13 @@ export default function LoginPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function switchMode(next: Mode) { setMode(next); setError(""); }
+  function switchMode(next: Mode) { setMode(next); setError(""); setConfirmPassword(""); }
 
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
@@ -66,12 +67,20 @@ export default function LoginPage() {
     const normalizedEmail = email.trim().toLowerCase();
     const pw = validatePassword(password, normalizedEmail);
     if (!pw.ok) { setLoading(false); setError(pw.errors[0] ?? "Password is too weak."); return; }
+    if (!confirmPassword) { setLoading(false); setError("Please confirm your password."); return; }
+    if (password !== confirmPassword) { setLoading(false); setError("Passwords do not match."); return; }
     if (!inviteCode.trim()) { setLoading(false); setError("Invite code is required."); return; }
 
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: normalizedEmail, password, inviteCode: inviteCode.trim(), name: nameCheck.value }),
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password,
+        passwordConfirm: confirmPassword,
+        inviteCode: inviteCode.trim(),
+        name: nameCheck.value,
+      }),
     });
     const data = await res.json();
     if (!res.ok) { setLoading(false); setError(data.error ?? "Something went wrong."); return; }
@@ -148,6 +157,36 @@ export default function LoginPage() {
                 </button>
               </div>
               {mode === "signup" && <PasswordStrengthBar password={password} email={email} />}
+
+            {mode === "signup" && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-base-content/50 font-medium uppercase tracking-wider">
+                  Confirm password
+                </label>
+                <div className="relative">
+                  <RiLockPasswordLine
+                    size={15}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/30"
+                  />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    className="input input-sm w-full pl-8 bg-base-300 border-base-300/50 focus:outline-none focus:border-primary/50"
+                    placeholder="Re-enter password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+                {confirmPassword.length > 0 && password !== confirmPassword && (
+                  <p className="text-[11px] text-error/90">Passwords do not match.</p>
+                )}
+                {confirmPassword.length > 0 && password === confirmPassword && (
+                  <p className="text-[11px] text-success/80">Passwords match.</p>
+                )}
+              </div>
+            )}
+
             </div>
 
             {mode === "signup" && (

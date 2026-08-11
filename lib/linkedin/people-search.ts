@@ -48,9 +48,8 @@ export interface PeopleSearchOptions {
   settleMs?: number;
 }
 
-const LOG = (msg: string, extra?: Record<string, unknown>) => {
-  if (extra) console.log(`[people-search] ${msg}`, extra);
-  else console.log(`[people-search] ${msg}`);
+const LOG = (msg: string) => {
+  console.log(`[people-search] ${msg}`);
 };
 
 function encodeKeywords(keywords: string): string {
@@ -278,7 +277,7 @@ export async function searchPeople(
   }
 
   const searchUrl = buildPeopleSearchUrl(trimmed, pageNum);
-  LOG("start", { accountId, keywords: trimmed, page: pageNum, searchUrl });
+  LOG(`start account=${accountId} keywords="${trimmed}" page=${pageNum}`);
 
   const page = await getSessionPage(accountId);
   const networkHits = new Map<string, PeopleSearchHit>();
@@ -290,11 +289,16 @@ export async function searchPeople(
       if (response.status() !== 200) return;
       if (!url.includes("linkedin.com")) return;
       // Voyager search / graphql people clusters
+      // Ignore chrome/nav GraphQL (feeds noise like voyagerFeedDashGlobalNavs)
+      if (url.includes("voyagerFeedDash") || url.includes("GlobalNavs") || url.includes("voyagerIdentityDash")) {
+        return;
+      }
       const interesting =
-        url.includes("/voyager/api/graphql") ||
-        url.includes("/voyager/api/search") ||
         url.includes("voyagerSearchDashClusters") ||
-        url.includes("searchDashClusters");
+        url.includes("searchDashClusters") ||
+        url.includes("/voyager/api/search") ||
+        (url.includes("/voyager/api/graphql") &&
+          (url.includes("Search") || url.includes("search") || url.includes("Cluster")));
       if (!interesting) return;
 
       const ct = (response.headers()["content-type"] || "").toLowerCase();
@@ -306,10 +310,7 @@ export async function searchPeople(
       extractHitsFromJson(json, networkHits);
       if (networkHits.size > before) {
         networkHitsCount = networkHits.size;
-        LOG("network payload absorbed", {
-          url: url.slice(0, 120),
-          newTotal: networkHits.size,
-        });
+        LOG(`network hit absorbed total=${networkHits.size}`);
       }
     } catch {
       /* ignore non-json */
@@ -320,12 +321,12 @@ export async function searchPeople(
 
   try {
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-    LOG("navigated", { url: page.url() });
+    LOG(`navigated ${page.url()}`);
 
     // Auth wall / challenge detection
     const current = page.url();
     if (/\/login|\/authwall|\/checkpoint|\/uas\/|\/challenge/i.test(current)) {
-      LOG("auth wall detected", { url: current });
+      LOG(`auth wall detected ${current}`);
       try {
         await markNeedsReauth(accountId);
       } catch {
@@ -347,7 +348,7 @@ export async function searchPeople(
 
     const totalEstimated = await readEstimatedTotal(page);
     const domHits = await extractHitsFromDom(page);
-    LOG("dom extract", { count: domHits.length, totalEstimated });
+    LOG(`dom extract count=${domHits.length} totalEstimated=${totalEstimated ?? "n/a"}`);
 
     // Merge network + DOM (DOM often has cleaner headline/location)
     const merged = new Map<string, PeopleSearchHit>();
@@ -383,15 +384,10 @@ export async function searchPeople(
       );
       // Capture a short diagnostic
       const title = await page.title().catch(() => "");
-      LOG("zero results", { title, url: page.url(), networkHits: networkHitsCount });
+      LOG(`zero results title="${title}" url=${page.url()} networkHits=${networkHitsCount}`);
     }
 
-    LOG("done", {
-      hits: hits.length,
-      source,
-      totalEstimated,
-      durationMs: Date.now() - started,
-    });
+    LOG(`done hits=${hits.length} source=${source} totalEstimated=${totalEstimated ?? "n/a"} durationMs=${Date.now() - started}`);
 
     return {
       keywords: trimmed,
@@ -417,7 +413,7 @@ export async function searchPeople(
       /* ignore */
     }
     if (/\/login|\/authwall|\/checkpoint|\/uas\//.test(url)) {
-      LOG("ending on wall — flag reauth", { url });
+      LOG(`ending on wall — flag reauth ${url}`);
       try {
         await markNeedsReauth(accountId);
       } catch {
@@ -427,7 +423,7 @@ export async function searchPeople(
       try {
         await saveSessionState(accountId);
       } catch (e) {
-        LOG("saveSessionState failed", { err: String(e) });
+        LOG(`saveSessionState failed ${String(e)}`);
       }
     }
   }
