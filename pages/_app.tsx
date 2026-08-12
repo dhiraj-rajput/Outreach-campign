@@ -1,3 +1,4 @@
+import Head from "next/head";
 import "@/styles/globals.css";
 import type { AppProps } from "next/app";
 import { SessionProvider, useSession } from "next-auth/react";
@@ -5,7 +6,7 @@ import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import Layout from "@/components/layout/Layout";
 import { Toaster } from "sonner";
-import { getStoredTheme, resolveTheme } from "@/lib/theme";
+import { getStoredTheme } from "@/lib/theme";
 
 const PUBLIC_PATHS = ["/login"];
 
@@ -35,7 +36,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 function ThemedToaster() {
   const [theme, setThemeState] = useState<"light" | "dark">("dark");
   useEffect(() => {
-    setThemeState(resolveTheme(getStoredTheme()));
+    setThemeState(getStoredTheme());
     const obs = new MutationObserver(() => {
       const t = document.documentElement.getAttribute("data-theme");
       setThemeState(t === "linki-light" ? "light" : "dark");
@@ -49,6 +50,9 @@ function ThemedToaster() {
 export default function App({ Component, pageProps: { session, ...pageProps } }: AppProps) {
   return (
     <SessionProvider session={session}>
+      <Head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      </Head>
       <AuthGuard>
         <Layout>
           <Component {...pageProps} />

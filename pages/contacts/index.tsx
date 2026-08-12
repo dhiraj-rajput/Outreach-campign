@@ -12,6 +12,7 @@ import {
 } from "react-icons/ri";
 import CsvImportModal from "@/components/csv/CsvImportModal";
 import FilterBar, { ActiveFilter, filtersToParams } from "@/components/ui/FilterBar";
+import PageHeader from "@/components/ui/PageHeader";
 
 const PAGE_SIZE = 50;
 
@@ -215,31 +216,20 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
         <meta name="robots" content="noindex, nofollow" />
       </Head>
       <div>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h1 className="text-xl font-semibold">Contacts</h1>
-            <p className="text-base-content/50 text-sm mt-0.5">
-              {total.toLocaleString()} contact{total !== 1 ? "s" : ""}
-              {hasActiveFilters ? " matching filters" : " total"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-base-300 hover:bg-base-300/50 transition-colors"
-              onClick={() => setShowImport(true)}
-            >
-              <RiUploadCloud2Line size={15} /> Import CSV
-            </button>
-            <button
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
-              onClick={() => setShowNewContact(true)}
-            >
-              <RiAddLine size={15} /> New Contact
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          title="Contacts"
+          subtitle={`${total.toLocaleString()} contact${total !== 1 ? "s" : ""}${hasActiveFilters ? " matching filters" : " total"}`}
+          actions={
+            <div className="flex items-center gap-2">
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>
+                <RiUploadCloud2Line size={15} /> Import CSV
+              </button>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowNewContact(true)}>
+                <RiAddLine size={15} /> New Contact
+              </button>
+            </div>
+          }
+        />
 
         {/* Filter row */}
         <div className="flex items-center gap-3 mb-5 flex-wrap" data-tour="contacts-filters">

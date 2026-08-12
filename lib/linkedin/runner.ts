@@ -1177,6 +1177,119 @@ trace back to the fields given below.`,
   }
 }
 
+// ─── scheduled LinkedIn posts ────────────────────────────────────────────────
+
+async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void> {
+  const now = new Date().toISOString();
+  // Due posts: scheduled_at <= now, or scheduled with null scheduled_at treated as immediate
+  const due = db.prepare(`
+    SELECT * FROM linkedin_posts
+    WHERE status = 'scheduled'
+      AND (scheduled_at IS NULL OR scheduled_at <= ?)
+    ORDER BY COALESCE(scheduled_at, created_at) ASC
+    LIMIT 5
+  `).all(now) as Array<{
+    id: string;
+    account_id: string;
+    content: string | null;
+    visibility: string;
+    comment_control: string;
+    brand_partnership: number;
+    post_type: string;
+    media_json: string | null;
+    poll_json: string | null;
+    scheduled_at: string | null;
+  }>;
+
+  if (due.length === 0) return;
+
+  console.log(`[runner] ${due.length} scheduled post(s) due`);
+
+  for (const post of due) {
+    // Claim
+    const claimed = db.prepare(`
+      UPDATE linkedin_posts SET status = 'posting', updated_at = ? WHERE id = ? AND status = 'scheduled'
+    `).run(now, post.id);
+    if (claimed.changes === 0) continue;
+
+    const account = db.prepare(
+      "SELECT id, is_authenticated, active_hours_start, active_hours_end, timezone, working_days FROM accounts WHERE id = ?"
+    ).get(post.account_id) as
+      | { id: string; is_authenticated: number; active_hours_start: number; active_hours_end: number; timezone: string; working_days: string }
+      | undefined;
+
+    if (!account || !account.is_authenticated) {
+      db.prepare(
+        "UPDATE linkedin_posts SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?"
+      ).run("LinkedIn account not authenticated", new Date().toISOString(), post.id);
+      continue;
+    }
+
+    // Respect active hours for the account
+    const scheduleCfg: ScheduleConfig = {
+      active_hours_start: account.active_hours_start ?? 9,
+      active_hours_end: account.active_hours_end ?? 18,
+      timezone: account.timezone || "UTC",
+      working_days: account.working_days || "1,2,3,4,5",
+    };
+    if (!isWithinSchedule(scheduleCfg)) {
+      const next = nextScheduledSlot(scheduleCfg);
+      db.prepare(
+        "UPDATE linkedin_posts SET status = 'scheduled', scheduled_at = ?, updated_at = ? WHERE id = ?"
+      ).run(next, new Date().toISOString(), post.id);
+      console.log(`[runner] Post ${post.id} outside active hours — rescheduled to ${next}`);
+      continue;
+    }
+
+    try {
+      const page = await getSessionPage(post.account_id);
+      const media = post.media_json ? JSON.parse(post.media_json) : [];
+      const poll = post.poll_json ? JSON.parse(post.poll_json) : null;
+
+      const { createLinkedInPost } = await import("@/lib/linkedin/post");
+      const result = await createLinkedInPost(page, {
+        content: post.content || "",
+        visibility: (post.visibility as "anyone" | "connections") || "anyone",
+        commentControl: post.comment_control as "anyone" | "connections" | "none",
+        brandPartnership: !!post.brand_partnership,
+        media: Array.isArray(media) ? media : [],
+        poll: poll || undefined,
+        scheduleAt: null, // already due — post now
+        forceImmediate: true,
+      });
+
+      await saveSessionState(post.account_id).catch(() => {});
+
+      if (result.success) {
+        db.prepare(`
+          UPDATE linkedin_posts
+          SET status = 'posted', posted_at = ?, linkedin_post_urn = ?, error_message = NULL, updated_at = ?
+          WHERE id = ?
+        `).run(new Date().toISOString(), result.postUrn || null, new Date().toISOString(), post.id);
+        console.log(`[runner] Posted ${post.id} successfully`);
+      } else {
+        db.prepare(`
+          UPDATE linkedin_posts
+          SET status = 'failed', error_message = ?, updated_at = ?
+          WHERE id = ?
+        `).run(result.error || "Unknown post error", new Date().toISOString(), post.id);
+        console.warn(`[runner] Post ${post.id} failed: ${result.error}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      db.prepare(`
+        UPDATE linkedin_posts
+        SET status = 'failed', error_message = ?, updated_at = ?
+        WHERE id = ?
+      `).run(msg, new Date().toISOString(), post.id);
+      console.error(`[runner] Post ${post.id} exception:`, msg);
+    }
+
+    // Small gap between posts on same account
+    await sleep(5000 + Math.random() * 5000);
+  }
+}
+
 // ─── global loop ─────────────────────────────────────────────────────────────
 
 const g = global as typeof global & { __linkiGlobalRunnerStarted?: boolean };
@@ -1202,6 +1315,11 @@ async function globalLoop(): Promise<void> {
       await processScheduledImports(db);
     } catch (err) {
       console.error("[runner] Import scheduler error:", err instanceof Error ? err.message : err);
+    }
+    try {
+      await processScheduledPosts(db);
+    } catch (err) {
+      console.error("[runner] Scheduled posts error:", err instanceof Error ? err.message : err);
     }
     await sleep(POLL_INTERVAL_MS);
   }

@@ -1,12 +1,14 @@
 import Head from "next/head";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   RiLinkedinBoxLine, RiUserAddLine, RiUserFollowLine, RiMessage2Line,
   RiForbidLine, RiCheckboxCircleLine, RiCloseCircleLine, RiReplyLine, RiEyeLine, RiBarChart2Line,
-  RiSearchLine, RiLoader4Line, RiExternalLinkLine, RiAddLine,
+  RiSearchLine, RiLoader4Line, RiExternalLinkLine, RiAddLine, RiEditBoxLine, RiTimeLine,
+  RiDeleteBinLine, RiEarthLine, RiGroupLine, RiDraftLine, RiRefreshLine,
 } from "react-icons/ri";
+import PostComposer from "@/components/linkedin/PostComposer";
 import {
   ActivityAreaChart, GroupedBarChart, RateBars, DonutChart, FunnelBars, HourBarChart, RateKpi, DailyBreakdownTable,
 } from "@/components/analytics/Charts";
@@ -58,7 +60,7 @@ function fmt(s: string | null | undefined) {
   return new Date(s).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function Kpi({ label, value, icon, color, sub }: { label: string; value: number; icon: React.ReactNode; color: string; sub?: string }) {
+function Kpi({ label, value, icon, color, sub }: { label: string; value: number; icon: ReactNode; color: string; sub?: string }) {
   return (
     <div className="bg-base-200 border border-base-300/50 rounded-xl p-4 flex items-center gap-3">
       <span className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${color}1a`, color }}>{icon}</span>
@@ -110,6 +112,30 @@ export default function LinkedInHistoryPage() {
   const [lists, setLists] = useState<ListOpt[]>([]);
   const [listId, setListId] = useState<string>("");
   const [importing, setImporting] = useState(false);
+
+  // ── Scheduled / drafted posts ─────────────────────────────────────────────
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [posts, setPosts] = useState<Array<{
+    id: string; account_id: string; account_name?: string; content: string | null;
+    visibility: string; post_type: string; status: string; scheduled_at: string | null;
+    posted_at: string | null; error_message: string | null; created_at: string;
+    media?: unknown[]; poll?: { question: string } | null;
+  }>>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [postFilter, setPostFilter] = useState("");
+
+  const loadPosts = () => {
+    setPostsLoading(true);
+    const qs = postFilter ? `?status=${encodeURIComponent(postFilter)}` : "";
+    fetch(`/api/linkedin/posts${qs}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPosts(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setPostsLoading(false));
+  };
+
+
+  useEffect(() => { loadPosts(); }, [postFilter]);
 
   useEffect(() => {
     setLoading(true);
@@ -260,7 +286,7 @@ export default function LinkedInHistoryPage() {
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-base-content flex items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight text-base-content flex items-center gap-2">
               <RiLinkedinBoxLine className="text-base-content/40" /> LinkedIn Analytics
             </h1>
             <p className="text-sm text-base-content/40 mt-0.5">Funnel, acceptance rates, activity trends, and campaign performance.</p>
@@ -272,6 +298,138 @@ export default function LinkedInHistoryPage() {
                 {d}d
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* ── Create & schedule posts ──────────────────────────────────────── */}
+        <div className="bg-base-200 border border-base-300/50 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-base-300/40">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-base-content flex items-center gap-2">
+                <RiEditBoxLine className="text-base-content/40" /> Posts
+              </h2>
+              <p className="text-xs text-base-content/40 mt-0.5 truncate">
+                Compose and schedule on your connected account
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button type="button" className="btn btn-ghost btn-xs btn-square" onClick={loadPosts} title="Refresh">
+                <RiRefreshLine />
+              </button>
+              <button type="button" className="btn btn-primary btn-sm gap-1 rounded-full px-3" onClick={() => setComposerOpen(true)}>
+                <RiAddLine /> Create post
+              </button>
+            </div>
+          </div>
+          <div className="px-4 pt-2.5 flex flex-wrap gap-1">
+            {["", "scheduled", "posted", "draft", "failed"].map((s) => (
+              <button
+                key={s || "all"}
+                type="button"
+                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                  postFilter === s
+                    ? "bg-primary text-primary-content"
+                    : "bg-base-300/40 text-base-content/50 hover:text-base-content/80"
+                }`}
+                onClick={() => setPostFilter(s)}
+              >
+                {s ? s.charAt(0).toUpperCase() + s.slice(1) : "All"}
+              </button>
+            ))}
+          </div>
+          <div className="p-3">
+            {postsLoading ? (
+              <div className="flex justify-center py-8">
+                <RiLoader4Line className="animate-spin text-xl text-base-content/35" />
+              </div>
+            ) : posts.length === 0 ? (
+              <div className="text-center py-8 px-4">
+                <p className="text-sm text-base-content/45 mb-3">No posts yet</p>
+                <button type="button" className="btn btn-ghost btn-sm gap-1 text-primary" onClick={() => setComposerOpen(true)}>
+                  <RiAddLine /> Create your first post
+                </button>
+              </div>
+            ) : (
+              <ul className="space-y-2 max-h-72 overflow-y-auto pr-0.5">
+                {posts.slice(0, 30).map((p) => (
+                  <li
+                    key={p.id}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-base-300/35 bg-base-100/40 hover:bg-base-100/70 px-3 py-2.5 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                        <span
+                          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${
+                            p.status === "posted"
+                              ? "bg-success/15 text-success"
+                              : p.status === "scheduled" || p.status === "posting"
+                                ? "bg-info/15 text-info"
+                                : p.status === "failed"
+                                  ? "bg-error/15 text-error"
+                                  : "bg-base-300/50 text-base-content/50"
+                          }`}
+                        >
+                          {p.status}
+                        </span>
+                        <span className="text-[10px] text-base-content/40 flex items-center gap-0.5">
+                          {p.visibility === "anyone" ? <RiEarthLine /> : <RiGroupLine />}
+                          {p.visibility === "anyone" ? "Anyone" : "Connections"}
+                        </span>
+                        {p.account_name && (
+                          <span className="text-[10px] text-base-content/35 truncate">{p.account_name}</span>
+                        )}
+                      </div>
+                      <p className="text-[13px] leading-snug line-clamp-2 text-base-content/80">
+                        {p.content || (p.poll ? `Poll: ${p.poll.question}` : "—")}
+                      </p>
+                      <p className="text-[10px] text-base-content/35 mt-1">
+                        {p.scheduled_at ? `Scheduled ${fmt(p.scheduled_at)}` : ""}
+                        {p.posted_at ? `${p.scheduled_at ? " · " : ""}Posted ${fmt(p.posted_at)}` : ""}
+                        {p.error_message ? ` · ${p.error_message}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex gap-1 shrink-0 pt-0.5">
+                      {p.status === "scheduled" && (
+                        <button
+                          type="button"
+                          className="text-[11px] text-base-content/45 hover:text-base-content px-1.5 py-0.5 rounded hover:bg-base-300/50"
+                          onClick={async () => {
+                            if (!confirm("Cancel this scheduled post?")) return;
+                            const r = await fetch(`/api/linkedin/posts/${p.id}`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ status: "cancelled" }),
+                            });
+                            if (r.ok) {
+                              toast.success("Cancelled");
+                              loadPosts();
+                            } else toast.error("Failed to cancel");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {["draft", "cancelled", "failed"].includes(p.status) && (
+                        <button
+                          type="button"
+                          className="text-base-content/35 hover:text-error p-1 rounded hover:bg-error/10"
+                          onClick={async () => {
+                            if (!confirm("Delete this post?")) return;
+                            const r = await fetch(`/api/linkedin/posts/${p.id}`, { method: "DELETE" });
+                            if (r.ok || r.status === 204) {
+                              toast.success("Deleted");
+                              loadPosts();
+                            } else toast.error("Failed to delete");
+                          }}
+                        >
+                          <RiDeleteBinLine />
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
 
@@ -722,6 +880,14 @@ export default function LinkedInHistoryPage() {
         </div>
 
       </div>
+
+      <PostComposer
+        open={composerOpen}
+        onClose={() => setComposerOpen(false)}
+        accounts={accounts}
+        defaultAccountId={accountId || undefined}
+        onCreated={loadPosts}
+      />
     </>
   );
 }

@@ -7,15 +7,20 @@ export default function Document() {
         <link rel="icon" type="image/x-icon" href="/logo_linki.ico" />
         <link rel="icon" type="image/png" href="/logo_linki.png" />
         <link rel="apple-touch-icon" href="/logo_linki.png" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <meta name="color-scheme" content="dark light" />
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function(){
                 try {
-                  var p = localStorage.getItem('linki-theme') || 'system';
-                  var dark = p === 'dark' || (p === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                  var p = localStorage.getItem('linki-theme');
+                  var dark;
+                  if (p === 'dark' || p === 'light') {
+                    dark = p === 'dark';
+                  } else {
+                    // No stored preference yet (or a legacy 'system' value) — resolve once, don't track the OS.
+                    dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  }
                   document.documentElement.setAttribute('data-theme', dark ? 'linki-dark' : 'linki-light');
                   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
                 } catch(e){}

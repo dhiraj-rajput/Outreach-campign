@@ -200,7 +200,7 @@ export default function EmailPage() {
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-base-content flex items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight text-base-content flex items-center gap-2">
               <RiMailSendLine className="text-base-content/40" /> Email Analytics
             </h1>
             <p className="text-sm text-base-content/40 mt-0.5">Campaign &amp; newsletter performance, rates, funnel, and account health.</p>

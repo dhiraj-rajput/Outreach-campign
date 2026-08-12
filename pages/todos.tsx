@@ -110,7 +110,7 @@ export default function TodosPage() {
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-base-content flex items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight text-base-content flex items-center gap-2">
               <RiCheckboxCircleLine className="text-base-content/40" /> CRM Pipeline · Todos
             </h1>
             <p className="text-sm text-base-content/40 mt-0.5">Follow-ups, call tasks, and action items across your contacts.</p>

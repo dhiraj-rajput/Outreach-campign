@@ -491,7 +491,7 @@ export default function InboxPage() {
       <div className="flex items-center gap-3 mb-5">
         <div className="flex-1">
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-semibold">Inbox</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Inbox</h1>
             {!loading && filtered.length > 0 && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-success/15 text-success">
                 {filtered.length} repl{filtered.length !== 1 ? "ies" : "y"}

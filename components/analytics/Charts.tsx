@@ -343,7 +343,7 @@ export function DailyBreakdownTable({
           {rows.map((row, idx) => {
             const isToday = idx === 0;
             return (
-              <tr key={row.day} className={`border-b border-base-300/20 hover:bg-base-300/20 transition-colors ${isToday ? "bg-primary/[0.03]" : ""}`}>
+              <tr key={row.day} className={`border-b border-base-300/20 hover:bg-base-300/20 transition-colors ${isToday ? "bg-primary/3" : ""}`}>
                 <td className="py-1.5 pr-3 whitespace-nowrap font-medium text-base-content/70 sticky left-0 bg-base-200">
                   {fmtDay(row.day)}
                   {isToday && <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-primary/15 text-primary uppercase tracking-wide">Today</span>}

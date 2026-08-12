@@ -5,6 +5,7 @@ import { useRouter } from "next/router";
 import { getDb } from "@/lib/db";
 import { toast } from "sonner";
 import { RiAddLine, RiDeleteBinLine, RiCloseLine, RiCalendarLine } from "react-icons/ri";
+import PageHeader from "@/components/ui/PageHeader";
 
 interface List {
   id: string;
@@ -134,15 +135,15 @@ export default function ListsPage({ initialLists }: { initialLists: List[] }) {
       <meta name="robots" content="noindex, nofollow" />
     </Head>
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold">Lists</h1>
-          <p className="text-base-content/50 text-sm mt-0.5">Lead lists imported from Sales Navigator</p>
-        </div>
-        <button data-tour="lists-new" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors" onClick={() => setShowModal(true)}>
-          <RiAddLine size={15} /> New List
-        </button>
-      </div>
+      <PageHeader
+        title="Lists"
+        subtitle="Lead lists imported from Sales Navigator"
+        actions={
+          <button data-tour="lists-new" type="button" className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>
+            <RiAddLine size={15} /> New List
+          </button>
+        }
+      />
 
       {/* Import jobs panel */}
       {activeJobs.length > 0 && (

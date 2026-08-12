@@ -603,6 +603,29 @@ function runMigrations(db: Database.Database) {
     "ALTER TABLE projects ADD COLUMN url TEXT",
     "CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)",
     "CREATE INDEX IF NOT EXISTS idx_companies_parent ON companies(parent_company_id)",
+
+    // Scheduled / drafted LinkedIn posts (composer + runner)
+    `CREATE TABLE IF NOT EXISTS linkedin_posts (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      content TEXT,
+      visibility TEXT DEFAULT 'anyone' CHECK(visibility IN ('anyone', 'connections')),
+      comment_control TEXT DEFAULT 'anyone',
+      brand_partnership INTEGER DEFAULT 0,
+      post_type TEXT DEFAULT 'text' CHECK(post_type IN ('text', 'poll', 'event', 'hiring', 'celebrate', 'document', 'expert')),
+      media_json TEXT,
+      poll_json TEXT,
+      event_json TEXT,
+      document_json TEXT,
+      scheduled_at TEXT,
+      status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'scheduled', 'posting', 'posted', 'failed', 'cancelled')),
+      linkedin_post_urn TEXT,
+      error_message TEXT,
+      posted_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_linkedin_posts_status_scheduled ON linkedin_posts(status, scheduled_at)",
 ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch { /* column already exists */ }
@@ -1001,5 +1024,29 @@ function initDb(db: Database.Database) {
       inbox_synced_at TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS linkedin_posts (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      content TEXT,
+      visibility TEXT DEFAULT 'anyone' CHECK(visibility IN ('anyone', 'connections')),
+      comment_control TEXT DEFAULT 'anyone',
+      brand_partnership INTEGER DEFAULT 0,
+      post_type TEXT DEFAULT 'text' CHECK(post_type IN ('text', 'poll', 'event', 'hiring', 'celebrate', 'document', 'expert')),
+      media_json TEXT,
+      poll_json TEXT,
+      event_json TEXT,
+      document_json TEXT,
+      scheduled_at TEXT,
+      status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'scheduled', 'posting', 'posted', 'failed', 'cancelled')),
+      linkedin_post_urn TEXT,
+      error_message TEXT,
+      posted_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_linkedin_posts_status_scheduled
+      ON linkedin_posts(status, scheduled_at);
   `);
 }

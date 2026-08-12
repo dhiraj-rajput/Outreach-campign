@@ -29,6 +29,7 @@ import {
   RiInboxUnarchiveLine,
   RiArrowDownSLine,
 } from "react-icons/ri";
+import PageHeader from "@/components/ui/PageHeader";
 
 interface WorkflowCard {
   id: string;
@@ -214,23 +215,20 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
       <meta name="robots" content="noindex, nofollow" />
     </Head>
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold">Campaigns</h1>
-          <p className="text-base-content/50 text-sm mt-0.5">Your outreach sequences</p>
-        </div>
-        <button
-          data-tour="workflows-new"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
-          onClick={() => setShowModal(true)}
-        >
-          <RiAddLine size={15} /> New Campaign
-        </button>
-      </div>
+      <PageHeader
+        title="Campaigns"
+        subtitle="Your outreach sequences"
+        actions={
+          <button data-tour="workflows-new" type="button" className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>
+            <RiAddLine size={15} /> New Campaign
+          </button>
+        }
+      />
 
       {workflows.length === 0 ? (
-        <div className="text-center py-20 border border-dashed border-base-300/60 rounded-xl text-base-content/30 text-sm">
-          No campaigns yet. Create one to start your outreach.
+        <div className="empty-state surface">
+          <h3>No campaigns yet</h3>
+          <p>Create one to start your outreach sequences.</p>
         </div>
       ) : (
         <>

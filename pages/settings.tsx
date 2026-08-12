@@ -182,7 +182,7 @@ export default function SettingsPage({
       <div className="max-w-3xl">
         {/* Page header */}
         <div className="mb-6">
-          <h1 className="text-xl font-semibold">Settings</h1>
+          <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
           <p className="text-base-content/50 text-sm mt-0.5">Accounts, integrations, and preferences</p>
         </div>
 

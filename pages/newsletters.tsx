@@ -353,7 +353,7 @@ export default function NewslettersPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
+          <h1 className="text-lg font-semibold tracking-tight flex items-center gap-2">
             <RiNewspaperLine className="text-secondary" /> Newsletters Dashboard
           </h1>
           <p className="text-base-content/40 text-sm mt-0.5">

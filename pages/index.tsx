@@ -90,27 +90,23 @@ function KpiCard({
   pulse?: boolean;
 }) {
   return (
-    <div className="relative surface p-3.5 sm:p-4 overflow-hidden group transition-colors">
-      <div
-        className="absolute top-0 right-0 w-14 h-14 rounded-bl-3xl opacity-[0.07] group-hover:opacity-[0.12] transition-opacity"
-        style={{ background: color }}
-      />
-      <div className="flex items-start justify-between mb-2.5">
+    <div className="kpi-card">
+      <div className="flex items-start justify-between">
         <span
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-xs shrink-0"
-          style={{ background: `${color}18`, color }}
+          className="w-7 h-7 rounded-md flex items-center justify-center text-xs shrink-0"
+          style={{ background: `${color}14`, color }}
         >
           {icon}
         </span>
         {pulse && (
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: color }} />
+          <span className="w-1.5 h-1.5 rounded-full animate-pulse mt-1" style={{ background: color }} />
         )}
       </div>
-      <div className="tabular-nums font-semibold text-xl sm:text-2xl text-base-content leading-none mb-1">
+      <div className="kpi-value">
         <Counter value={value} />
       </div>
-      <div className="text-xs text-base-content/45">{label}</div>
-      {sub && <div className="text-xs mt-1 font-medium" style={{ color }}>{sub}</div>}
+      <div className="kpi-label">{label}</div>
+      {sub && <div className="kpi-sub font-medium" style={{ color }}>{sub}</div>}
     </div>
   );
 }
