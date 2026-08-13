@@ -397,8 +397,15 @@ a:focus:not(:focus-visible) {
   .filter-divider { display: block; width: 1px; height: 1rem; background: color-mix(in srgb, var(--color-base-content) 12%, transparent); }
 }
 
-/* Modal responsive */
+/* Modal responsive — box must stack ABOVE backdrop or inputs/buttons become unclickable */
+.modal.modal-open {
+  z-index: 100;
+  pointer-events: auto;
+}
 .modal-box {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
   max-height: 90dvh;
   overflow-y: auto;
   width: min(92vw, 520px);
@@ -417,17 +424,18 @@ a:focus:not(:focus-visible) {
 .modal-box-xl {
   width: min(96vw, 960px);
 }
+/* Backdrop is only the dim layer — never sit above .modal-box */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
-  background: rgba(0,0,0,0.5);
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(3px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  /* do NOT use flex centering here — that was covering the dialog and stealing clicks */
+  display: block;
+  padding: 0;
+  pointer-events: auto;
+  cursor: default;
 }
 
 /* Responsive 2-col form grid */
