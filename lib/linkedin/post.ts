@@ -45,6 +45,10 @@ export interface CreatePostResult {
 }
 
 const FEED_URL = "https://www.linkedin.com/feed/";
+/** Direct composer entry used by profile "Create a post" (hover shows this href). */
+const SHAREBOX_URL = "https://www.linkedin.com/preload/sharebox/";
+/** Alternate feed entry that forces the share box open. */
+const FEED_SHARE_ACTIVE_URL = "https://www.linkedin.com/feed/?shareActive=true";
 
 async function humanDelay(minMs = 400, maxMs = 1400) {
   const t = minMs + Math.random() * (maxMs - minMs);
@@ -54,13 +58,48 @@ async function humanDelay(minMs = 400, maxMs = 1400) {
 
 async function isLoggedIn(page: Page): Promise<boolean> {
   const url = page.url();
-  if (url.includes("/login") || url.includes("/uas/")) return false;
-  const nav = page.locator('nav.global-nav, #global-nav, [data-test-global-nav]').first();
-  if (await nav.isVisible({ timeout: 4000 }).catch(() => false)) return true;
-  const start = page.locator(
-    'button.share-box-feed-entry__trigger, button[aria-label*="Start a post"], div.share-box-feed-entry__trigger'
-  ).first();
-  return start.isVisible({ timeout: 3000 }).catch(() => false);
+  if (
+    url.includes("/login") ||
+    url.includes("/uas/") ||
+    url.includes("/checkpoint/") ||
+    url.includes("/authwall") ||
+    url.includes("/signup")
+  ) {
+    return false;
+  }
+
+  // Give the feed a moment to hydrate after navigation (cookies restore can lag)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const nav = page
+      .locator(
+        'nav.global-nav, #global-nav, [data-test-global-nav], header.global-nav, ' +
+          '[data-test-id="nav"], .global-nav__me, button[aria-label*="Me" i], ' +
+          'img.global-nav__me-photo, .feed-identity-module'
+      )
+      .first();
+    if (await nav.isVisible({ timeout: 3500 }).catch(() => false)) return true;
+
+    const start = page
+      .locator(
+        'button.share-box-feed-entry__trigger, button[aria-label*="Start a post" i], ' +
+          'div.share-box-feed-entry__trigger, div.share-box-feed-entry__closed-share-box, ' +
+          '[data-control-name="share.sharebox_focus"]'
+      )
+      .first();
+    if (await start.isVisible({ timeout: 2500 }).catch(() => false)) return true;
+
+    // Profile / messaging indicators that only appear when authenticated
+    const profileHint = page
+      .locator(
+        'a[href*="/in/"][href*="miniProfile"], a[data-control-name="identity_welcome_message"], ' +
+          '.feed-identity-module__actor-meta, .profile-rail-card'
+      )
+      .first();
+    if (await profileHint.isVisible({ timeout: 1500 }).catch(() => false)) return true;
+
+    if (attempt < 2) await humanDelay(800, 1400);
+  }
+  return false;
 }
 
 async function editorVisible(page: Page): Promise<boolean> {
@@ -84,47 +123,66 @@ function editorLocator(page: Page) {
   ).first();
 }
 
-async function openComposer(page: Page): Promise<boolean> {
-  if (!page.url().includes("/feed")) {
-    await page.goto(FEED_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await humanDelay(1200, 2200);
-  }
-
-  if (!(await isLoggedIn(page))) {
-    throw new Error("LinkedIn session not authenticated — re-login the account in Linki");
-  }
-
+async function dismissOverlays(page: Page) {
   for (const sel of [
     'button[action-type="ACCEPT"]',
     'button:has-text("Accept")',
     'button:has-text("Dismiss")',
     'button[aria-label="Dismiss"]',
+    'button[aria-label="Close"]',
+    'button.artdeco-modal__dismiss',
   ]) {
     const b = page.locator(sel).first();
-    if (await b.isVisible({ timeout: 800 }).catch(() => false)) {
+    if (await b.isVisible({ timeout: 500 }).catch(() => false)) {
       await b.click().catch(() => {});
-      await humanDelay(300, 600);
+      await humanDelay(250, 500);
     }
   }
+}
 
+async function assertLoggedIn(page: Page) {
+  if (await isLoggedIn(page)) return;
+  const url = page.url();
+  if (
+    url.includes("/login") ||
+    url.includes("/uas/") ||
+    url.includes("/checkpoint/") ||
+    url.includes("/authwall")
+  ) {
+    throw new Error(
+      "LinkedIn session not authenticated — re-login the account in Linki (redirected to " +
+        url.split("?")[0] +
+        ")"
+    );
+  }
+  throw new Error("LinkedIn session not authenticated — re-login the account in Linki");
+}
+
+async function tryClickStartPost(page: Page): Promise<boolean> {
   const startSelectors = [
     'button.share-box-feed-entry__trigger',
-    'button[aria-label*="Start a post"]',
     'button[aria-label*="Start a post" i]',
+    'button[aria-label*="Create a post" i]',
+    'a[href*="/preload/sharebox"]',
+    'a[href*="sharebox"]',
     'div.share-box-feed-entry__trigger',
     'div.share-box-feed-entry__closed-share-box',
     'button.artdeco-button:has-text("Start a post")',
+    'button.artdeco-button:has-text("Create a post")',
     'div[role="button"]:has-text("Start a post")',
+    'div[role="button"]:has-text("Create a post")',
     '[data-control-name="share.sharebox_focus"]',
     'button.share-box-feed-entry__trigger--v2',
+    'button:has-text("Start a post")',
+    'button:has-text("Create a post")',
   ];
 
   for (const sel of startSelectors) {
     try {
       const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 2500 }).catch(() => false)) {
+      if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
         await el.scrollIntoViewIfNeeded().catch(() => {});
-        await humanDelay(200, 500);
+        await humanDelay(200, 450);
         await el.click({ timeout: 5000 });
         await humanDelay(700, 1300);
         if (await editorVisible(page)) return true;
@@ -133,21 +191,52 @@ async function openComposer(page: Page): Promise<boolean> {
       /* next */
     }
   }
+  return false;
+}
 
-  await page.goto(FEED_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await humanDelay(1500, 2800);
-  for (const sel of startSelectors.slice(0, 5)) {
-    try {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await el.click({ timeout: 5000 });
-        await humanDelay(800, 1400);
-        if (await editorVisible(page)) return true;
-      }
-    } catch {
-      /* continue */
-    }
+async function openComposer(page: Page): Promise<boolean> {
+  // 1) Land on feed so restored cookies apply and auth redirects are visible
+  try {
+    await page.goto(FEED_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+  } catch (e) {
+    console.warn("[post] feed navigation failed:", e instanceof Error ? e.message : e);
   }
+  await humanDelay(1500, 2800);
+  await dismissOverlays(page);
+  await assertLoggedIn(page);
+
+  // 2) Try native feed / profile-style "Start a post" / "Create a post" clicks
+  if (await tryClickStartPost(page)) return true;
+
+  // 3) Direct sharebox URL (the href behind profile Activity → "Create a post")
+  try {
+    await page.goto(SHAREBOX_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await humanDelay(1200, 2200);
+    await dismissOverlays(page);
+    if (await editorVisible(page)) return true;
+    // Sometimes sharebox lands on a shell that still needs a click
+    if (await tryClickStartPost(page)) return true;
+  } catch (e) {
+    console.warn("[post] sharebox navigation failed:", e instanceof Error ? e.message : e);
+  }
+
+  // 4) Feed with shareActive=true (another known way to force the composer)
+  try {
+    await page.goto(FEED_SHARE_ACTIVE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await humanDelay(1500, 2500);
+    await dismissOverlays(page);
+    if (await editorVisible(page)) return true;
+    if (await tryClickStartPost(page)) return true;
+  } catch (e) {
+    console.warn("[post] feed shareActive navigation failed:", e instanceof Error ? e.message : e);
+  }
+
+  // 5) Last chance: plain feed reload + click
+  await page.goto(FEED_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await humanDelay(1800, 3000);
+  await dismissOverlays(page);
+  if (await tryClickStartPost(page)) return true;
+
   return false;
 }
 
@@ -247,16 +336,27 @@ async function attachMedia(page: Page, media: MediaItem[]) {
   if (!media.length) return;
 
   const paths = media.map((m) => resolveMediaPath(m.path));
+  const isDocument = media.some((m) => m.type === "document");
 
-  let input = page.locator('input[type="file"][accept*="image"], input[type="file"]').first();
-  if ((await input.count()) === 0) {
-    const mediaBtns = [
-      'button[aria-label*="Add a photo" i]',
-      'button[aria-label*="Add media" i]',
-      'button[aria-label*="photo" i]',
-      'button:has-text("Add media")',
-      'button.share-creation-state__media-button',
-    ];
+  let input = page.locator('input[type="file"]').first();
+  if ((await input.count()) === 0 || !(await input.isVisible().catch(() => false))) {
+    // Prefer the correct toolbar button so LinkedIn opens the right accept filter
+    const mediaBtns = isDocument
+      ? [
+          'button[aria-label*="Add a document" i]',
+          'button[aria-label*="document" i]',
+          'button:has-text("Add a document")',
+          'button[aria-label*="Add a photo" i]',
+          'button[aria-label*="Add media" i]',
+          'button.share-creation-state__media-button',
+        ]
+      : [
+          'button[aria-label*="Add a photo" i]',
+          'button[aria-label*="Add media" i]',
+          'button[aria-label*="photo" i]',
+          'button:has-text("Add media")',
+          'button.share-creation-state__media-button',
+        ];
     for (const sel of mediaBtns) {
       const btn = page.locator(sel).first();
       if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
@@ -275,7 +375,8 @@ async function attachMedia(page: Page, media: MediaItem[]) {
   await input.setInputFiles(paths);
   await humanDelay(1800, 3200);
 
-  for (const label of ["Next", "Done", "Add"]) {
+  // Document uploads often show a title field + Next/Done; image/video may show crop UI
+  for (const label of ["Next", "Done", "Add", "Done"]) {
     const next = page.locator(`button:has-text("${label}")`).first();
     if (await next.isVisible({ timeout: 2500 }).catch(() => false)) {
       const disabled = await next.isDisabled().catch(() => false);

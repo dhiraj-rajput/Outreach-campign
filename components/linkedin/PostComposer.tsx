@@ -168,6 +168,8 @@ export default function PostComposer({ open, onClose, accounts, defaultAccountId
 
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
+    // LinkedIn does not allow media/documents together with a poll
+    setPostType((t) => (t === "poll" ? "text" : t));
     setUploading(true);
     try {
       for (const file of Array.from(files)) {
@@ -308,7 +310,8 @@ export default function PostComposer({ open, onClose, accounts, defaultAccountId
       icon: <RiImageLine />,
       label: "Add media",
       onClick: () => fileRef.current?.click(),
-      disabled: uploading,
+      // LinkedIn forbids media + poll on the same post
+      disabled: uploading || postType === "poll",
     },
     {
       id: "event",
@@ -337,16 +340,18 @@ export default function PostComposer({ open, onClose, accounts, defaultAccountId
       label: "Create a poll",
       onClick: () => {
         setPostType((t) => (t === "poll" ? "text" : "poll"));
+        // LinkedIn does not allow poll + media/document together
         if (postType !== "poll") setMedia([]);
       },
       active: postType === "poll",
+      disabled: media.length > 0,
     },
     {
       id: "doc",
       icon: <RiFileTextLine />,
       label: "Add a document",
       onClick: () => fileRef.current?.click(),
-      disabled: uploading,
+      disabled: uploading || postType === "poll",
     },
     {
       id: "expert",

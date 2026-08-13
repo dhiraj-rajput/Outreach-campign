@@ -108,6 +108,19 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       if (p.options.length > 4) {
         return res.status(400).json({ error: "Poll supports max 4 options" });
       }
+      // LinkedIn does not allow a poll together with media or a document
+      if (Array.isArray(media) && media.length > 0) {
+        return res.status(400).json({
+          error:
+            "LinkedIn does not allow polls together with images, videos, or documents. Remove media or the poll.",
+        });
+      }
+      if (document) {
+        return res.status(400).json({
+          error:
+            "LinkedIn does not allow polls together with documents. Remove the document or the poll.",
+        });
+      }
     }
 
     const id = randomUUID();

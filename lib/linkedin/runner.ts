@@ -1241,8 +1241,9 @@ async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void
       continue;
     }
 
+    let page: Awaited<ReturnType<typeof getSessionPage>> | null = null;
     try {
-      const page = await getSessionPage(post.account_id);
+      page = await getSessionPage(post.account_id);
       const media = post.media_json ? JSON.parse(post.media_json) : [];
       const poll = post.poll_json ? JSON.parse(post.poll_json) : null;
 
@@ -1268,12 +1269,23 @@ async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void
         `).run(new Date().toISOString(), result.postUrn || null, new Date().toISOString(), post.id);
         console.log(`[runner] Posted ${post.id} successfully`);
       } else {
+        const errMsg = result.error || "Unknown post error";
         db.prepare(`
           UPDATE linkedin_posts
           SET status = 'failed', error_message = ?, updated_at = ?
           WHERE id = ?
-        `).run(result.error || "Unknown post error", new Date().toISOString(), post.id);
-        console.warn(`[runner] Post ${post.id} failed: ${result.error}`);
+        `).run(errMsg, new Date().toISOString(), post.id);
+        console.warn(`[runner] Post ${post.id} failed: ${errMsg}`);
+
+        // Dead session → flag account so UI prompts re-login and runner stops retrying
+        if (/session not authenticated|re-login the account/i.test(errMsg)) {
+          try {
+            const { markNeedsReauth } = await import("@/lib/linkedin/session");
+            await markNeedsReauth(post.account_id);
+          } catch {
+            /* ignore */
+          }
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1283,6 +1295,22 @@ async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void
         WHERE id = ?
       `).run(msg, new Date().toISOString(), post.id);
       console.error(`[runner] Post ${post.id} exception:`, msg);
+      if (/session not authenticated|re-login the account/i.test(msg)) {
+        try {
+          const { markNeedsReauth } = await import("@/lib/linkedin/session");
+          await markNeedsReauth(post.account_id);
+        } catch {
+          /* ignore */
+        }
+      }
+    } finally {
+      if (page) {
+        try {
+          await page.close();
+        } catch {
+          /* ignore */
+        }
+      }
     }
 
     // Small gap between posts on same account
