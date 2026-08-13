@@ -267,7 +267,7 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
 
   return (
     <div className="modal modal-open z-[100]">
-      <div className="modal-box bg-base-200 border border-base-300/50 max-w-6xl w-full max-h-[92vh] flex flex-col p-0 overflow-hidden">
+      <div className="modal-box bg-base-200 border border-base-300/50 max-w-[96vw] md:max-w-4xl xl:max-w-6xl w-full max-h-[92dvh] flex flex-col p-0 overflow-hidden rounded-xl sm:rounded-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-base-300/50 shrink-0">
           <h3 className="font-semibold text-base">{title}</h3>
@@ -283,7 +283,7 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
                 Drop a CSV file or paste CSV text. You can edit, multi-select, and import only the rows you need.
                 Large files import in chunks of {CHUNK_SIZE}.
               </p>
-              <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-base-300 rounded-xl p-10 cursor-pointer hover:border-primary/50 hover:bg-base-300/20 transition">
+              <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-base-300 rounded-xl p-6 sm:p-10 cursor-pointer hover:border-primary/50 hover:bg-base-300/20 transition">
                 <RiUploadCloud2Line className="text-3xl text-base-content/40" />
                 <span className="text-sm font-medium">Click or drop CSV here</span>
                 <input type="file" accept=".csv,text/csv" className="hidden" onChange={onFileChange} disabled={busy} />
@@ -459,7 +459,7 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
                 Importing… {progress.processed} / {progress.total}
               </p>
               <progress
-                className="progress progress-primary w-64"
+                className="progress progress-primary w-full max-w-xs"
                 value={progress.processed}
                 max={Math.max(progress.total, 1)}
               />
@@ -492,7 +492,7 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
 
         {/* Footer actions */}
         {phase === "preview" && (
-          <div className="flex justify-end gap-2 px-5 py-3 border-t border-base-300/50 shrink-0">
+          <div className="flex flex-wrap justify-end gap-2 px-4 sm:px-5 py-3 border-t border-base-300/50 shrink-0">
             <button type="button" className="btn btn-ghost btn-sm" onClick={reset} disabled={busy}>
               Back
             </button>

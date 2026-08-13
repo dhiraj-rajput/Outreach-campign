@@ -188,14 +188,14 @@ export default function CompaniesPage({
         <meta name="robots" content="noindex, nofollow" />
       </Head>
       <div>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <h1 className="text-xl font-semibold">Companies</h1>
             <p className="text-base-content/50 text-sm mt-0.5">
               Organisations, parent/child hierarchy, and projects
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-base-300 hover:bg-base-300/50 transition-colors"
               onClick={() => setShowImport(true)}
@@ -211,9 +211,9 @@ export default function CompaniesPage({
           </div>
         </div>
 
-        <div className="mb-4">
+        <div className="mb-4 w-full sm:w-auto">
           <input
-            className="input input-bordered input-sm w-72 bg-base-300/50"
+            className="input input-bordered input-sm w-full sm:w-72 bg-base-300/50"
             placeholder="Search companies..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -230,10 +230,10 @@ export default function CompaniesPage({
               <thead>
                 <tr className="border-base-300/50 text-base-content/50 text-xs uppercase tracking-wide">
                   <th>Name</th>
-                  <th>Parent</th>
-                  <th>Domain</th>
-                  <th>Industry</th>
-                  <th>Projects</th>
+                  <th className="hidden md:table-cell">Parent</th>
+                  <th className="hidden md:table-cell">Domain</th>
+                  <th className="hidden md:table-cell">Industry</th>
+                  <th className="hidden sm:table-cell">Projects</th>
                   <th>Contacts</th>
                   <th></th>
                 </tr>
@@ -254,7 +254,7 @@ export default function CompaniesPage({
                         </Link>
                       </div>
                     </td>
-                    <td className="text-base-content/50 text-xs">
+                    <td className="hidden md:table-cell text-base-content/50 text-xs">
                       {c.parent_name ? (
                         <span className="inline-flex items-center gap-1">
                           <RiNodeTree size={11} /> {c.parent_name}
@@ -263,7 +263,7 @@ export default function CompaniesPage({
                         <span className="text-base-content/25">—</span>
                       )}
                     </td>
-                    <td className="text-base-content/50 text-xs">
+                    <td className="hidden md:table-cell text-base-content/50 text-xs">
                       {c.domain ? (
                         <span className="inline-flex items-center gap-1">
                           <RiGlobalLine size={11} /> {c.domain}
@@ -272,10 +272,10 @@ export default function CompaniesPage({
                         <span className="text-base-content/25">—</span>
                       )}
                     </td>
-                    <td className="text-base-content/60 text-xs">
+                    <td className="hidden md:table-cell text-base-content/60 text-xs">
                       {c.industry ?? <span className="text-base-content/25">—</span>}
                     </td>
-                    <td className="text-base-content/60 text-xs">{c.project_count ?? 0}</td>
+                    <td className="hidden sm:table-cell text-base-content/60 text-xs">{c.project_count ?? 0}</td>
                     <td className="text-base-content/60 text-xs">{c.contact_count}</td>
                     <td>
                       <div className="flex justify-end gap-1">

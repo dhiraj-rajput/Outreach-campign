@@ -37,7 +37,7 @@ function PipelineCard({ label, value, color, icon, active, onClick }: {
 }) {
   return (
     <button type="button" onClick={onClick}
-      className={`text-left bg-base-200 border rounded-xl p-4 transition-all hover:border-base-300 ${active ? "border-primary/50 ring-1 ring-primary/30" : "border-base-300/50"}`}>
+      className={`text-left bg-base-200 border rounded-xl p-4 transition-all hover:border-base-300 min-h-[44px] ${active ? "border-primary/50 ring-1 ring-primary/30" : "border-base-300/50"}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="w-7 h-7 rounded-lg flex items-center justify-center text-xs" style={{ background: `${color}18`, color }}>{icon}</span>
         <span className="text-2xl font-semibold tabular-nums text-base-content">{value}</span>
@@ -115,13 +115,13 @@ export default function TodosPage() {
             </h1>
             <p className="text-sm text-base-content/40 mt-0.5">Follow-ups, call tasks, and action items across your contacts.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => load()} className="btn btn-sm btn-ghost gap-1.5" title="Refresh"><RiRefreshLine size={14} /></button>
-            <button type="button" onClick={() => setShowCreate(true)} className="btn btn-sm btn-primary gap-1.5"><RiAddLine size={14} /> New todo</button>
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <button type="button" onClick={() => load()} className="btn btn-sm btn-ghost gap-1.5 min-h-[40px]" title="Refresh"><RiRefreshLine size={14} /></button>
+            <button type="button" onClick={() => setShowCreate(true)} className="btn btn-sm btn-primary gap-1.5 min-h-[40px]"><RiAddLine size={14} /> New todo</button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="pipeline-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <PipelineCard label="Open" value={summary?.open_count ?? 0} color="#fb923c" icon={<RiCheckboxBlankCircleLine size={14} />} active={status === "open"} onClick={() => setStatus("open")} />
           <PipelineCard label="Overdue" value={summary?.overdue ?? 0} color="#f87171" icon={<RiAlertLine size={14} />} active={status === "overdue"} onClick={() => setStatus("overdue")} />
           <PipelineCard label="Due today" value={summary?.due_today ?? 0} color="#f4b740" icon={<RiTimeLine size={14} />} active={status === "today"} onClick={() => setStatus("today")} />
@@ -130,10 +130,10 @@ export default function TodosPage() {
           <PipelineCard label="All" value={summary?.total ?? 0} color="#a78bfa" icon={<RiFilterLine size={14} />} active={status === "all"} onClick={() => setStatus("all")} />
         </div>
 
-        <div className="relative max-w-md">
+        <div className="relative w-full sm:max-w-md">
           <RiSearchLine size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/30" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search todos, contacts, companies…"
-            className="w-full pl-9 pr-3 py-2 bg-base-200 border border-base-300/50 rounded-xl text-sm focus:outline-none focus:border-base-300" />
+            className="w-full pl-9 pr-3 py-2 bg-base-200 border border-base-300/50 rounded-xl text-sm focus:outline-none focus:border-base-300 min-h-[40px]" />
         </div>
 
         <div className="bg-base-200 border border-base-300/50 rounded-xl overflow-hidden">
@@ -150,19 +150,19 @@ export default function TodosPage() {
               {filtered.map((todo) => {
                 const overdue = isOverdue(todo);
                 return (
-                  <li key={todo.id} className="flex items-start gap-3 px-4 py-3.5 hover:bg-base-300/20 transition-colors group">
-                    <button type="button" onClick={() => toggle(todo)} className="mt-0.5 shrink-0 text-base-content/40 hover:text-success transition-colors"
+                  <li key={todo.id} className="flex items-start gap-3 px-4 py-3.5 hover:bg-base-300/20 transition-colors group min-h-[44px]">
+                    <button type="button" onClick={() => toggle(todo)} className="mt-0.5 shrink-0 text-base-content/40 hover:text-success transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
                       title={todo.status === "open" ? "Mark done" : "Reopen"}>
                       {todo.status === "done" ? <RiCheckboxCircleLine size={18} className="text-success" /> : <RiCheckboxBlankCircleLine size={18} />}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
                         <div className="min-w-0">
                           <p className={`text-sm font-medium ${todo.status === "done" ? "text-base-content/40 line-through" : "text-base-content"}`}>{todo.title}</p>
                           {todo.description && <p className="text-xs text-base-content/45 mt-0.5 line-clamp-2">{todo.description}</p>}
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-base-content/40">
                             {todo.full_name && (
-                              <Link href={`/contacts/${todo.target_id}`} className="inline-flex items-center gap-1 hover:text-primary">
+                              <Link href={`/contacts/${todo.target_id}`} className="inline-flex items-center gap-1 hover:text-primary min-h-[32px]">
                                 <RiUserLine size={12} />{todo.full_name}{todo.company ? ` · ${todo.company}` : ""}
                               </Link>
                             )}
@@ -171,11 +171,11 @@ export default function TodosPage() {
                             </span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                          <Link href={`/contacts/${todo.target_id}`} className="p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50" title="Open contact">
+                        <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                          <Link href={`/contacts/${todo.target_id}`} className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50" title="Open contact">
                             <RiExternalLinkLine size={14} />
                           </Link>
-                          <button type="button" onClick={() => remove(todo.id)} className="p-1.5 rounded-lg text-base-content/40 hover:text-error hover:bg-error/10" title="Delete">
+                          <button type="button" onClick={() => remove(todo.id)} className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-base-content/40 hover:text-error hover:bg-error/10" title="Delete">
                             <RiDeleteBinLine size={14} />
                           </button>
                         </div>
@@ -236,30 +236,30 @@ function CreateTodoModal({ onClose, onCreated }: { onClose: () => void; onCreate
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg bg-base-100 border border-base-300/60 rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-base-300/40">
+      <div className="relative z-10 w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-base-100 border border-base-300/60 rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between px-4 sm:px-6 pt-5 pb-4 border-b border-base-300/40">
           <h2 className="text-sm font-semibold text-base-content">New todo</h2>
-          <button type="button" onClick={onClose} className="text-base-content/40 hover:text-base-content text-sm">Close</button>
+          <button type="button" onClick={onClose} className="text-base-content/40 hover:text-base-content text-sm p-1 min-h-[40px] min-w-[40px] flex items-center justify-center">Close</button>
         </div>
-        <div className="px-6 py-5 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4">
           <div>
             <label className="block text-[11px] text-base-content/40 uppercase tracking-wide mb-1.5">Contact</label>
             {targetId ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm min-h-[40px]">
                 <span className="truncate">{selectedLabel}</span>
-                <button type="button" className="text-xs text-base-content/50 hover:text-base-content" onClick={() => { setTargetId(null); setSelectedLabel(""); setContactQ(""); }}>Change</button>
+                <button type="button" className="text-xs text-base-content/50 hover:text-base-content shrink-0" onClick={() => { setTargetId(null); setSelectedLabel(""); setContactQ(""); }}>Change</button>
               </div>
             ) : (
               <div className="relative">
                 <input value={contactQ} onChange={(e) => setContactQ(e.target.value)} placeholder="Search contacts by name or email…"
-                  className="w-full px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm focus:outline-none focus:border-base-300" />
+                  className="w-full px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm focus:outline-none focus:border-base-300 min-h-[40px]" />
                 {(searching || contacts.length > 0) && (
                   <div className="absolute z-10 left-0 right-0 mt-1 bg-base-200 border border-base-300/50 rounded-xl shadow-lg max-h-48 overflow-auto">
                     {searching && <div className="px-3 py-2 text-xs text-base-content/40">Searching…</div>}
                     {contacts.map((c) => (
-                      <button key={c.id} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-base-300/40"
+                      <button key={c.id} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-base-300/40 min-h-[40px]"
                         onClick={() => { setTargetId(c.id); setSelectedLabel([c.full_name, c.email, c.company].filter(Boolean).join(" · ")); setContacts([]); setContactQ(""); }}>
                         <span className="font-medium">{c.full_name ?? "Unnamed"}</span>
                         {c.email && <span className="text-base-content/40 text-xs ml-2">{c.email}</span>}
@@ -273,7 +273,7 @@ function CreateTodoModal({ onClose, onCreated }: { onClose: () => void; onCreate
           <div>
             <label className="block text-[11px] text-base-content/40 uppercase tracking-wide mb-1.5">Title</label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Call back, send proposal…"
-              className="w-full px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm focus:outline-none focus:border-base-300" />
+              className="w-full px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm focus:outline-none focus:border-base-300 min-h-[40px]" />
           </div>
           <div>
             <label className="block text-[11px] text-base-content/40 uppercase tracking-wide mb-1.5">Description</label>
@@ -283,12 +283,12 @@ function CreateTodoModal({ onClose, onCreated }: { onClose: () => void; onCreate
           <div>
             <label className="block text-[11px] text-base-content/40 uppercase tracking-wide mb-1.5">Due date</label>
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-              className="w-48 px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm focus:outline-none focus:border-base-300" />
+              className="w-full sm:w-48 px-3 py-2 bg-base-200/60 border border-base-300/40 rounded-xl text-sm focus:outline-none focus:border-base-300 min-h-[40px]" />
           </div>
         </div>
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-base-300/40">
-          <button type="button" onClick={onClose} className="btn btn-sm btn-ghost">Cancel</button>
-          <button type="button" onClick={save} disabled={!title.trim() || !targetId || saving} className="btn btn-sm btn-primary">
+        <div className="flex flex-wrap sm:flex-nowrap justify-end gap-2 px-4 sm:px-6 py-4 border-t border-base-300/40">
+          <button type="button" onClick={onClose} className="btn btn-sm btn-ghost min-h-[40px]">Cancel</button>
+          <button type="button" onClick={save} disabled={!title.trim() || !targetId || saving} className="btn btn-sm btn-primary min-h-[40px]">
             {saving ? "Saving…" : "Create todo"}
           </button>
         </div>

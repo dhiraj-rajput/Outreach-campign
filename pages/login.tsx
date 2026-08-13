@@ -156,7 +156,7 @@ export default function LoginPage() {
         <meta name="robots" content="noindex, nofollow" />
       </Head>
       <div className="min-h-screen bg-base-100 flex items-center justify-center px-4 py-10">
-        <div className="w-full max-w-[380px]">
+        <div className="w-full max-w-[95vw] sm:max-w-[380px]">
           <div className="flex flex-col items-center gap-3 mb-7">
             <Image src="/logo_linki.png" alt="Linki" width={36} height={36} className="rounded-lg" />
             <div className="text-center">

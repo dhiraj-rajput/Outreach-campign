@@ -179,7 +179,7 @@ export default function SettingsPage({
         <meta name="robots" content="noindex, nofollow" />
       </Head>
 
-      <div className="max-w-3xl">
+      <div className="max-w-3xl w-full">
         {/* Page header */}
         <div className="mb-6">
           <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
@@ -187,17 +187,13 @@ export default function SettingsPage({
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 mb-6 border-b border-base-300/50 pb-0">
+        <div className="tab-nav mb-6">
           {visibleTabs.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               data-tour={`settings-tab-${key}`}
               onClick={() => switchTab(key)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors relative -mb-px border-b-2 ${
-                tab === key
-                  ? "text-base-content border-primary"
-                  : "text-base-content/40 border-transparent hover:text-base-content/70"
-              }`}
+              className={`tab-btn ${tab === key ? "active" : ""}`}
             >
               <Icon size={14} />
               {label}
@@ -386,7 +382,7 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
       ) : (
         <div className="flex flex-col gap-2">
           {accounts.map((a) => (
-            <div key={a.id} className="flex items-center gap-4 px-4 py-3 bg-base-200 border border-base-300/50 rounded-xl hover:border-base-300 transition-colors">
+            <div key={a.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3 bg-base-200 border border-base-300/50 rounded-xl hover:border-base-300 transition-colors">
               <div className="w-9 h-9 rounded-lg bg-base-300 flex items-center justify-center text-sm font-bold text-base-content/60 shrink-0">
                 {a.name.charAt(0).toUpperCase()}
               </div>
@@ -397,7 +393,7 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
                   {" · "}{fmtHour(a.active_hours_start ?? 9)}–{fmtHour(a.active_hours_end ?? 18)} ({a.timezone ?? "UTC"})
                 </p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 {a.active_run_count > 0 ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-warning/15 text-warning">
                     <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" /> In use
@@ -407,20 +403,20 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
                   {a.is_authenticated ? <><RiCheckLine size={10} /> Auth</> : "Unauth"}
                 </span>
                 <button
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors min-h-[36px]"
                   onClick={() => openAuthModal(a)}
                 >
                   <RiShieldKeyholeLine size={12} /> Authenticate
                 </button>
                 <button
-                  className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors"
+                  className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors min-h-[36px] min-w-[36px] justify-center"
                   onClick={() => openEdit(a)}
                   title="Edit"
                 >
                   <RiEditLine size={14} />
                 </button>
                 <button
-                  className="inline-flex items-center p-1.5 rounded-lg bg-error/10 text-error border border-error/20 hover:bg-error/20 transition-colors"
+                  className="inline-flex items-center p-1.5 rounded-lg bg-error/10 text-error border border-error/20 hover:bg-error/20 transition-colors min-h-[36px] min-w-[36px] justify-center"
                   onClick={() => deleteAccount(a.id)}
                   title="Delete"
                 >
@@ -434,8 +430,8 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
 
       {/* Add/Edit modal */}
       {showModal && (
-        <div className="modal modal-open">
-          <div className="modal-box bg-base-200 border border-base-300/50 max-w-md">
+        <div className="modal modal-open items-start sm:items-center p-2 sm:p-4">
+          <div className="modal-box bg-base-200 border border-base-300/50 max-h-[90dvh] overflow-y-auto w-[min(92vw,500px)] max-w-md p-4 sm:p-6">
             <h3 className="font-semibold text-base mb-4">{editingAccount ? "Edit LinkedIn Account" : "Add LinkedIn Account"}</h3>
             <form onSubmit={save} className="flex flex-col gap-3">
               <div>
@@ -446,7 +442,7 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
                 <label className="label text-xs text-base-content/50 pb-1">Email</label>
                 <input type="email" className="input input-bordered input-sm w-full bg-base-300/50" placeholder="you@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="label text-xs text-base-content/50 pb-1">Connections/day</label>
                   <input type="number" className="input input-bordered input-sm w-full bg-base-300/50" value={form.daily_connection_limit} onChange={(e) => setForm({ ...form, daily_connection_limit: Number(e.target.value) })} min={1} max={100} />
@@ -463,7 +459,7 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
 
               <div className="border-t border-base-300/40 pt-3 flex flex-col gap-3">
                 <p className="text-xs font-medium text-base-content/50 uppercase tracking-wide">Working Hours</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="label text-xs text-base-content/50 pb-1">Start</label>
                     <select className="select select-sm w-full" value={form.active_hours_start} onChange={(e) => setForm({ ...form, active_hours_start: Number(e.target.value) })}>
@@ -489,7 +485,7 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
                 </div>
                 <div>
                   <label className="label text-xs text-base-content/50 pb-1">Working days</label>
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     {WEEKDAYS.map(day => {
                       const active = form.working_days.split(",").map(Number).includes(day.iso);
                       return (
@@ -530,8 +526,8 @@ function LinkedInTab({ initialAccounts }: { initialAccounts: LiAccount[] }) {
 
       {/* Auth modal */}
       {authModal && (
-        <div className="modal modal-open">
-          <div className="modal-box bg-base-200 border border-base-300/50 max-w-lg">
+        <div className="modal modal-open items-start sm:items-center p-2 sm:p-4">
+          <div className="modal-box bg-base-200 border border-base-300/50 max-h-[90dvh] overflow-y-auto w-[min(92vw,500px)] max-w-lg p-4 sm:p-6">
             <h3 className="font-semibold text-base mb-1">Authenticate LinkedIn Account</h3>
 
             {/* Mode toggle */}
@@ -898,7 +894,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
       ) : (
         <div className="flex flex-col gap-2">
           {pageAccounts.map((a) => (
-            <div key={a.id} className="flex items-center gap-4 px-4 py-3 bg-base-200 border border-base-300/50 rounded-xl hover:border-base-300 transition-colors">
+            <div key={a.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3 bg-base-200 border border-base-300/50 rounded-xl hover:border-base-300 transition-colors">
               <div className="w-9 h-9 rounded-lg bg-base-300 flex items-center justify-center text-sm font-bold text-base-content/60 shrink-0">
                 {a.name.charAt(0).toUpperCase()}
               </div>
@@ -906,7 +902,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                 <p className="text-sm font-medium">{a.name}</p>
                 <p className="text-xs text-base-content/40 truncate">{a.from_email} · {a.smtp_host}:{a.smtp_port} · {a.daily_email_limit}/day</p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 {a.is_verified ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-success/15 text-success">
                     <RiCheckLine size={10} /> Verified
@@ -926,7 +922,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                   </span>
                 )}
                 <button
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-50 min-h-[36px]"
                   onClick={() => testConnection(a.id)}
                   disabled={testingId === a.id}
                 >
@@ -934,20 +930,20 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                   Test
                 </button>
                 <button
-                  className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors"
+                  className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors min-h-[36px] min-w-[36px] justify-center"
                   onClick={() => openDuplicate(a)}
                   title="Duplicate"
                 >
                   <RiFileCopyLine size={14} />
                 </button>
                 <button
-                  className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors"
+                  className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors min-h-[36px] min-w-[36px] justify-center"
                   onClick={() => openEdit(a)}
                 >
                   <RiEditLine size={14} />
                 </button>
                 <button
-                  className="inline-flex items-center p-1.5 rounded-lg bg-error/10 text-error border border-error/20 hover:bg-error/20 transition-colors"
+                  className="inline-flex items-center p-1.5 rounded-lg bg-error/10 text-error border border-error/20 hover:bg-error/20 transition-colors min-h-[36px] min-w-[36px] justify-center"
                   onClick={() => deleteAccount(a.id)}
                 >
                   <RiDeleteBinLine size={13} />
@@ -992,8 +988,8 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
 
       {/* Create / Edit modal */}
       {showModal && (
-        <div className="modal modal-open">
-          <div className="modal-box bg-base-200 border border-base-300/50 max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="modal modal-open items-start sm:items-center p-2 sm:p-4">
+          <div className="modal-box bg-base-200 border border-base-300/50 max-h-[90dvh] overflow-y-auto w-[min(92vw,500px)] max-w-lg p-4 sm:p-6">
             <h3 className="font-semibold text-base mb-4">{editingAccount ? "Edit Email Account" : "Add Email Account"}</h3>
             <form onSubmit={save} className="flex flex-col gap-3">
 
@@ -1001,7 +997,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
               {!editingAccount && (
                 <div>
                   <label className="label text-xs text-base-content/50 pb-1">Provider preset</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {[["gmail", "Gmail"], ["outlook", "Outlook / Hotmail"], ["custom", "Custom SMTP"]].map(([key, label]) => (
                       <button key={key} type="button" onClick={() => applyPreset(key)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${form.preset === key ? "bg-primary/15 text-primary border-primary/30" : "bg-base-300/50 text-base-content/50 border-base-300/50 hover:border-primary/20"}`}>
@@ -1012,7 +1008,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="label text-xs text-base-content/50 pb-1">Display name</label>
                   <input className="input input-bordered input-sm w-full bg-base-300/50" placeholder="My Gmail" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -1023,7 +1019,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="label text-xs text-base-content/50 pb-1">From email address</label>
                   <input type="email" className="input input-bordered input-sm w-full bg-base-300/50" placeholder="you@gmail.com" value={form.from_email} onChange={(e) => setForm({ ...form, from_email: e.target.value })} required />
@@ -1036,8 +1032,8 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
 
               <div className="border-t border-base-300/40 pt-3">
                 <p className="text-xs font-medium text-base-content/50 mb-2 uppercase tracking-wide">SMTP (sending)</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="col-span-1 sm:col-span-2">
                     <label className="label text-xs text-base-content/50 pb-1">Host</label>
                     <input className="input input-bordered input-sm w-full bg-base-300/50 font-mono text-xs" placeholder="smtp.gmail.com" value={form.smtp_host} onChange={(e) => setForm({ ...form, smtp_host: e.target.value })} required />
                   </div>
@@ -1068,7 +1064,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                       : "Unlock to set username and password"}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="label text-xs text-base-content/50 pb-1">Username / Email</label>
                       <input
@@ -1100,8 +1096,8 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
 
               <div className="border-t border-base-300/40 pt-3">
                 <p className="text-xs font-medium text-base-content/50 mb-2 uppercase tracking-wide">IMAP (inbox reading — optional)</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="col-span-1 sm:col-span-2">
                     <label className="label text-xs text-base-content/50 pb-1">Host</label>
                     <input className="input input-bordered input-sm w-full bg-base-300/50 font-mono text-xs" placeholder="imap.gmail.com" value={form.imap_host} onChange={(e) => setForm({ ...form, imap_host: e.target.value })} />
                   </div>
@@ -1128,7 +1124,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                       : <span>Uses SMTP credentials · password kept</span>}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="label text-xs text-base-content/50 pb-1">IMAP username <span className="text-base-content/30">(blank = same as SMTP)</span></label>
                       <input
@@ -1160,7 +1156,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                   <label className="label text-xs text-base-content/50 pb-1">Emails / day</label>
                   <input type="number" className="input input-bordered input-sm w-full bg-base-300/50" value={form.daily_email_limit} onChange={(e) => setForm({ ...form, daily_email_limit: Number(e.target.value) })} min={1} max={500} />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="label text-xs text-base-content/50 pb-1">Start</label>
                     <select className="select select-sm w-full" value={form.active_hours_start} onChange={(e) => setForm({ ...form, active_hours_start: Number(e.target.value) })}>
@@ -1186,7 +1182,7 @@ function EmailTab({ initialAccounts }: { initialAccounts: EmailAccount[] }) {
                 </div>
                 <div>
                   <label className="label text-xs text-base-content/50 pb-1">Working days</label>
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     {WEEKDAYS.map(day => {
                       const active = form.working_days.split(",").map(Number).includes(day.iso);
                       return (
@@ -1330,16 +1326,16 @@ function TemplatesTab({ initialTemplates }: { initialTemplates: Template[] }) {
       ) : (
         <div className="flex flex-col gap-2">
           {templates.map((t) => (
-            <div key={t.id} className="flex items-start gap-4 px-4 py-3 bg-base-200 border border-base-300/50 rounded-xl hover:border-base-300 transition-colors">
+            <div key={t.id} className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4 px-4 py-3 bg-base-200 border border-base-300/50 rounded-xl hover:border-base-300 transition-colors">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">{t.name}</p>
                 <p className="text-xs text-base-content/40 mt-0.5 line-clamp-2 whitespace-pre-wrap">{t.body}</p>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors" onClick={() => openEdit(t)}>
+              <div className="flex flex-wrap items-center gap-1 shrink-0">
+                <button className="inline-flex items-center p-1.5 rounded-lg text-base-content/40 hover:text-base-content hover:bg-base-300/50 transition-colors min-h-[36px] min-w-[36px] justify-center" onClick={() => openEdit(t)}>
                   <RiEditLine size={14} />
                 </button>
-                <button className="inline-flex items-center p-1.5 rounded-lg bg-error/10 text-error border border-error/20 hover:bg-error/20 transition-colors" onClick={() => del(t.id)}>
+                <button className="inline-flex items-center p-1.5 rounded-lg bg-error/10 text-error border border-error/20 hover:bg-error/20 transition-colors min-h-[36px] min-w-[36px] justify-center" onClick={() => del(t.id)}>
                   <RiDeleteBinLine size={13} />
                 </button>
               </div>
@@ -1349,8 +1345,8 @@ function TemplatesTab({ initialTemplates }: { initialTemplates: Template[] }) {
       )}
 
       {showModal && (
-        <div className="modal modal-open">
-          <div className="modal-box bg-base-200 border border-base-300/50 max-w-lg">
+        <div className="modal modal-open items-start sm:items-center p-2 sm:p-4">
+          <div className="modal-box bg-base-200 border border-base-300/50 max-h-[90dvh] overflow-y-auto w-[min(92vw,500px)] max-w-lg p-4 sm:p-6">
             <h3 className="font-semibold text-base mb-4">{editing ? "Edit Template" : "New Template"}</h3>
             <form onSubmit={save} className="flex flex-col gap-3">
               <div>
@@ -1536,7 +1532,7 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
 
         return (
           <div key={intg.key} className="bg-base-200 border border-base-300/50 rounded-xl overflow-hidden">
-            <div className="flex items-center gap-4 px-4 py-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3.5">
               {/* Logo badge */}
               <div
                 className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
@@ -1546,7 +1542,7 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
               </div>
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-medium">{intg.name}</p>
                   {configured && (
                     <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/15 text-success">
@@ -1562,24 +1558,24 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
                 <p className="text-xs text-base-content/40">{intg.description}</p>
               </div>
               {/* Actions */}
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 {configured && !isEditing && (
                   <>
                     <span className="text-xs text-base-content/25 font-mono">{state?.masked}</span>
-                    <button onClick={() => { setEditingKey(intg.key); setApiKeyInput(""); setModelInput(state?.model || ""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-2 py-1">Change</button>
-                    <button onClick={() => remove(intg.key)} className="text-xs text-error/50 hover:text-error transition-colors p-1"><RiCloseLine size={14} /></button>
+                    <button onClick={() => { setEditingKey(intg.key); setApiKeyInput(""); setModelInput(state?.model || ""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-2 py-1 min-h-[32px]">Change</button>
+                    <button onClick={() => remove(intg.key)} className="text-xs text-error/50 hover:text-error transition-colors p-1 min-h-[32px] min-w-[32px] flex items-center justify-center"><RiCloseLine size={14} /></button>
                   </>
                 )}
                 {!configured && !isEditing && (
                   <button
                     onClick={() => { setEditingKey(intg.key); setApiKeyInput(""); setModelInput(intg.models?.[0]?.id || ""); }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300 text-base-content/70 hover:bg-base-300/80 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300 text-base-content/70 hover:bg-base-300/80 transition-colors min-h-[36px]"
                   >
                     Configure
                   </button>
                 )}
                 {isEditing && (
-                  <button onClick={() => { setEditingKey(null); setApiKeyInput(""); setModelInput(""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-1 py-1">
+                  <button onClick={() => { setEditingKey(null); setApiKeyInput(""); setModelInput(""); }} className="text-xs text-base-content/40 hover:text-base-content/70 transition-colors px-1 py-1 min-h-[32px] min-w-[32px] flex items-center justify-center">
                     <RiCloseLine size={14} />
                   </button>
                 )}
@@ -1589,7 +1585,7 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
             {/* Inline key & model input */}
             {isEditing && (
               <form onSubmit={(e) => save(intg.key, e)} className="px-4 pb-4 flex flex-col gap-2.5">
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="text"
                     autoFocus
@@ -1762,7 +1758,7 @@ function GeneralTab({ hasPremium }: { hasPremium: boolean }) {
   }
 
   return (
-    <div className="max-w-sm flex flex-col gap-4">
+    <div className="max-w-sm w-full flex flex-col gap-4">
       {/* Account */}
       <div className="bg-base-200 border border-base-300/50 rounded-xl p-4">
         <p className="text-xs font-medium text-base-content/40 uppercase tracking-wide mb-2">Account</p>
@@ -1780,7 +1776,7 @@ function GeneralTab({ hasPremium }: { hasPremium: boolean }) {
         <p className="text-xs text-base-content/50 mb-3">
           Max contacts imported from Sales Navigator per day (across all lists). Larger lists are split into batches over consecutive days to stay under LinkedIn&apos;s radar.
         </p>
-        <form onSubmit={saveImportCap} className="flex items-end gap-2">
+        <form onSubmit={saveImportCap} className="flex flex-col sm:flex-row sm:items-end gap-2">
           <div className="flex-1">
             <input type="number" min={1} className="input input-bordered input-sm w-full bg-base-300/50" placeholder="1500" value={importCap} onChange={(e) => setImportCap(e.target.value === "" ? "" : Number(e.target.value))} required />
           </div>

@@ -222,12 +222,12 @@ function ReplyModal({ reply, onClose, onActionDone, hasPremium }: ReplyModalProp
   const canReply = !!reply.email && !!reply.email_account_id;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative z-10 w-full max-w-2xl max-h-[85vh] flex flex-col bg-base-100 border border-base-300/50 rounded-xl shadow-2xl mx-4">
+      <div className="relative z-10 w-[min(96vw,600px)] max-h-[90dvh] flex flex-col bg-base-100 border border-base-300/50 rounded-xl shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-base-300/50">
           <div>
@@ -488,8 +488,8 @@ export default function InboxPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-3 mb-5">
-        <div className="flex-1">
+      <div className="flex flex-wrap items-start gap-3 mb-5">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2.5">
             <h1 className="text-lg font-semibold tracking-tight">Inbox</h1>
             {!loading && filtered.length > 0 && (
@@ -500,14 +500,14 @@ export default function InboxPage() {
           </div>
           <p className="text-base-content/40 text-sm mt-0.5">Contacts who replied to your outreach</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {hasPremium ? (
             <>
               <button
                 onClick={handleBackfill}
                 disabled={backfilling}
                 title="Fetch + classify historic replies that predate the classifier (no dispatch)"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-200 border border-base-300/50 text-base-content/70 hover:bg-base-300/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-lg text-xs font-medium bg-base-200 border border-base-300/50 text-base-content/70 hover:bg-base-300/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {backfilling ? <RiLoader4Line size={13} className="animate-spin" /> : null}
                 {backfilling ? "Backfilling…" : "Backfill"}
@@ -516,7 +516,7 @@ export default function InboxPage() {
                 onClick={handleReclassifyAll}
                 disabled={reclassifyingAll}
                 title="Re-run the classifier on unclassified or failed replies (no dispatch)"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-200 border border-base-300/50 text-base-content/70 hover:bg-base-300/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-lg text-xs font-medium bg-base-200 border border-base-300/50 text-base-content/70 hover:bg-base-300/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {reclassifyingAll ? <RiLoader4Line size={13} className="animate-spin" /> : null}
                 {reclassifyingAll ? "Reclassifying…" : "Reclassify all"}
@@ -525,7 +525,7 @@ export default function InboxPage() {
           ) : (
             <a href="https://opsily.com?utm_source=linki&utm_medium=app&utm_campaign=reply-ai" target="_blank" rel="noopener noreferrer"
               title="AI reply classification + auto-followup is a premium feature"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors">
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-lg text-xs font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors">
               Auto-classify replies · Upgrade →
             </a>
           )}
@@ -533,49 +533,45 @@ export default function InboxPage() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-4">
+        {/* Search — full-width on mobile */}
+        <div className="relative w-full sm:w-56">
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-base-content/30 pointer-events-none">
             <RiSearchLine size={13} />
           </span>
           <input
             type="text"
-            className="w-56 bg-base-200 border border-base-300/50 rounded-lg pl-8 pr-3 py-1.5 text-sm text-base-content placeholder:text-base-content/30 focus:outline-none focus:border-primary/40"
+            className="w-full bg-base-200 border border-base-300/50 rounded-lg pl-8 pr-3 py-2 text-sm text-base-content placeholder:text-base-content/30 focus:outline-none focus:border-primary/40"
             placeholder="Name, email, company…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
-        <div className="w-px h-4 bg-base-300/60" />
-
-        <div className="flex items-center gap-1">
+        {/* Channel tabs + verdict filter row — horizontally scrollable on mobile */}
+        <div className="tab-nav">
           {CHANNEL_TABS.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setChannel(tab.key)}
-              className={`h-7 px-3 rounded-lg text-xs font-medium transition-colors ${
-                channel === tab.key
-                  ? "bg-primary/15 text-primary border border-primary/30"
-                  : "text-base-content/50 hover:text-base-content hover:bg-base-300/50"
-              }`}
+              className={`tab-btn${channel === tab.key ? " active" : ""}`}
             >
               {tab.label}
             </button>
           ))}
+
+          <div className="w-px h-4 bg-base-300/60 mx-1 shrink-0" />
+
+          <select
+            value={verdict}
+            onChange={(e) => setVerdict(e.target.value)}
+            className="shrink-0 h-9 bg-base-200 border border-base-300/50 rounded-lg px-2.5 text-xs font-medium text-base-content/70 focus:outline-none focus:border-primary/40 cursor-pointer"
+          >
+            {VERDICT_FILTERS.map((v) => (
+              <option key={v.key} value={v.key}>{v.label}</option>
+            ))}
+          </select>
         </div>
-
-        <div className="w-px h-4 bg-base-300/60" />
-
-        <select
-          value={verdict}
-          onChange={(e) => setVerdict(e.target.value)}
-          className="h-7 bg-base-200 border border-base-300/50 rounded-lg px-2.5 text-xs font-medium text-base-content/70 focus:outline-none focus:border-primary/40 cursor-pointer"
-        >
-          {VERDICT_FILTERS.map((v) => (
-            <option key={v.key} value={v.key}>{v.label}</option>
-          ))}
-        </select>
       </div>
 
       {/* Body */}
@@ -597,15 +593,15 @@ export default function InboxPage() {
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-base-300/50 overflow-hidden">
+        <div className="rounded-lg border border-base-300/50 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-base-300/50 bg-base-200/60">
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40">Contact</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40">Channel</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40 hidden sm:table-cell">Channel</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40">Verdict</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40">From</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40">Campaign</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40 hidden md:table-cell">From</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-base-content/40 hidden md:table-cell">Campaign</th>
                 <th className="text-right px-4 py-2.5 text-xs font-medium text-base-content/40">Replied</th>
               </tr>
             </thead>
@@ -613,7 +609,7 @@ export default function InboxPage() {
               {filtered.map((r) => (
                 <tr
                   key={r.id}
-                  className="border-b border-base-300/30 hover:bg-base-200/40 transition-colors cursor-pointer"
+                  className="border-b border-base-300/30 hover:bg-base-200/40 transition-colors cursor-pointer min-h-[48px]"
                   onClick={() => setSelectedReply(r)}
                 >
                   {/* Contact */}
@@ -648,7 +644,7 @@ export default function InboxPage() {
                   </td>
 
                   {/* Channel */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 hidden sm:table-cell">
                     <div className="flex items-center gap-1.5">
                       {(r.channel === "email" || r.channel === "both") && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-info/15 text-info">
@@ -683,7 +679,7 @@ export default function InboxPage() {
                   </td>
 
                   {/* From (email account) */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 hidden md:table-cell">
                     {r.email_account_from ? (
                       <span className="text-xs text-base-content/50">
                         {r.email_account_name ?? r.email_account_from}
@@ -694,7 +690,7 @@ export default function InboxPage() {
                   </td>
 
                   {/* Campaign */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 hidden md:table-cell">
                     {r.workflow_id ? (
                       <Link
                         href={`/workflows/${r.workflow_id}`}

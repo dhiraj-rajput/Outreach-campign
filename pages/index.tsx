@@ -121,21 +121,21 @@ function FunnelRow({
 }) {
   const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0;
   return (
-    <div className="flex items-center gap-3 px-3 sm:px-4 py-2.5">
+    <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5">
       <span
         className="w-5 h-5 rounded flex items-center justify-center shrink-0"
         style={{ background: `${color}15`, color }}
       >
         {icon}
       </span>
-      <span className="text-xs text-base-content/50 w-20 sm:w-24 shrink-0">{label}</span>
+      <span className="text-xs text-base-content/50 w-14 sm:w-20 md:w-24 shrink-0 truncate">{label}</span>
       <div className="flex-1 h-1.5 bg-base-300/40 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-700"
           style={{ width: `${pct}%`, background: color }}
         />
       </div>
-      <span className="text-sm font-semibold tabular-nums text-base-content w-10 text-right">
+      <span className="text-sm font-semibold tabular-nums text-base-content w-8 sm:w-10 text-right">
         <Counter value={value} />
       </span>
     </div>

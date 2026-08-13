@@ -202,7 +202,7 @@ a:focus:not(:focus-visible) {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
 }
 @media (min-width: 640px) {
   .page-header {
@@ -210,14 +210,18 @@ a:focus:not(:focus-visible) {
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
+    margin-bottom: 1.5rem;
   }
 }
 .page-header h1 {
-  font-size: 1.125rem;
+  font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.3;
   color: var(--color-base-content);
+}
+@media (min-width: 640px) {
+  .page-header h1 { font-size: 1.125rem; }
 }
 .page-header .subtitle {
   font-size: 0.8125rem;
@@ -225,6 +229,17 @@ a:focus:not(:focus-visible) {
   max-width: 36rem;
   line-height: 1.45;
   margin-top: 0.15rem;
+}
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  flex-shrink: 0;
+}
+@media (min-width: 640px) {
+  .page-header-actions { margin-top: 0; }
 }
 
 .section-label {
@@ -279,8 +294,11 @@ a:focus:not(:focus-visible) {
 
 .kpi-grid {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+@media (min-width: 480px) {
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
 }
 @media (min-width: 640px) {
   .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -298,11 +316,20 @@ a:focus:not(:focus-visible) {
   -webkit-overflow-scrolling: touch;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--color-base-content) 7%, transparent);
+  /* subtle gradient fade hint at right edge on mobile */
+  position: relative;
 }
 .table-wrap table {
   width: 100%;
-  min-width: 640px;
+  min-width: 580px;
   border-collapse: collapse;
+}
+/* Wider tables keep 640 minimum */
+.table-wrap.table-wide table {
+  min-width: 760px;
+}
+.table-wrap.table-compact table {
+  min-width: 480px;
 }
 
 .dash-split {
@@ -310,14 +337,165 @@ a:focus:not(:focus-visible) {
   gap: 1rem;
   grid-template-columns: 1fr;
 }
-@media (min-width: 1024px) {
+@media (min-width: 900px) {
   .dash-split {
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 220px 1fr;
+  }
+}
+@media (min-width: 1280px) {
+  .dash-split {
+    grid-template-columns: 260px 1fr;
   }
 }
 
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE HELPERS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Responsive filter row — wraps chips neatly */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+}
+
+/* Search input that grows on mobile */
+.filter-search {
+  width: 100%;
+  max-width: 100%;
+}
+@media (min-width: 480px) {
+  .filter-search { width: 14rem; flex-shrink: 0; }
+}
+@media (min-width: 640px) {
+  .filter-search { width: 16rem; }
+}
+
+/* Stack divider — hide vertical dividers on mobile */
+.filter-divider {
+  display: none;
+}
+@media (min-width: 640px) {
+  .filter-divider { display: block; width: 1px; height: 1rem; background: color-mix(in srgb, var(--color-base-content) 12%, transparent); }
+}
+
+/* Modal responsive */
+.modal-box {
+  max-height: 90dvh;
+  overflow-y: auto;
+  width: min(92vw, 520px);
+  padding: 1.25rem;
+  border-radius: 14px;
+  background: var(--color-base-200);
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+.modal-box-sm {
+  width: min(92vw, 380px);
+}
+.modal-box-lg {
+  width: min(96vw, 720px);
+}
+.modal-box-xl {
+  width: min(96vw, 960px);
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* Responsive 2-col form grid */
+.form-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.form-grid-3 {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 480px) {
+  .form-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 768px) {
+  .form-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* Tab nav — horizontal scroll on mobile */
+.tab-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -webkit-scrollbar: none;
+  white-space: nowrap;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  padding-bottom: 0;
+  margin-bottom: 1.25rem;
+}
+.tab-nav::-webkit-scrollbar { display: none; }
+.tab-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: color 0.12s ease;
+  position: relative;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: color-mix(in srgb, var(--color-base-content) 40%, transparent);
+  white-space: nowrap;
+}
+.tab-btn:hover {
+  color: color-mix(in srgb, var(--color-base-content) 70%, transparent);
+}
+.tab-btn.active {
+  color: var(--color-base-content);
+  border-bottom-color: var(--color-primary);
+}
+
+/* Selection action bar */
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
+
+/* Ultrawide max container */
+.container-2xl {
+  max-width: 1536px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -401,10 +579,14 @@ a:focus:not(:focus-visible) {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  height: 2.25rem;
+  height: 2.5rem; /* 40px — meets touch target minimum */
   border-radius: 8px;
   transition: background-color 0.12s ease, color 0.12s ease;
   color: color-mix(in srgb, var(--color-base-content) 48%, transparent);
+  min-height: 44px; /* iOS touch target */
+}
+@media (min-width: 1024px) {
+  .nav-item { min-height: 2.25rem; height: 2.25rem; }
 }
 .nav-item:hover {
   color: color-mix(in srgb, var(--color-base-content) 85%, transparent);
@@ -824,8 +1006,11 @@ a:focus:not(:focus-visible) {
 /* ─── Overview strip (top-line totals) ─────────────────────────────────── */
 .hq-overview-grid {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+@media (min-width: 420px) {
+  .hq-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
 }
 @media (min-width: 640px) {
   .hq-overview-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -837,7 +1022,7 @@ a:focus:not(:focus-visible) {
   gap: 0.85rem;
   grid-template-columns: 1fr;
 }
-@media (min-width: 900px) {
+@media (min-width: 768px) {
   .hq-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .hq-channel-head {
@@ -872,9 +1057,12 @@ a:focus:not(:focus-visible) {
 .hq-channel-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
-@media (min-width: 480px) {
+@media (min-width: 360px) {
+  .hq-channel-stats { gap: 0.6rem; }
+}
+@media (min-width: 540px) {
   .hq-channel-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 .hq-channel-stat-value {
@@ -942,9 +1130,472 @@ a:focus:not(:focus-visible) {
 /* ─── Task strip (todos / inbox) ───────────────────────────────────────── */
 .hq-task-grid {
   display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 480px) {
+  .hq-task-grid { gap: 0.75rem; }
+}
+@media (min-width: 640px) {
+  .hq-task-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ─── Header chips (today stats) ───────────────────────────────────────── */
+.hq-header-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* ─── KPI card xs fix ──────────────────────────────────────────────────── */
+.hq-kpi-card {
+  padding: 0.85rem;
+}
+@media (min-width: 480px) {
+  .hq-kpi-card { padding: 1rem; }
+}
+
+/* ─── hq-chip compact on very small screens ────────────────────────────── */
+@media (max-width: 420px) {
+  .hq-chip {
+    font-size: 0.6875rem;
+    padding: 0.25rem 0.5rem;
+  }
+  .hq-header-today {
+    font-size: 0.625rem;
+  }
+}
+
+/* ─── Inbox / list-detail split panel ──────────────────────────────────── */
+.split-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+@media (min-width: 768px) {
+  .split-panel {
+    flex-direction: row;
+  }
+}
+.split-panel-list {
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  flex-shrink: 0;
+  max-height: 40dvh;
+}
+@media (min-width: 768px) {
+  .split-panel-list {
+    width: 320px;
+    max-height: none;
+    border-bottom: none;
+    border-right: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  }
+}
+@media (min-width: 1024px) {
+  .split-panel-list { width: 360px; }
+}
+.split-panel-detail {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ─── Pipeline card grid ───────────────────────────────────────────────── */
+.pipeline-grid {
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 480px) {
+  .pipeline-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 768px) {
+  .pipeline-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.75rem; }
+}
+
+/* ─── Workflow card grid ───────────────────────────────────────────────── */
+.workflow-grid {
+  display: grid;
+  gap: 0.875rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .workflow-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1400px) {
+  .workflow-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ─── PostComposer split ───────────────────────────────────────────────── */
+.composer-split {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+@media (min-width: 900px) {
+  .composer-split {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+.composer-panel {
+  width: 100%;
+}
+@media (min-width: 900px) {
+  .composer-panel { width: 320px; flex-shrink: 0; }
+}
+.composer-preview {
+  width: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ─── Responsive KPI strip for linkedin/email pages ────────────────────── */
+.kpi-strip {
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 480px) {
+  .kpi-strip { gap: 0.75rem; }
+}
+@media (min-width: 640px) {
+  .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .kpi-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  .kpi-strip.kpi-strip-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (min-width: 1400px) {
+  .kpi-strip.kpi-strip-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* ─── Responsive settings form ─────────────────────────────────────────── */
+.settings-account-card {
+  background: var(--color-base-200);
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: border-color 0.12s ease;
+}
+@media (min-width: 640px) {
+  .settings-account-card { padding: 1.25rem; }
+}
+.settings-account-card:hover {
+  border-color: color-mix(in srgb, var(--color-base-content) 14%, transparent);
+}
+
+/* ─── CSV import modal column mapping ──────────────────────────────────── */
+.csv-col-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hq-ink) 7%, transparent);
+  overflow: hidden;
+}
+[data-theme="linki-dark"] .hq-rate-track {
+  background: var(--color-base-300);
+}
+.hq-rate-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.7s ease;
+}
+.hq-rate-sub {
+  font-size: 0.6875rem;
+  color: color-mix(in srgb, var(--color-base-content) 38%, transparent);
+  margin-top: 0.35rem;
+}
+
+/* ─── Task strip (todos / inbox) ───────────────────────────────────────── */
+.hq-task-grid {
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 480px) {
+  .hq-task-grid { gap: 0.75rem; }
+}
+@media (min-width: 640px) {
+  .hq-task-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ─── Header chips (today stats) ───────────────────────────────────────── */
+.hq-header-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* ─── KPI card xs fix ──────────────────────────────────────────────────── */
+.hq-kpi-card {
+  padding: 0.85rem;
+}
+@media (min-width: 480px) {
+  .hq-kpi-card { padding: 1rem; }
+}
+
+/* ─── hq-chip compact on very small screens ────────────────────────────── */
+@media (max-width: 420px) {
+  .hq-chip {
+    font-size: 0.6875rem;
+    padding: 0.25rem 0.5rem;
+  }
+  .hq-header-today {
+    font-size: 0.625rem;
+  }
+}
+
+/* ─── Inbox / list-detail split panel ──────────────────────────────────── */
+.split-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+@media (min-width: 768px) {
+  .split-panel {
+    flex-direction: row;
+  }
+}
+.split-panel-list {
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  flex-shrink: 0;
+  max-height: 40dvh;
+}
+@media (min-width: 768px) {
+  .split-panel-list {
+    width: 320px;
+    max-height: none;
+    border-bottom: none;
+    border-right: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  }
+}
+@media (min-width: 1024px) {
+  .split-panel-list { width: 360px; }
+}
+.split-panel-detail {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ─── Pipeline card grid ───────────────────────────────────────────────── */
+.pipeline-grid {
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 480px) {
+  .pipeline-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 768px) {
+  .pipeline-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.75rem; }
+}
+
+/* ─── Workflow card grid ───────────────────────────────────────────────── */
+.workflow-grid {
+  display: grid;
+  gap: 0.875rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .workflow-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1400px) {
+  .workflow-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ─── PostComposer split ───────────────────────────────────────────────── */
+.composer-split {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+@media (min-width: 900px) {
+  .composer-split {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+.composer-panel {
+  width: 100%;
+}
+@media (min-width: 900px) {
+  .composer-panel { width: 320px; flex-shrink: 0; }
+}
+.composer-preview {
+  width: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ─── Responsive KPI strip for linkedin/email pages ────────────────────── */
+.kpi-strip {
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 480px) {
+  .kpi-strip { gap: 0.75rem; }
+}
+@media (min-width: 640px) {
+  .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .kpi-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  .kpi-strip.kpi-strip-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (min-width: 1400px) {
+  .kpi-strip.kpi-strip-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* ─── Responsive settings form ─────────────────────────────────────────── */
+.settings-account-card {
+  background: var(--color-base-200);
+  border: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: border-color 0.12s ease;
+}
+@media (min-width: 640px) {
+  .settings-account-card { padding: 1.25rem; }
+}
+.settings-account-card:hover {
+  border-color: color-mix(in srgb, var(--color-base-content) 14%, transparent);
+}
+
+/* ─── CSV import modal column mapping ──────────────────────────────────── */
+.csv-col-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 480px) {
+  .csv-col-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ─── Page content with safe area for iOS ──────────────────────────────── */
+.safe-area-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE LAYOUT UTILITIES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Split-panel: list + detail (inbox, contacts, etc.) ────────────────── */
+.split-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
+@media (min-width: 768px) {
+  .split-panel {
+    flex-direction: row;
+    align-items: stretch;
+  }
+}
+
+.split-panel-list {
+  width: 100%;
+  overflow-y: auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-base-content) 10%, transparent);
+  max-height: 42vh;
+}
+@media (min-width: 768px) {
+  .split-panel-list {
+    width: 340px;
+    flex-shrink: 0;
+    border-bottom: none;
+    border-right: 1px solid color-mix(in srgb, var(--color-base-content) 10%, transparent);
+    max-height: unset;
+  }
+}
+
+.split-panel-detail {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* ─── Tab nav: horizontal scroll on mobile ──────────────────────────────── */
+.tab-nav {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.125rem;
+  overflow-x: auto;
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE/Edge */
+  padding-bottom: 1px;            /* prevent clipping active indicator */
+}
+.tab-nav::-webkit-scrollbar { display: none; }
+
+/* ─── Tab buttons ───────────────────────────────────────────────────────── */
+.tab-btn {
+  flex-shrink: 0;
+  height: 2.25rem;                /* 36px — comfortable touch target */
+  padding: 0 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color 0.12s ease, background 0.12s ease;
+  color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.tab-btn:hover {
+  color: var(--color-base-content);
+  background: color-mix(in srgb, var(--color-base-content) 8%, transparent);
+}
+.tab-btn.active {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+/* ─── KPI strip grid ────────────────────────────────────────────────────── */
+.kpi-strip {
+  display: grid;
   gap: 0.75rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 @media (min-width: 640px) {
-  .hq-task-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+}
+@media (min-width: 1024px) {
+  .kpi-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }

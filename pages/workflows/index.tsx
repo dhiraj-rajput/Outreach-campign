@@ -28,6 +28,8 @@ import {
   RiArchiveLine,
   RiInboxUnarchiveLine,
   RiArrowDownSLine,
+  RiSearchLine,
+  RiLayoutGridLine,
 } from "react-icons/ri";
 import PageHeader from "@/components/ui/PageHeader";
 
@@ -76,6 +78,25 @@ const STEP_LABEL: Record<string, string> = {
   connect: "Connect",
   message: "Message",
 };
+
+const CAMPAIGN_TEMPLATES = [
+  {
+    name: "Connection & Message Sequence",
+    description: "Visit Profile → Send Connection Request → Follow-up Message after 2 days",
+  },
+  {
+    name: "SaaS Founder Outreach",
+    description: "Visit Profile → Personalized Connection Note → Value-add Message",
+  },
+  {
+    name: "Event & Webinar Follow-up",
+    description: "Direct Connection Request with Event Context → Message within 24 hours",
+  },
+  {
+    name: "Dual-Touch Outreach",
+    description: "Cold Email → LinkedIn Visit → Connection Request → Email Follow-up",
+  },
+];
 
 export const getServerSideProps: GetServerSideProps = async () => {
   const db = getDb();
@@ -147,14 +168,21 @@ export const getServerSideProps: GetServerSideProps = async () => {
 export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: WorkflowCard[] }) {
   const router = useRouter();
   const [workflows, setWorkflows] = useState<WorkflowCard[]>(initialWorkflows);
+  const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [form, setForm] = useState({ name: "", description: "" });
   const [loading, setLoading] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
 
-  const activeWorkflows = workflows.filter((w) => !w.is_archived);
-  const archivedWorkflows = workflows.filter((w) => w.is_archived);
+  const filteredWorkflows = workflows.filter((w) =>
+    w.name.toLowerCase().includes(search.toLowerCase()) ||
+    (w.description && w.description.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const activeWorkflows = filteredWorkflows.filter((w) => !w.is_archived);
+  const archivedWorkflows = filteredWorkflows.filter((w) => w.is_archived);
 
   async function createWorkflow(e: React.FormEvent) {
     e.preventDefault();
@@ -219,11 +247,34 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
         title="Campaigns"
         subtitle="Your outreach sequences"
         actions={
-          <button data-tour="workflows-new" type="button" className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>
-            <RiAddLine size={15} /> New Campaign
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm border border-base-300/60 text-base-content/70 hover:bg-base-300/50"
+              onClick={() => setShowTemplateModal(true)}
+            >
+              <RiLayoutGridLine size={15} /> Templates
+            </button>
+            <button data-tour="workflows-new" type="button" className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>
+              <RiAddLine size={15} /> New Campaign
+            </button>
+          </div>
         }
       />
+
+      {/* Search Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div className="relative w-full sm:w-64">
+          <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" size={15} />
+          <input
+            type="text"
+            placeholder="Search campaigns..."
+            className="input input-bordered input-sm w-full pl-9 bg-base-200/50"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
 
       {workflows.length === 0 ? (
         <div className="empty-state surface">
@@ -235,10 +286,10 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
         {/* Active campaigns */}
         {activeWorkflows.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-base-300/60 rounded-xl text-base-content/30 text-sm mb-4">
-            No active campaigns. Create one or restore from the archive below.
+            {search ? "No campaigns match your search." : "No active campaigns. Create one or restore from the archive below."}
           </div>
         ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
           {activeWorkflows.map((w) => {
             const colorIdx = w.id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
             const style = CARD_COLORS[colorIdx % CARD_COLORS.length];
@@ -262,7 +313,7 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
             return (
               <div
                 key={w.id}
-                className="bg-base-200 border border-base-300/50 rounded-xl p-5 cursor-pointer hover:border-base-300 transition-all hover:shadow-sm flex flex-col gap-4"
+                className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-4 cursor-pointer hover:border-base-300 transition-all hover:shadow-sm flex flex-col justify-between gap-4"
                 onClick={() => router.push(`/workflows/${w.id}`)}
               >
                 {/* Header: icon + name + status */}
@@ -397,7 +448,7 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
               Archived ({archivedWorkflows.length})
             </button>
             {archivedOpen && (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {archivedWorkflows.map((w) => {
                   const colorIdx = w.id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
                   const style = CARD_COLORS[colorIdx % CARD_COLORS.length];
@@ -405,7 +456,7 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
                   return (
                     <div
                       key={w.id}
-                      className="bg-base-200/50 border border-base-300/30 rounded-xl p-4 opacity-60 hover:opacity-80 transition-opacity flex items-center gap-3"
+                      className="bg-base-200/50 border border-base-300/30 rounded-xl p-3 sm:p-4 opacity-60 hover:opacity-80 transition-opacity flex items-center gap-3"
                     >
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${style.bg} ${style.border}`}>
                         <Icon size={15} className={style.icon} />
@@ -439,10 +490,45 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
         </>
       )}
 
+      {/* Template picker modal */}
+      {showTemplateModal && (
+        <div className="modal modal-open">
+          <div className="modal-box bg-base-200 border border-base-300/50 w-[min(92vw,520px)] max-h-[90dvh] overflow-y-auto p-4 sm:p-6">
+            <h3 className="font-semibold text-base mb-1">Campaign Templates</h3>
+            <p className="text-xs text-base-content/50 mb-4">Choose a pre-built campaign structure to get started fast.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              {CAMPAIGN_TEMPLATES.map((tmpl, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 rounded-lg border border-base-300/50 bg-base-300/20 hover:border-primary/40 hover:bg-base-300/40 transition-all cursor-pointer flex flex-col justify-between gap-2"
+                  onClick={() => {
+                    setForm({ name: tmpl.name, description: tmpl.description });
+                    setShowTemplateModal(false);
+                    setShowModal(true);
+                  }}
+                >
+                  <div>
+                    <h4 className="font-medium text-xs text-base-content line-clamp-1">{tmpl.name}</h4>
+                    <p className="text-[11px] text-base-content/50 mt-1 line-clamp-2">{tmpl.description}</p>
+                  </div>
+                  <span className="text-[10px] text-primary font-medium self-end">Use template →</span>
+                </div>
+              ))}
+            </div>
+            <div className="modal-action">
+              <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={() => setShowTemplateModal(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={() => setShowTemplateModal(false)} />
+        </div>
+      )}
+
       {/* New campaign modal */}
       {showModal && (
         <div className="modal modal-open">
-          <div className="modal-box bg-base-200 border border-base-300/50 max-w-md">
+          <div className="modal-box bg-base-200 border border-base-300/50 w-[min(92vw,520px)] max-h-[90dvh] overflow-y-auto p-4 sm:p-6">
             <h3 className="font-semibold text-base mb-4">New Campaign</h3>
             <form onSubmit={createWorkflow} className="flex flex-col gap-3">
               <div>
@@ -482,7 +568,7 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
       {/* Delete confirm */}
       {deleteId !== null && (
         <div className="modal modal-open">
-          <div className="modal-box bg-base-200 border border-base-300/50 max-w-sm">
+          <div className="modal-box bg-base-200 border border-base-300/50 w-[min(92vw,520px)] max-h-[90dvh] overflow-y-auto p-4 sm:p-6">
             <h3 className="font-semibold text-base mb-2">Delete campaign?</h3>
             <p className="text-sm text-base-content/60 mb-4">
               This will permanently delete the campaign and all its history. Cannot be undone.

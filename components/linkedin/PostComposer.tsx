@@ -363,11 +363,11 @@ export default function PostComposer({ open, onClose, accounts, defaultAccountId
   ];
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center pt-[6vh] sm:pt-[10vh] px-3 sm:px-4" role="presentation">
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-start justify-center sm:pt-[6vh] md:pt-[10vh] px-0 sm:px-4" role="presentation">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" onClick={() => !submitting && onClose()} />
 
       <div
-        className="relative w-full max-w-[552px] bg-base-200 rounded-xl shadow-2xl border border-base-300/60 flex flex-col max-h-[min(88vh,720px)] overflow-hidden"
+        className="relative w-full sm:max-w-[552px] bg-base-200 rounded-t-2xl sm:rounded-xl shadow-2xl border border-base-300/60 flex flex-col max-h-[92dvh] sm:max-h-[min(88vh,720px)] overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label="Create a post"
@@ -794,7 +794,7 @@ export default function PostComposer({ open, onClose, accounts, defaultAccountId
       {showSettings && (
         <div className="absolute inset-0 z-[90] flex items-center justify-center px-3">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowSettings(false)} />
-          <div className="relative w-full max-w-[420px] bg-base-200 rounded-xl shadow-2xl border border-base-300/60 overflow-hidden">
+          <div className="relative w-full max-w-[92vw] sm:max-w-[420px] bg-base-200 rounded-xl shadow-2xl border border-base-300/60 overflow-hidden max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-base-300/40">
               <h3 className="text-[17px] font-semibold">Post settings</h3>
               <button

@@ -220,7 +220,7 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
           title="Contacts"
           subtitle={`${total.toLocaleString()} contact${total !== 1 ? "s" : ""}${hasActiveFilters ? " matching filters" : " total"}`}
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button type="button" className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>
                 <RiUploadCloud2Line size={15} /> Import CSV
               </button>
@@ -232,15 +232,15 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
         />
 
         {/* Filter row */}
-        <div className="flex items-center gap-3 mb-5 flex-wrap" data-tour="contacts-filters">
+        <div className="flex items-center gap-2 mb-4 sm:mb-5 flex-wrap" data-tour="contacts-filters">
           {/* Search */}
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-base-content/30 pointer-events-none">
               <RiSearchLine size={13} />
             </span>
             <input
               type="text"
-              className="w-56 bg-base-200 border border-base-300/50 rounded-lg pl-8 pr-3 py-1.5 text-sm text-base-content placeholder:text-base-content/30 focus:outline-none focus:border-primary/40"
+              className="w-full sm:w-48 md:w-56 bg-base-200 border border-base-300/50 rounded-lg pl-8 pr-3 py-1.5 text-sm text-base-content placeholder:text-base-content/30 focus:outline-none focus:border-primary/40"
               placeholder="Search name, company…"
               value={search}
               onChange={(e) => changeSearch(e.target.value)}
@@ -249,7 +249,7 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
 
           {/* List selector */}
           <select
-            className="bg-base-200 border border-base-300/50 rounded-lg px-2.5 py-1.5 text-sm text-base-content focus:outline-none focus:border-primary/40 h-8"
+            className="w-full sm:w-auto bg-base-200 border border-base-300/50 rounded-lg px-2.5 py-1.5 text-sm text-base-content focus:outline-none focus:border-primary/40 h-8"
             value={listId}
             onChange={(e) => changeList(e.target.value)}
           >
@@ -262,15 +262,15 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
           </select>
 
           {/* Divider */}
-          <div className="w-px h-4 bg-base-300/60" />
+          <div className="hidden sm:block w-px h-4 bg-base-300/60" />
 
           {/* FilterBar */}
           <FilterBar filters={filters} onChange={changeFilters} />
         </div>
 
         {selected.size > 0 && (
-          <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20">
-            <span className="text-xs text-base-content/60 flex-1">{selected.size} selected</span>
+          <div className="flex items-center gap-3 gap-y-2 mb-3 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 flex-wrap">
+            <span className="text-xs text-base-content/60 flex-1 min-w-[100px]">{selected.size} selected</span>
             <button
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-base-300/60 text-base-content/70 hover:bg-base-300 transition-colors"
               onClick={() => setShowAddToList(true)}
@@ -311,10 +311,10 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
                       <input type="checkbox" className="w-3.5 h-3.5 rounded border border-base-300 bg-base-300/50 accent-primary cursor-pointer" checked={allPageSelected} onChange={toggleAll} />
                     </th>
                     <th>Name</th>
-                    <th>Title</th>
+                    <th className="hidden md:table-cell">Title</th>
                     <th>Company</th>
-                    <th>Location</th>
-                    <th>Email</th>
+                    <th className="hidden md:table-cell">Location</th>
+                    <th className="hidden sm:table-cell">Email</th>
                     <th className="w-24">Status</th>
                     <th className="w-8"></th>
                   </tr>
@@ -342,10 +342,10 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
                           <span className="font-medium truncate max-w-36">{c.full_name ?? "—"}</span>
                         </div>
                       </td>
-                      <td className="text-base-content/60 max-w-44 truncate">{c.title ?? "—"}</td>
+                      <td className="hidden md:table-cell text-base-content/60 max-w-44 truncate">{c.title ?? "—"}</td>
                       <td className="text-base-content/60 truncate max-w-36">{c.company ?? "—"}</td>
-                      <td className="text-base-content/40 text-xs truncate max-w-32">{c.location ?? "—"}</td>
-                      <td className="text-base-content/60 text-xs font-mono truncate max-w-40">{c.email ?? <span className="text-base-content/20">—</span>}</td>
+                      <td className="hidden md:table-cell text-base-content/40 text-xs truncate max-w-32">{c.location ?? "—"}</td>
+                      <td className="hidden sm:table-cell text-base-content/60 text-xs font-mono truncate max-w-40">{c.email ?? <span className="text-base-content/20">—</span>}</td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
                           <ConnectionIcon t={c} />
@@ -385,11 +385,11 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
             </div>
 
             {totalPages > 1 && (
-              <div className="flex items-center justify-between mt-3 text-sm text-base-content/50">
-                <span>
+              <div className="flex items-center justify-between mt-3 text-sm text-base-content/50 flex-wrap gap-2">
+                <span className="truncate">
                   {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total.toLocaleString()}
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     className="inline-flex items-center justify-center w-6 h-6 rounded text-base-content/50 hover:text-base-content hover:bg-base-300/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     onClick={() => setPage((p) => p - 1)}

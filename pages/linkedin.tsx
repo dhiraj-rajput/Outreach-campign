@@ -515,14 +515,14 @@ export default function LinkedInHistoryPage() {
                 </div>
               </div>
 
-              <div className="border border-base-300/40 rounded-xl overflow-hidden">
+          <div className="border border-base-300/40 rounded-xl overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-base-200/80">
                     <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
                       <th className="px-3 py-2 w-8"></th>
                       <th className="px-3 py-2">Person</th>
-                      <th className="px-3 py-2">Headline</th>
-                      <th className="px-3 py-2">Location</th>
+                      <th className="px-3 py-2 hidden sm:table-cell">Headline</th>
+                      <th className="px-3 py-2 hidden sm:table-cell">Location</th>
                       <th className="px-3 py-2 w-10"></th>
                     </tr>
                   </thead>
@@ -543,8 +543,8 @@ export default function LinkedInHistoryPage() {
                             <span className="text-[10px] text-base-content/40">{h.degree}°</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-base-content/60 max-w-[14rem] truncate">{h.headline || "—"}</td>
-                        <td className="px-3 py-2 text-base-content/50 whitespace-nowrap">{h.location || "—"}</td>
+                        <td className="px-3 py-2 text-base-content/60 max-w-[14rem] truncate hidden sm:table-cell">{h.headline || "—"}</td>
+                        <td className="px-3 py-2 text-base-content/50 whitespace-nowrap hidden sm:table-cell">{h.location || "—"}</td>
                         <td className="px-3 py-2">
                           <a href={h.linkedinUrl} target="_blank" rel="noreferrer" className="text-base-content/40 hover:text-primary">
                             <RiExternalLinkLine size={14} />
@@ -646,7 +646,7 @@ export default function LinkedInHistoryPage() {
           <div className="flex items-center justify-center py-24"><span className="loading loading-spinner loading-sm text-base-content/40" /></div>
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="kpi-strip">
               <Kpi label="Profile visits" value={totals.visits} icon={<RiEyeLine size={16} />} color="#5aa2ff" />
               <Kpi label="Connections sent" value={totals.connections_sent} icon={<RiUserAddLine size={16} />} color="#5aa2ff" />
               <Kpi label="Accepted" value={totals.connections_accepted} icon={<RiUserFollowLine size={16} />} color="#32d583" sub={rates ? `${rates.acceptance_rate}% rate` : undefined} />
@@ -656,7 +656,7 @@ export default function LinkedInHistoryPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
                 <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4 flex items-center gap-1.5"><RiBarChart2Line size={12} /> Key rates</p>
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   <RateKpi label="Acceptance" value={rates?.acceptance_rate ?? 0} color="#32d583" />
@@ -665,7 +665,7 @@ export default function LinkedInHistoryPage() {
                 </div>
                 <RateBars data={rateBars} height={140} />
               </div>
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
                 <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4">Outreach funnel</p>
                 {funnel && (
                   <FunnelBars stages={[
@@ -677,7 +677,7 @@ export default function LinkedInHistoryPage() {
                   ]} />
                 )}
               </div>
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
                 <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Activity mix</p>
                 <DonutChart data={compositionData} height={240} />
               </div>
@@ -702,7 +702,7 @@ export default function LinkedInHistoryPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
                 <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Campaign comparison</p>
                 <GroupedBarChart data={campaignBars} bars={[
                   { key: "sent", color: "#5aa2ff", label: "Connects" },
@@ -711,7 +711,7 @@ export default function LinkedInHistoryPage() {
                   { key: "replies", color: "#a78bfa", label: "Replies" },
                 ]} height={280} />
               </div>
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
                 <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Send time distribution (hour of day)</p>
                 <HourBarChart data={hourSeries} height={280} />
               </div>
@@ -757,9 +757,9 @@ export default function LinkedInHistoryPage() {
             </div>
 
             <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-              <div className="flex items-center gap-1 mb-4 bg-base-300/50 rounded-lg p-0.5 w-fit">
-                <button onClick={() => setTab("activity")} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${tab === "activity" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>Recent activity</button>
-                <button onClick={() => setTab("optedout")} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === "optedout" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>
+              <div className="tab-nav mb-4">
+                <button onClick={() => setTab("activity")} className={`tab-btn${tab === "activity" ? " active" : ""}`}>Recent activity</button>
+                <button onClick={() => setTab("optedout")} className={`tab-btn flex items-center gap-1.5${tab === "optedout" ? " active" : ""}`}>
                   Opted out <span className="text-error">({optedOut.length})</span>
                 </button>
               </div>
@@ -767,47 +767,47 @@ export default function LinkedInHistoryPage() {
                 activity.length === 0 ? <p className="text-sm text-base-content/40">No LinkedIn activity yet.</p> : (
                   <ul className="space-y-2">
                     {activity.map((a) => (
-                      <li key={a.id} className="flex items-center gap-3 text-sm py-1.5 border-b border-base-300/30 last:border-0">
-                        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-info" />
-                        <span className="flex-1 min-w-0 truncate">
+                      <li key={a.id} className="flex items-start gap-3 text-sm py-2 border-b border-base-300/30 last:border-0 min-h-[48px]">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-info mt-1.5" />
+                        <span className="flex-1 min-w-0 break-words">
                           {a.message}
                           {a.full_name ? <span className="text-base-content/40"> — {a.full_name}</span> : null}
                           {a.company ? <span className="text-base-content/30"> at {a.company}</span> : null}
                           {a.workflow_name ? <span className="text-base-content/30"> ({a.workflow_name})</span> : null}
                         </span>
-                        <span className="text-base-content/30 text-xs shrink-0">{fmt(a.created_at)}</span>
+                        <span className="text-base-content/30 text-xs shrink-0 mt-0.5">{fmt(a.created_at)}</span>
                       </li>
                     ))}
                   </ul>
                 )
-              ) : optedOut.length === 0 ? (
-                <p className="text-sm text-base-content/40">Nobody has opted out yet.</p>
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
-                      <th className="pb-2 font-medium">Person</th>
-                      <th className="pb-2 font-medium">Signal</th>
-                      <th className="pb-2 font-medium">Marked</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {optedOut.map((o) => (
-                      <tr key={o.id} className="border-t border-base-300/40">
-                        <td className="py-2">
-                          <Link href={`/contacts/${o.id}`} className="hover:text-primary transition-colors font-medium">{o.full_name ?? "—"}</Link>
-                          {o.company && <span className="text-base-content/40"> · {o.company}</span>}
-                        </td>
-                        <td className="py-2">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-error/10 text-error">
-                            <RiCloseCircleLine size={11} /> not interested
-                          </span>
-                        </td>
-                        <td className="py-2 text-base-content/40">{fmt(o.li_intent_at)}</td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
+                        <th className="pb-2 font-medium">Person</th>
+                        <th className="pb-2 font-medium">Signal</th>
+                        <th className="pb-2 font-medium hidden sm:table-cell">Marked</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {optedOut.map((o) => (
+                        <tr key={o.id} className="border-t border-base-300/40">
+                          <td className="py-2">
+                            <Link href={`/contacts/${o.id}`} className="hover:text-primary transition-colors font-medium">{o.full_name ?? "—"}</Link>
+                            {o.company && <span className="text-base-content/40"> · {o.company}</span>}
+                          </td>
+                          <td className="py-2">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-error/10 text-error">
+                              <RiCloseCircleLine size={11} /> not interested
+                            </span>
+                          </td>
+                          <td className="py-2 text-base-content/40 hidden sm:table-cell">{fmt(o.li_intent_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
               <p className="text-[11px] text-base-content/30 mt-4 flex items-center gap-1.5">
                 <RiCheckboxCircleLine size={12} /> Contacts marked opted-out here should be excluded when building new LinkedIn campaign lists.

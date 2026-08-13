@@ -351,7 +351,7 @@ export default function NewslettersPage() {
       </Head>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-lg font-semibold tracking-tight flex items-center gap-2">
             <RiNewspaperLine className="text-secondary" /> Newsletters Dashboard
@@ -362,7 +362,7 @@ export default function NewslettersPage() {
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 h-10 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
         >
           <RiAddLine size={16} /> New Newsletter
         </button>
@@ -390,7 +390,7 @@ export default function NewslettersPage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
           {/* Newsletter sidebar list */}
           <div className="md:col-span-1 space-y-2">
             <div className="text-xs font-semibold text-base-content/40 uppercase tracking-wider px-1 mb-2">
@@ -429,7 +429,7 @@ export default function NewslettersPage() {
           {selectedNewsletter && (
             <div className="md:col-span-3 space-y-4">
               {/* Analytics KPI summary cards */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 kpi-strip">
                 <div className="bg-base-200 border border-base-300/50 rounded-xl p-3.5">
                   <div className="text-xs font-medium text-base-content/40 uppercase tracking-wider">Subscribers</div>
                   <div className="text-xl font-bold text-base-content mt-1">{selectedNewsletter.subscriber_count}</div>
@@ -448,8 +448,8 @@ export default function NewslettersPage() {
               </div>
 
               {/* Active Newsletter Banner */}
-              <div className="bg-base-200/60 border border-base-300/50 rounded-xl p-4 flex items-center justify-between">
-                <div>
+              <div className="bg-base-200/60 border border-base-300/50 rounded-xl p-3 sm:p-4 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
                   <h2 className="font-semibold text-base">{selectedNewsletter.name}</h2>
                   {selectedNewsletter.description && (
                     <p className="text-xs text-base-content/50 mt-0.5">
@@ -460,16 +460,16 @@ export default function NewslettersPage() {
                     Sender: {selectedNewsletter.sender_name ?? "—"} ({selectedNewsletter.sender_email})
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => setShowSubModal(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300/60 text-base-content/80 hover:bg-base-300 transition-colors"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 h-9 rounded-lg text-xs font-medium bg-base-300/60 text-base-content/80 hover:bg-base-300 transition-colors"
                   >
                     <RiUserAddLine size={14} /> Add / Import Subscribers
                   </button>
                   <button
                     onClick={() => setShowEditionModal(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary text-secondary-content hover:bg-secondary/90 transition-colors"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 h-9 rounded-lg text-xs font-medium bg-secondary text-secondary-content hover:bg-secondary/90 transition-colors"
                   >
                     <RiAddLine size={14} /> Compose Issue
                   </button>
@@ -477,10 +477,10 @@ export default function NewslettersPage() {
               </div>
 
               {/* Tabs */}
-              <div className="flex items-center gap-2 border-b border-base-300/50 pb-2">
+              <div className="tab-nav flex items-center gap-2 border-b border-base-300/50 pb-2 overflow-x-auto">
                 <button
                   onClick={() => setTab("editions")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  className={`px-3 py-1.5 h-9 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
                     tab === "editions"
                       ? "bg-primary/15 text-primary border border-primary/30"
                       : "text-base-content/50 hover:bg-base-300/40"
@@ -490,7 +490,7 @@ export default function NewslettersPage() {
                 </button>
                 <button
                   onClick={() => setTab("subscribers")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  className={`px-3 py-1.5 h-9 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
                     tab === "subscribers"
                       ? "bg-primary/15 text-primary border border-primary/30"
                       : "text-base-content/50 hover:bg-base-300/40"
@@ -512,10 +512,10 @@ export default function NewslettersPage() {
                       {editions.map((ed) => (
                         <div
                           key={ed.id}
-                          className="bg-base-200/40 border border-base-300/40 rounded-xl p-4 flex items-center justify-between"
+                          className="bg-base-200/40 border border-base-300/40 rounded-xl p-3 sm:p-4 flex flex-wrap items-start justify-between gap-3"
                         >
-                          <div>
-                            <div className="flex items-center gap-2">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="font-semibold text-sm">{ed.title}</span>
                               <span
                                 className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
@@ -531,17 +531,17 @@ export default function NewslettersPage() {
                               Subject: {ed.subject}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <button
                               onClick={() => setPreviewEdition(ed)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-base-300/60 text-base-content hover:bg-base-300 transition-colors"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 h-9 rounded-lg text-xs font-medium bg-base-300/60 text-base-content hover:bg-base-300 transition-colors"
                             >
                               <RiEyeLine size={13} /> Preview
                             </button>
                             <button
                               onClick={() => handleSendEdition(ed.id)}
                               disabled={sendingEditionId === ed.id}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-content hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 h-9 rounded-lg text-xs font-medium bg-primary text-primary-content hover:bg-primary/90 disabled:opacity-40 transition-colors"
                             >
                               {sendingEditionId === ed.id ? (
                                 <RiLoader4Line size={13} className="animate-spin" />
@@ -566,21 +566,21 @@ export default function NewslettersPage() {
                       No subscribers added yet.
                     </div>
                   ) : (
-                    <div className="rounded-xl border border-base-300/50 overflow-hidden">
+                    <div className="rounded-xl border border-base-300/50 overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="bg-base-200/60 border-b border-base-300/50 text-base-content/40">
                             <th className="text-left px-4 py-2">Email</th>
-                            <th className="text-left px-4 py-2">Name</th>
+                            <th className="text-left px-4 py-2 hidden sm:table-cell">Name</th>
                             <th className="text-left px-4 py-2">Status</th>
-                            <th className="text-right px-4 py-2">Subscribed</th>
+                            <th className="text-right px-4 py-2 hidden sm:table-cell">Subscribed</th>
                           </tr>
                         </thead>
                         <tbody>
                           {subscribers.map((s) => (
                             <tr key={s.id} className="border-b border-base-300/30">
                               <td className="px-4 py-2.5 font-medium">{s.email}</td>
-                              <td className="px-4 py-2.5 text-base-content/60">
+                              <td className="px-4 py-2.5 text-base-content/60 hidden sm:table-cell">
                                 {s.full_name ?? "—"}
                               </td>
                               <td className="px-4 py-2.5">
@@ -588,7 +588,7 @@ export default function NewslettersPage() {
                                   {s.status}
                                 </span>
                               </td>
-                              <td className="px-4 py-2.5 text-right text-base-content/40">
+                              <td className="px-4 py-2.5 text-right text-base-content/40 hidden sm:table-cell">
                                 {new Date(s.subscribed_at).toLocaleDateString()}
                               </td>
                             </tr>

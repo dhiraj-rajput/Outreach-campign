@@ -198,19 +198,19 @@ export default function EmailPage() {
     <>
       <Head><title>Email — Linki</title><meta name="robots" content="noindex, nofollow" /></Head>
       <div className="space-y-5">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-lg font-semibold tracking-tight text-base-content flex items-center gap-2">
               <RiMailSendLine className="text-base-content/40" /> Email Analytics
             </h1>
             <p className="text-sm text-base-content/40 mt-0.5">Campaign &amp; newsletter performance, rates, funnel, and account health.</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {mainTab === "overview" && (
               <div className="flex items-center gap-0.5 bg-base-300/50 rounded-lg p-0.5">
                 {DAY_OPTIONS.map((d) => (
                   <button key={d} onClick={() => setDays(d)}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${days === d ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/35 hover:text-base-content/60"}`}>
+                    className={`px-2.5 py-1 h-8 rounded-md text-xs font-medium transition-all ${days === d ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/35 hover:text-base-content/60"}`}>
                     {d}d
                   </button>
                 ))}
@@ -218,9 +218,9 @@ export default function EmailPage() {
             )}
             <div className="flex items-center gap-1 bg-base-300/50 rounded-lg p-0.5">
               <button type="button" onClick={() => setMainTab("overview")}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${mainTab === "overview" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>Overview</button>
+                className={`px-3 py-1.5 h-8 rounded-md text-xs font-medium transition-all ${mainTab === "overview" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>Overview</button>
               <button type="button" onClick={() => setMainTab("health")}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${mainTab === "health" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>Health</button>
+                className={`px-3 py-1.5 h-8 rounded-md text-xs font-medium transition-all ${mainTab === "health" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>Health</button>
             </div>
           </div>
         </div>
@@ -231,7 +231,7 @@ export default function EmailPage() {
               <div className="flex items-center justify-center py-24"><span className="loading loading-spinner loading-sm text-base-content/40" /></div>
             ) : (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 kpi-strip">
                   <Kpi label="Campaign sent" value={totals.campaign_emails_sent} icon={<RiFlowChart size={16} />} color="#f4b740" />
                   <Kpi label="Newsletter sent" value={totals.newsletter_emails_sent} icon={<RiNewspaperLine size={16} />} color="#e879f9" />
                   <Kpi label="Opens" value={totals.campaign_opens + totals.newsletter_opens} icon={<RiEyeLine size={16} />} color="#38bdf8" sub={rates ? `${rates.overall_open_rate}% rate` : undefined} />
@@ -248,29 +248,37 @@ export default function EmailPage() {
                       <RateKpi label="Click" value={rates?.campaign_click_rate ?? 0} color="#32d583" />
                       <RateKpi label="Reply" value={rates?.campaign_reply_rate ?? 0} color="#a78bfa" />
                     </div>
-                    <RateBars data={rateBars} height={160} />
+                    <div className="min-h-[180px] sm:min-h-[220px]">
+                      <RateBars data={rateBars} height={160} />
+                    </div>
                   </div>
                   <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
                     <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4">Email funnel</p>
-                    {funnel && (
-                      <FunnelBars stages={[
-                        { label: "Sent", value: funnel.sent, color: "#f4b740" },
-                        { label: "Opened", value: funnel.opened, color: "#38bdf8" },
-                        { label: "Clicked", value: funnel.clicked, color: "#32d583" },
-                        { label: "Replied", value: funnel.replied, color: "#a78bfa" },
-                        { label: "Unsubscribed", value: funnel.unsubscribed, color: "#f87171" },
-                      ]} />
-                    )}
+                    <div className="min-h-[180px] sm:min-h-[220px]">
+                      {funnel && (
+                        <FunnelBars stages={[
+                          { label: "Sent", value: funnel.sent, color: "#f4b740" },
+                          { label: "Opened", value: funnel.opened, color: "#38bdf8" },
+                          { label: "Clicked", value: funnel.clicked, color: "#32d583" },
+                          { label: "Replied", value: funnel.replied, color: "#a78bfa" },
+                          { label: "Unsubscribed", value: funnel.unsubscribed, color: "#f87171" },
+                        ]} />
+                      )}
+                    </div>
                   </div>
                   <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
                     <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Volume mix</p>
-                    <DonutChart data={compositionData} height={240} />
+                    <div className="min-h-[180px] sm:min-h-[220px]">
+                      <DonutChart data={compositionData} height={240} />
+                    </div>
                   </div>
                 </div>
 
                 <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
                   <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Email activity over time ({days}d)</p>
-                  <ActivityAreaChart data={daily} series={SERIES} height={260} />
+                  <div className="min-h-[180px] sm:min-h-[260px]">
+                    <ActivityAreaChart data={daily} series={SERIES} height={260} />
+                  </div>
                   <div className="mt-5 pt-4 border-t border-base-300/30">
                     <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Daily breakdown</p>
                     <DailyBreakdownTable
@@ -291,16 +299,20 @@ export default function EmailPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
                     <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Campaign comparison</p>
-                    <GroupedBarChart data={campaignBars} bars={[
-                      { key: "sent", color: "#f4b740", label: "Sent" },
-                      { key: "opened", color: "#38bdf8", label: "Opened" },
-                      { key: "clicked", color: "#32d583", label: "Clicked" },
-                      { key: "replied", color: "#a78bfa", label: "Replied" },
-                    ]} height={280} />
+                    <div className="min-h-[280px]">
+                      <GroupedBarChart data={campaignBars} bars={[
+                        { key: "sent", color: "#f4b740", label: "Sent" },
+                        { key: "opened", color: "#38bdf8", label: "Opened" },
+                        { key: "clicked", color: "#32d583", label: "Clicked" },
+                        { key: "replied", color: "#a78bfa", label: "Replied" },
+                      ]} height={280} />
+                    </div>
                   </div>
                   <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
                     <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Send time distribution (hour of day)</p>
-                    <HourBarChart data={hourSeries} height={280} />
+                    <div className="min-h-[180px] sm:min-h-[220px]">
+                      <HourBarChart data={hourSeries} height={280} />
+                    </div>
                   </div>
                 </div>
 
@@ -315,12 +327,12 @@ export default function EmailPage() {
                           <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
                             <th className="pb-2 font-medium">Campaign</th>
                             <th className="pb-2 font-medium">Sent</th>
-                            <th className="pb-2 font-medium">Opened</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Opened</th>
                             <th className="pb-2 font-medium">Open %</th>
-                            <th className="pb-2 font-medium">Clicked</th>
-                            <th className="pb-2 font-medium">Replied</th>
-                            <th className="pb-2 font-medium">Reply %</th>
-                            <th className="pb-2 font-medium">Last activity</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Clicked</th>
+                            <th className="pb-2 font-medium hidden lg:table-cell">Replied</th>
+                            <th className="pb-2 font-medium hidden lg:table-cell">Reply %</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Last activity</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -331,12 +343,12 @@ export default function EmailPage() {
                               <tr key={c.workflow_id} className="border-t border-base-300/40">
                                 <td className="py-2"><Link href={`/workflows/${c.workflow_id}`} className="hover:text-primary transition-colors font-medium">{c.workflow_name}</Link></td>
                                 <td className="py-2 tabular-nums">{c.emails_sent}</td>
-                                <td className="py-2 text-success tabular-nums">{c.opened}</td>
+                                <td className="py-2 text-success tabular-nums hidden md:table-cell">{c.opened}</td>
                                 <td className="py-2 tabular-nums text-base-content/60">{openPct}%</td>
-                                <td className="py-2 text-info tabular-nums">{c.clicked}</td>
-                                <td className="py-2 text-primary tabular-nums">{c.replied}</td>
-                                <td className="py-2 tabular-nums text-base-content/60">{replyPct}%</td>
-                                <td className="py-2 text-base-content/40">{fmt(c.last_activity_at)}</td>
+                                <td className="py-2 text-info tabular-nums hidden md:table-cell">{c.clicked}</td>
+                                <td className="py-2 text-primary tabular-nums hidden lg:table-cell">{c.replied}</td>
+                                <td className="py-2 tabular-nums text-base-content/60 hidden lg:table-cell">{replyPct}%</td>
+                                <td className="py-2 text-base-content/40 hidden md:table-cell">{fmt(c.last_activity_at)}</td>
                               </tr>
                             );
                           })}
@@ -356,13 +368,13 @@ export default function EmailPage() {
                         <thead>
                           <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
                             <th className="pb-2 font-medium">Edition</th>
-                            <th className="pb-2 font-medium">Newsletter</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Newsletter</th>
                             <th className="pb-2 font-medium">Sent</th>
-                            <th className="pb-2 font-medium">Opened</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Opened</th>
                             <th className="pb-2 font-medium">Open %</th>
-                            <th className="pb-2 font-medium">Clicked</th>
-                            <th className="pb-2 font-medium">Failed</th>
-                            <th className="pb-2 font-medium">Sent at</th>
+                            <th className="pb-2 font-medium hidden lg:table-cell">Clicked</th>
+                            <th className="pb-2 font-medium hidden lg:table-cell">Failed</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Sent at</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -371,13 +383,13 @@ export default function EmailPage() {
                             return (
                               <tr key={e.id} className="border-t border-base-300/40">
                                 <td className="py-2 font-medium">{e.title}</td>
-                                <td className="py-2 text-base-content/60">{e.newsletter_name}</td>
+                                <td className="py-2 text-base-content/60 hidden md:table-cell">{e.newsletter_name}</td>
                                 <td className="py-2 tabular-nums">{e.sent_count}/{e.total_recipients}</td>
-                                <td className="py-2 text-success tabular-nums">{e.opened_count}</td>
+                                <td className="py-2 text-success tabular-nums hidden md:table-cell">{e.opened_count}</td>
                                 <td className="py-2 tabular-nums text-base-content/60">{openPct}%</td>
-                                <td className="py-2 text-info tabular-nums">{e.clicked_count}</td>
-                                <td className="py-2 text-error tabular-nums">{e.failed_count || "—"}</td>
-                                <td className="py-2 text-base-content/40">{fmt(e.sent_at)}</td>
+                                <td className="py-2 text-info tabular-nums hidden lg:table-cell">{e.clicked_count}</td>
+                                <td className="py-2 text-error tabular-nums hidden lg:table-cell">{e.failed_count || "—"}</td>
+                                <td className="py-2 text-base-content/40 hidden md:table-cell">{fmt(e.sent_at)}</td>
                               </tr>
                             );
                           })}
@@ -388,7 +400,7 @@ export default function EmailPage() {
                 </div>
 
                 <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-                  <div className="flex items-center gap-1 mb-4 bg-base-300/50 rounded-lg p-0.5 w-fit">
+                  <div className="tab-nav flex items-center gap-1 mb-4 bg-base-300/50 rounded-lg p-0.5 w-fit overflow-x-auto">
                     <button onClick={() => setTab("activity")} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${tab === "activity" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>Recent activity</button>
                     <button onClick={() => setTab("unsubscribed")} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${tab === "unsubscribed" ? "bg-base-100 text-base-content shadow-sm" : "text-base-content/40 hover:text-base-content/70"}`}>
                       Unsubscribed <span className="text-error">({unsubscribed.length})</span>
@@ -421,37 +433,39 @@ export default function EmailPage() {
                   ) : unsubscribed.length === 0 ? (
                     <p className="text-sm text-base-content/40">Nobody has unsubscribed yet.</p>
                   ) : (
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
-                          <th className="pb-2 font-medium">Person</th>
-                          <th className="pb-2 font-medium">Email</th>
-                          <th className="pb-2 font-medium">Reason</th>
-                          <th className="pb-2 font-medium">Unsubscribed</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {unsubscribed.map((u) => (
-                          <tr key={u.id} className={`border-t border-base-300/40 ${highlight && u.target_id === highlight ? "bg-error/5" : ""}`}>
-                            <td className="py-2">
-                              {u.target_id ? (
-                                <Link href={`/contacts/${u.target_id}`} className="hover:text-primary transition-colors font-medium">{u.full_name ?? "—"}</Link>
-                              ) : (
-                                <span className="text-base-content/50">{u.full_name ?? "—"}</span>
-                              )}
-                              {u.company && <span className="text-base-content/40"> · {u.company}</span>}
-                            </td>
-                            <td className="py-2 text-base-content/60">{u.email}</td>
-                            <td className="py-2">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-error/10 text-error">
-                                <RiCloseCircleLine size={11} /> {u.reason.replace(/_/g, " ")}
-                              </span>
-                            </td>
-                            <td className="py-2 text-base-content/40">{fmt(u.created_at)}</td>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-[11px] text-base-content/40 uppercase tracking-wide">
+                            <th className="pb-2 font-medium">Person</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Email</th>
+                            <th className="pb-2 font-medium">Reason</th>
+                            <th className="pb-2 font-medium hidden md:table-cell">Unsubscribed</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {unsubscribed.map((u) => (
+                            <tr key={u.id} className={`border-t border-base-300/40 ${highlight && u.target_id === highlight ? "bg-error/5" : ""}`}>
+                              <td className="py-2">
+                                {u.target_id ? (
+                                  <Link href={`/contacts/${u.target_id}`} className="hover:text-primary transition-colors font-medium">{u.full_name ?? "—"}</Link>
+                                ) : (
+                                  <span className="text-base-content/50">{u.full_name ?? "—"}</span>
+                                )}
+                                {u.company && <span className="text-base-content/40"> · {u.company}</span>}
+                              </td>
+                              <td className="py-2 text-base-content/60 hidden md:table-cell">{u.email}</td>
+                              <td className="py-2">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-error/10 text-error">
+                                  <RiCloseCircleLine size={11} /> {u.reason.replace(/_/g, " ")}
+                                </span>
+                              </td>
+                              <td className="py-2 text-base-content/40 hidden md:table-cell">{fmt(u.created_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                   <p className="text-[11px] text-base-content/30 mt-4 flex items-center gap-1.5">
                     <RiCheckboxCircleLine size={12} /> Unsubscribed contacts are automatically blocked from being re-added to campaigns or newsletters.
@@ -464,15 +478,15 @@ export default function EmailPage() {
 
         {mainTab === "health" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-base-content">Email Health</h2>
                 <p className="text-sm text-base-content/50 mt-0.5">Daily send volume per account vs ramp limits</p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 {lastRefresh && <span className="text-xs text-base-content/30">Updated {formatTime(lastRefresh.toISOString())}</span>}
                 <button onClick={loadHealth} disabled={healthLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-base-300 text-base-content/70 hover:text-base-content border border-base-300/50 hover:bg-base-300/80 transition-colors">
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 h-9 rounded-lg text-sm font-medium bg-base-300 text-base-content/70 hover:text-base-content border border-base-300/50 hover:bg-base-300/80 transition-colors">
                   <RiRefreshLine size={13} className={healthLoading ? "animate-spin" : ""} /> Refresh
                 </button>
               </div>
@@ -573,7 +587,7 @@ export default function EmailPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-base-200 rounded-xl border border-base-300/50 overflow-hidden">
                 <div className="px-5 py-3 border-b border-base-300/40">
                   <span className="text-sm font-medium text-base-content">Recent sends</span>
