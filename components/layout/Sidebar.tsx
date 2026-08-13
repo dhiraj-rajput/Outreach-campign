@@ -161,7 +161,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             type="button"
             onClick={() => signOut({ callbackUrl: "/login" })}
             title={!labels ? "Sign out" : undefined}
-            className={`nav-item ${labels ? "px-2.5" : "justify-center"} hover:!text-error/80 hover:!bg-error/5`}
+            className={`nav-item ${labels ? "px-2.5" : "justify-center"} hover:!text-error/80! hover:!bg-error/5!`}
           >
             <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
               <RiLogoutBoxLine size={15} />
