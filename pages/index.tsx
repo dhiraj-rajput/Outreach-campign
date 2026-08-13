@@ -3,7 +3,6 @@ import { useEffect, useState, useRef } from "react";
 import { FiUserPlus, FiMessageSquare, FiEye, FiRepeat, FiUsers, FiRefreshCw } from "react-icons/fi";
 import { RiMailSendLine, RiReplyLine, RiRobot2Line, RiLinkedinBoxLine, RiFilterLine } from "react-icons/ri";
 import { ActivityAreaChart, RateKpi, DailyBreakdownTable } from "@/components/analytics/Charts";
-import PageHeader from "@/components/ui/PageHeader";
 
 interface DashboardStats {
   totals: {
@@ -70,11 +69,11 @@ function Counter({ value, duration = 700 }: { value: number; duration?: number }
 
 function SectionLabel({ icon, label, color }: { icon: React.ReactNode; label: string; color: string }) {
   return (
-    <div className="section-label">
-      <span style={{ color }} className="flex items-center gap-1.5">
+    <div className="hq-section-title" style={{ color }}>
+      <span className="flex items-center gap-1.5">
         {icon} {label}
       </span>
-      <div className="line" />
+      <div className="hq-rule" />
     </div>
   );
 }
@@ -90,23 +89,20 @@ function KpiCard({
   pulse?: boolean;
 }) {
   return (
-    <div className="kpi-card">
+    <div className="hq-kpi-card">
       <div className="flex items-start justify-between">
-        <span
-          className="w-7 h-7 rounded-md flex items-center justify-center text-xs shrink-0"
-          style={{ background: `${color}14`, color }}
-        >
+        <span className="hq-kpi-icon" style={{ background: `${color}17`, color }}>
           {icon}
         </span>
         {pulse && (
           <span className="w-1.5 h-1.5 rounded-full animate-pulse mt-1" style={{ background: color }} />
         )}
       </div>
-      <div className="kpi-value">
+      <div className="hq-kpi-value">
         <Counter value={value} />
       </div>
-      <div className="kpi-label">{label}</div>
-      {sub && <div className="kpi-sub font-medium" style={{ color }}>{sub}</div>}
+      <div className="hq-kpi-label">{label}</div>
+      {sub && <div className="hq-kpi-sub" style={{ color }}>{sub}</div>}
     </div>
   );
 }
@@ -161,20 +157,16 @@ function ActivityChart({
   onDaysChange: (d: number) => void;
 }) {
   return (
-    <div className="surface p-4 sm:p-5 flex flex-col" style={{ minHeight: 260 }} data-tour="dashboard-chart">
+    <div className="hq-card p-4 sm:p-5 flex flex-col" style={{ minHeight: 260 }} data-tour="dashboard-chart">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <span className="text-sm font-medium text-base-content">Activity over time</span>
-        <div className="flex items-center gap-0.5 bg-base-300/50 rounded-lg p-0.5">
+        <span className="text-sm font-semibold text-base-content">Activity over time</span>
+        <div className="hq-pill-group">
           {DAY_OPTIONS.map((d) => (
             <button
               key={d}
               type="button"
               onClick={() => onDaysChange(d)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                days === d
-                  ? "bg-base-100 text-base-content shadow-sm"
-                  : "text-base-content/35 hover:text-base-content/60"
-              }`}
+              className={`hq-pill-btn ${days === d ? "active" : ""}`}
             >
               {d}d
             </button>
@@ -239,11 +231,11 @@ function LinkedInCard({
   ];
 
   return (
-    <div className="surface p-4">
+    <div className="hq-card p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <RiLinkedinBoxLine size={14} className="text-base-content/35" />
-          <span className="text-xs font-medium text-base-content/45 uppercase tracking-wider">LinkedIn account</span>
+          <RiLinkedinBoxLine size={14} className="text-primary" />
+          <span className="text-xs font-semibold text-base-content/55 uppercase tracking-wider">LinkedIn account</span>
         </div>
         <div className="flex items-center gap-2">
           {syncedAt && (
@@ -256,7 +248,7 @@ function LinkedInCard({
               type="button"
               onClick={handleSync}
               disabled={syncing}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-base-content/45 hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
+              className="hq-btn hq-btn-light !py-1 !px-2.5 text-xs disabled:opacity-40"
             >
               <FiRefreshCw size={10} className={syncing ? "animate-spin" : ""} />
               {syncing ? "Syncing…" : "Sync"}
@@ -266,7 +258,7 @@ function LinkedInCard({
       </div>
       <div className="grid grid-cols-3 gap-2">
         {items.map((s) => (
-          <div key={s.label} className="flex flex-col gap-1 bg-base-300/30 rounded-lg p-2.5 sm:p-3">
+          <div key={s.label} className="hq-mini-stat flex flex-col gap-1 !p-2.5 sm:!p-3">
             {s.value !== null ? (
               <span className="text-lg sm:text-xl font-semibold tabular-nums" style={{ color: s.color }}>
                 <Counter value={s.value} />
@@ -292,11 +284,11 @@ function AiUsagePanel({ data, days }: { data: AgentStats["daily"]; days: number 
   const labelEvery = days <= 7 ? 1 : days <= 14 ? 2 : days <= 30 ? 5 : 15;
 
   return (
-    <div className="surface p-4">
+    <div className="hq-card p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <RiRobot2Line size={14} className="text-base-content/35" />
-          <span className="text-xs font-medium text-base-content/45 uppercase tracking-wider">AI usage</span>
+          <RiRobot2Line size={14} className="text-primary" />
+          <span className="text-xs font-semibold text-base-content/55 uppercase tracking-wider">AI usage</span>
         </div>
         {hasData && (
           <div className="flex items-center gap-3 text-xs">
@@ -348,12 +340,14 @@ function FilterBar({
   const hasFilter = listId || workflowId;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <RiFilterLine size={13} className="text-base-content/30 shrink-0 hidden sm:block" />
+      <RiFilterLine size={13} className="text-primary shrink-0 hidden sm:block" />
       <select
         value={listId}
         onChange={(e) => { onListChange(e.target.value); if (e.target.value) onWorkflowChange(""); }}
-        className={`h-8 px-2.5 rounded-lg text-xs border bg-base-200 transition-colors focus:outline-none cursor-pointer ${
-          listId ? "border-primary/40 text-primary" : "border-base-300/50 text-base-content/50 hover:border-base-300"
+        className={`h-8 px-3 rounded-full text-xs border transition-colors focus:outline-none cursor-pointer ${
+          listId
+            ? "border-transparent bg-primary text-primary-content font-medium"
+            : "border-base-300 bg-base-100 text-base-content/55 hover:border-primary/40"
         }`}
       >
         <option value="">All lists</option>
@@ -362,8 +356,10 @@ function FilterBar({
       <select
         value={workflowId}
         onChange={(e) => { onWorkflowChange(e.target.value); if (e.target.value) onListChange(""); }}
-        className={`h-8 px-2.5 rounded-lg text-xs border bg-base-200 transition-colors focus:outline-none cursor-pointer ${
-          workflowId ? "border-primary/40 text-primary" : "border-base-300/50 text-base-content/50 hover:border-base-300"
+        className={`h-8 px-3 rounded-full text-xs border transition-colors focus:outline-none cursor-pointer ${
+          workflowId
+            ? "border-transparent bg-primary text-primary-content font-medium"
+            : "border-base-300 bg-base-100 text-base-content/55 hover:border-primary/40"
         }`}
       >
         <option value="">All campaigns</option>
@@ -373,7 +369,7 @@ function FilterBar({
         <button
           type="button"
           onClick={() => { onListChange(""); onWorkflowChange(""); }}
-          className="h-8 px-2.5 rounded-lg text-xs text-base-content/40 hover:text-base-content/70 hover:bg-base-300/50 transition-colors"
+          className="h-8 px-3 rounded-full text-xs text-base-content/45 hover:text-primary hover:bg-primary/10 transition-colors"
         >
           Clear
         </button>
@@ -457,58 +453,56 @@ export default function Dashboard() {
       </Head>
 
       <div className="space-y-5">
-        <PageHeader
-          title="Dashboard"
-          subtitle="Your outreach at a glance — LinkedIn, email, and replies in one place."
-          actions={
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto" data-tour="dashboard-filters">
-              <FilterBar
-                lists={stats.lists}
-                workflows={stats.workflows}
-                listId={listId}
-                workflowId={workflowId}
-                onListChange={setListId}
-                onWorkflowChange={setWorkflowId}
-              />
-              <div className="flex flex-wrap items-center gap-1.5 sm:pl-2 sm:border-l border-base-300/40">
-                <span className="text-xs text-base-content/30 mr-0.5">Today</span>
-                {[
-                  { label: `${today.visits_today} visits`, color: "#60a5fa" },
-                  { label: `${today.connections_today} connects`, color: "#22c55e" },
-                  { label: `${today.messages_today} messages`, color: "#f59e0b" },
-                  { label: `${today.inmails_today} inmails`, color: "#c084fc" },
-                ].map((p) => (
-                  <span
-                    key={p.label}
-                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium"
-                    style={{ background: `${p.color}15`, color: p.color }}
-                  >
-                    {p.label}
-                  </span>
-                ))}
+        {/* Header */}
+        <div className="hq-header">
+          <div className="hq-header-accent" aria-hidden="true" />
+          <div className="hq-header-main">
+            <div>
+              <div className="flex items-center gap-2">
+                <h1>Dashboard</h1>
               </div>
+              <p className="hq-header-sub">Your outreach at a glance — LinkedIn, email, and replies in one place.</p>
             </div>
-          }
-        />
+            <div className="hq-header-badges" data-tour="dashboard-filters">
+              <span className="hq-header-today">Today</span>
+              <span className="hq-chip"><b><Counter value={today.visits_today} /></b> visits</span>
+              <span className="hq-chip"><b><Counter value={today.connections_today} /></b> connects</span>
+              <span className="hq-chip"><b><Counter value={today.messages_today} /></b> messages</span>
+              <span className="hq-chip"><b><Counter value={today.inmails_today} /></b> inmails</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="hq-card p-3 sm:p-3.5">
+          <FilterBar
+            lists={stats.lists}
+            workflows={stats.workflows}
+            listId={listId}
+            workflowId={workflowId}
+            onListChange={setListId}
+            onWorkflowChange={setWorkflowId}
+          />
+        </div>
 
         {/* CRM strip */}
         {stats.crm && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
-            <a href="/todos" className="surface p-3 hover:border-primary/40 transition-colors">
-              <div className="text-[11px] text-base-content/40 mb-1">Open todos</div>
-              <div className="text-xl font-semibold tabular-nums">{stats.crm.open_todos}</div>
+            <a href="/todos" className="hq-mini-stat">
+              <div className="text-[11px] text-base-content/45 mb-1">Open todos</div>
+              <div className="text-xl font-bold tabular-nums" style={{ color: "var(--hq-primary)" }}>{stats.crm.open_todos}</div>
             </a>
-            <a href="/todos" className="surface p-3 hover:border-error/40 transition-colors">
-              <div className="text-[11px] text-base-content/40 mb-1">Overdue</div>
-              <div className="text-xl font-semibold tabular-nums text-error">{stats.crm.overdue_todos}</div>
+            <a href="/todos" className="hq-mini-stat">
+              <div className="text-[11px] text-base-content/45 mb-1">Overdue</div>
+              <div className="text-xl font-bold tabular-nums text-error">{stats.crm.overdue_todos}</div>
             </a>
-            <a href="/todos" className="surface p-3 hover:border-warning/40 transition-colors">
-              <div className="text-[11px] text-base-content/40 mb-1">Due today</div>
-              <div className="text-xl font-semibold tabular-nums text-warning">{stats.crm.due_today}</div>
+            <a href="/todos" className="hq-mini-stat">
+              <div className="text-[11px] text-base-content/45 mb-1">Due today</div>
+              <div className="text-xl font-bold tabular-nums text-warning">{stats.crm.due_today}</div>
             </a>
-            <a href="/inbox" className="surface p-3 hover:border-info/40 transition-colors">
-              <div className="text-[11px] text-base-content/40 mb-1">Inbox replies</div>
-              <div className="text-xl font-semibold tabular-nums">{stats.crm.inbox_replies}</div>
+            <a href="/inbox" className="hq-mini-stat">
+              <div className="text-[11px] text-base-content/45 mb-1">Inbox replies</div>
+              <div className="text-xl font-bold tabular-nums" style={{ color: "var(--hq-primary)" }}>{stats.crm.inbox_replies}</div>
             </a>
           </div>
         )}
@@ -580,9 +574,9 @@ export default function Dashboard() {
         {/* Funnel + Chart */}
         <div className="dash-split">
           <div className="space-y-3">
-            <div className="surface overflow-hidden" data-tour="dashboard-funnel">
+            <div className="hq-card overflow-hidden" data-tour="dashboard-funnel">
               <div className="px-4 py-2.5 border-b border-base-300/30">
-                <span className="text-xs font-medium text-base-content/35 uppercase tracking-wider">Funnel</span>
+                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--hq-primary)" }}>Funnel</span>
               </div>
               <div className="divide-y divide-base-300/20 py-1">
                 <FunnelRow icon={<FiUsers size={11} />} color="#808080" label="Targets" value={totals.total_targets} max={maxFunnelValue} />

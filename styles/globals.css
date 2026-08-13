@@ -16,14 +16,14 @@
   name: "linki-dark";
   default: true;
   color-scheme: dark;
-  --color-base-100: #15191c;   /* page canvas — charcoal, not black */
-  --color-base-200: #1d2226;   /* card / surface — one step up from canvas */
-  --color-base-300: #2b3238;   /* borders / hover / elevated charcoal */
-  --color-base-content: #e9edef; /* soft off-white text, no glare */
-  --color-primary: #2f9df4;    /* same Brand/Info hue as light mode, lightened for AA contrast on charcoal */
-  --color-primary-content: #ffffff;
+  --color-base-100: #17161d;   /* page canvas — charcoal with a whisper of the brand purple undertone */
+  --color-base-200: #1e1c25;   /* card / surface — one step up from canvas */
+  --color-base-300: #2d2a37;   /* borders / hover / elevated charcoal, same purple-charcoal family */
+  --color-base-content: #ece9f4; /* soft off-white text with a faint violet cast, no glare */
+  --color-primary: #8b8df2;    /* Hoteliq brand purple (#4C4DDC), lightened + softened for AA contrast on charcoal */
+  --color-primary-content: #17161d;
   --color-secondary: #93a3ad;  /* Blue-Grey family, mirrors light theme's D_Grey */
-  --color-secondary-content: #15191c;
+  --color-secondary-content: #17161d;
   --color-accent: #4caf50;     /* Success, lightened from Figma's #2e7d31 for dark contrast */
   --color-accent-content: #08240a;
   --color-neutral: #242b30;
@@ -49,11 +49,11 @@
 @plugin "daisyui/theme" {
   name: "linki-light";
   color-scheme: light;
-  --color-base-100: #eef1f5;   /* softened Silver — dimmer canvas, less glare */
-  --color-base-200: #f8f9fb;   /* off-white cards — never pure #fff */
-  --color-base-300: #dfe4ea;   /* border, still from the Grey-blue family */
-  --color-base-content: #263238; /* Neutral/Black — unchanged, already comfortable */
-  --color-primary: #1c7ed6;    /* Brand/Info, deepened slightly so it doesn't vibrate on a lighter page */
+  --color-base-100: #f5f5fb;   /* Hoteliq canvas — soft lavender-tinted white */
+  --color-base-200: #ffffff;   /* Hoteliq cards — pure white, per style guide */
+  --color-base-300: #e1e1e1;   /* Hoteliq Color 05 — border/hover grey */
+  --color-base-content: #101010; /* Hoteliq Color 03 — near-black text */
+  --color-primary: #6a6ce2;    /* Hoteliq purple, lightened from the raw #4C4DDC swatch so it reads as friendly, not heavy */
   --color-primary-content: #ffffff;
   --color-secondary: #4d4d4d;  /* D_Grey */
   --color-secondary-content: #ffffff;
@@ -126,20 +126,20 @@ a:focus:not(:focus-visible) {
 
 /* Figma-style soft elevation on light theme (shadows use Grey-blue #ABBED1) — kept subtle so it reads as depth, not a bright outline */
 [data-theme="linki-light"] .surface {
-  border-color: color-mix(in srgb, #abbed1 32%, transparent);
-  box-shadow: 0 1px 4px color-mix(in srgb, #abbed1 16%, transparent);
+  border-color: #e1e1e1;
+  box-shadow: 0 1px 2px rgba(16, 16, 16, 0.04);
 }
 [data-theme="linki-light"] .surface:hover {
-  border-color: color-mix(in srgb, #abbed1 45%, transparent);
-  box-shadow: 0 2px 8px color-mix(in srgb, #abbed1 20%, transparent);
+  border-color: color-mix(in srgb, #6a6ce2 22%, #e1e1e1);
+  box-shadow: 0 2px 6px rgba(16, 16, 16, 0.06);
 }
 [data-theme="linki-light"] .kpi-card {
-  border-color: color-mix(in srgb, #abbed1 32%, transparent);
-  box-shadow: 0 1px 4px color-mix(in srgb, #abbed1 14%, transparent);
+  border-color: #e1e1e1;
+  box-shadow: 0 1px 2px rgba(16, 16, 16, 0.04);
 }
 [data-theme="linki-light"] .table-wrap {
-  border-color: color-mix(in srgb, #abbed1 32%, transparent);
-  box-shadow: 0 1px 4px color-mix(in srgb, #abbed1 12%, transparent);
+  border-color: #e1e1e1;
+  box-shadow: 0 1px 2px rgba(16, 16, 16, 0.04);
 }
 [data-theme="linki-light"] .page-header .subtitle {
   color: #717171; /* Neutral/Grey */
@@ -152,12 +152,12 @@ a:focus:not(:focus-visible) {
   color: #263238;
 }
 [data-theme="linki-light"] .btn-primary {
-  background: #1c7ed6;
-  border-color: #1c7ed6;
+  background: #6a6ce2;
+  border-color: #6a6ce2;
 }
 [data-theme="linki-light"] .btn-primary:hover {
-  background: #1568b3;
-  border-color: #1568b3;
+  background: #5658d4;
+  border-color: #5658d4;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -525,4 +525,298 @@ a:focus:not(:focus-visible) {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HOTELIQ DASHBOARD THEME (v2 — restrained)
+   Sourced from the "Hoteliq — Booking Hotel App" Figma UI kit style guide:
+   brand purple (lightened to #6A6CE2 for a friendlier, less heavy feel than
+   the raw #4C4DDC swatch), light-lavender tint #E4E4FA, near-black text
+   #101010, hairline grey #E1E1E1, Inter typeface.
+
+   v1 leaned on a full-bleed purple gradient hero with glow blobs and glassy
+   pill badges — that combination (saturated gradient + soft-glow blur +
+   glassmorphism + everything pill-shaped) is the generic "AI dashboard"
+   signature, and it also only had one color story, so it fell apart in dark
+   mode. v2 uses purple only as an accent (icons, active states, a thin rule)
+   against plain flat cards, the way the actual Hoteliq app screens (not the
+   marketing cover slide) use it — plus explicit dark-mode pairings for every
+   class instead of relying on transparency math to "just work".
+   Scoped to `.hq-*` classes so it only affects the dashboard page — the rest
+   of the app keeps using the shared `.surface` / `.kpi-card` primitives
+   above (which already picked up the new brand purple from the theme vars).
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --hq-primary: #6a6ce2;
+  --hq-primary-soft: #eeeefb;
+  --hq-primary-soft-dark: #2a2840;
+  --hq-ink: #101010;
+  --hq-line: #e1e1e1;
+}
+
+/* ─── Header (flat, not a gradient banner) ─────────────────────────────── */
+.hq-header {
+  display: flex;
+  gap: 0.85rem;
+  border-radius: 14px;
+  border: 1px solid var(--hq-line);
+  background: var(--color-base-200);
+  padding: 1.1rem 1.25rem;
+}
+[data-theme="linki-dark"] .hq-header {
+  border-color: var(--color-base-300);
+}
+.hq-header-accent {
+  width: 3px;
+  border-radius: 3px;
+  background: var(--hq-primary);
+  flex-shrink: 0;
+}
+.hq-header-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+@media (min-width: 768px) {
+  .hq-header-main {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+.hq-header h1 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--hq-ink);
+  margin: 0;
+}
+[data-theme="linki-dark"] .hq-header h1 {
+  color: var(--color-base-content);
+}
+.hq-header-sub {
+  font-size: 0.8125rem;
+  color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
+  max-width: 34rem;
+  line-height: 1.45;
+  margin: 0.2rem 0 0;
+}
+.hq-header-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.hq-header-today {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color-mix(in srgb, var(--color-base-content) 40%, transparent);
+  margin-right: 0.15rem;
+}
+.hq-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  background: var(--hq-primary-soft);
+  color: var(--hq-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.3rem 0.65rem;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+[data-theme="linki-dark"] .hq-chip {
+  background: var(--hq-primary-soft-dark);
+  color: #b7b8f5;
+}
+.hq-chip b {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Cards ─────────────────────────────────────────────────────────────── */
+.hq-card {
+  background: var(--color-base-200);
+  border: 1px solid var(--hq-line);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(16, 16, 16, 0.04);
+  transition: border-color 0.15s ease;
+}
+.hq-card:hover {
+  border-color: color-mix(in srgb, var(--hq-primary) 24%, var(--hq-line));
+}
+[data-theme="linki-dark"] .hq-card {
+  border-color: var(--color-base-300);
+  box-shadow: none;
+}
+[data-theme="linki-dark"] .hq-card:hover {
+  border-color: color-mix(in srgb, var(--hq-primary) 35%, var(--color-base-300));
+}
+
+.hq-kpi-card {
+  background: var(--color-base-200);
+  border: 1px solid var(--hq-line);
+  border-radius: 14px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  box-shadow: 0 1px 2px rgba(16, 16, 16, 0.04);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.hq-kpi-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--hq-primary) 24%, var(--hq-line));
+}
+[data-theme="linki-dark"] .hq-kpi-card {
+  border-color: var(--color-base-300);
+  box-shadow: none;
+}
+[data-theme="linki-dark"] .hq-kpi-card:hover {
+  border-color: color-mix(in srgb, var(--hq-primary) 35%, var(--color-base-300));
+}
+.hq-kpi-icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.hq-kpi-value {
+  font-size: 1.4375rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--hq-ink);
+  line-height: 1.1;
+}
+[data-theme="linki-dark"] .hq-kpi-value {
+  color: var(--color-base-content);
+}
+.hq-kpi-label {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--color-base-content) 52%, transparent);
+}
+.hq-kpi-sub {
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* ─── Section titles ────────────────────────────────────────────────────── */
+.hq-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.65rem;
+}
+.hq-section-title .hq-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--hq-line);
+}
+[data-theme="linki-dark"] .hq-section-title .hq-rule {
+  background: var(--color-base-300);
+}
+
+/* ─── Pill segmented control (e.g. 7d/14d/30d/90d) ─────────────────────── */
+.hq-pill-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: color-mix(in srgb, var(--hq-primary) 8%, transparent);
+  border: 1px solid var(--hq-line);
+  border-radius: 999px;
+  padding: 3px;
+}
+[data-theme="linki-dark"] .hq-pill-group {
+  background: var(--color-base-100);
+  border-color: var(--color-base-300);
+}
+.hq-pill-btn {
+  padding: 0.32rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-base-content) 55%, transparent);
+  transition: all 0.15s ease;
+}
+.hq-pill-btn.active {
+  background: var(--hq-primary);
+  color: #ffffff;
+}
+.hq-pill-btn:not(.active):hover {
+  background: color-mix(in srgb, var(--hq-primary) 10%, transparent);
+}
+
+/* ─── Buttons ───────────────────────────────────────────────────────────── */
+.hq-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  padding: 0.45rem 1rem;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+.hq-btn-primary {
+  background: var(--hq-primary);
+  color: #ffffff;
+}
+.hq-btn-primary:hover {
+  background: #5658d4;
+}
+.hq-btn-light {
+  background: var(--hq-primary-soft);
+  color: var(--hq-primary);
+}
+.hq-btn-light:hover {
+  background: color-mix(in srgb, var(--hq-primary) 22%, var(--hq-primary-soft));
+}
+[data-theme="linki-dark"] .hq-btn-light {
+  background: var(--hq-primary-soft-dark);
+  color: #b7b8f5;
+}
+[data-theme="linki-dark"] .hq-btn-light:hover {
+  background: color-mix(in srgb, var(--hq-primary) 25%, var(--hq-primary-soft-dark));
+}
+.hq-btn-outline {
+  background: transparent;
+  border-color: var(--hq-ink);
+  color: var(--hq-ink);
+}
+[data-theme="linki-dark"] .hq-btn-outline {
+  border-color: var(--color-base-content);
+  color: var(--color-base-content);
+}
+
+/* ─── Mini stat tiles (CRM strip / LinkedIn stats) ─────────────────────── */
+.hq-mini-stat {
+  background: var(--color-base-200);
+  border: 1px solid var(--hq-line);
+  border-radius: 12px;
+  padding: 0.85rem;
+  transition: border-color 0.15s ease;
+}
+.hq-mini-stat:hover {
+  border-color: color-mix(in srgb, var(--hq-primary) 24%, var(--hq-line));
+}
+[data-theme="linki-dark"] .hq-mini-stat {
+  border-color: var(--color-base-300);
+}
+[data-theme="linki-dark"] .hq-mini-stat:hover {
+  border-color: color-mix(in srgb, var(--hq-primary) 35%, var(--color-base-300));
 }
