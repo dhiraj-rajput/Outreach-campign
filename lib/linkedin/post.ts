@@ -677,7 +677,7 @@ async function clickPost(page: Page) {
     )
     .first();
 
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 20; i++) {
     const visible = await postBtn.isVisible({ timeout: 1000 }).catch(() => false);
     if (visible) {
       const disabled =
@@ -691,15 +691,106 @@ async function clickPost(page: Page) {
   await postBtn.click({ timeout: 10000 });
   await humanDelay(2000, 3500);
 
+  // Media posts can keep the modal briefly; retry Post once if still clearly open
   if (await editorVisible(page)) {
-    await humanDelay(800, 1200);
-    const again = page.locator('button:has-text("Post"), button.share-actions__primary-action:has-text("Post")').first();
-    if (await again.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const dis = await again.isDisabled().catch(() => true);
-      if (!dis) await again.click().catch(() => {});
-      await humanDelay(2000, 3000);
+    await humanDelay(1000, 1600);
+    const again = page
+      .locator(
+        'button:has-text("Post"):not([disabled]), button.share-actions__primary-action:has-text("Post")'
+      )
+      .first();
+    if (await again.isVisible({ timeout: 2500 }).catch(() => false)) {
+      const dis =
+        (await again.isDisabled().catch(() => true)) ||
+        (await again.getAttribute("aria-disabled").catch(() => null)) === "true";
+      if (!dis) {
+        await again.click().catch(() => {});
+        await humanDelay(2500, 4000);
+      }
     }
   }
+}
+
+/**
+ * Decide whether the composer is gone after clicking Post.
+ * Media uploads take longer; LinkedIn may leave a contenteditable briefly.
+ * Treat as closed if ANY strong success signal is present.
+ */
+async function isComposerClosed(page: Page, hadMedia: boolean): Promise<boolean> {
+  const maxWaitMs = hadMedia ? 18000 : 10000;
+  const start = Date.now();
+
+  while (Date.now() - start < maxWaitMs) {
+    const url = page.url();
+
+    // Left the compose route entirely → published
+    if (
+      !url.includes("/sharing/compose") &&
+      !url.includes("/preload/sharebox") &&
+      (url.includes("/feed") || url.includes("/in/") || url.includes("/mynetwork"))
+    ) {
+      console.log("[post] success: navigated away from compose →", url.split("?")[0]);
+      return true;
+    }
+
+    // Post button gone + no dialog = closed
+    const postBtnVisible = await page
+      .locator('button:has-text("Post"), button.share-actions__primary-action')
+      .first()
+      .isVisible({ timeout: 800 })
+      .catch(() => false);
+    const dialogVisible = await page
+      .locator('div[role="dialog"], .artdeco-modal, [data-test-modal-id]')
+      .first()
+      .isVisible({ timeout: 600 })
+      .catch(() => false);
+
+    if (!postBtnVisible && !dialogVisible && !(await editorVisible(page))) {
+      console.log("[post] success: post button + dialog gone");
+      return true;
+    }
+
+    // Success toast / "Post successful" style feedback
+    const toast = await page
+      .locator(
+        'text=/post (was )?(successful|shared|published)/i, ' +
+          '[data-test-artdeco-toast-item-type="success"], ' +
+          '.artdeco-toast-item--visible'
+      )
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    if (toast) {
+      console.log("[post] success: toast visible");
+      return true;
+    }
+
+    // Still on compose but editor empty and Post disabled → often means it already sent
+    if (url.includes("/sharing/compose") || url.includes("/feed")) {
+      const editorEmpty = await page.evaluate(() => {
+        const els = Array.from(
+          document.querySelectorAll('[contenteditable="true"], .ql-editor')
+        ) as HTMLElement[];
+        if (!els.length) return true;
+        return els.every((el) => !(el.innerText || "").trim());
+      }).catch(() => false);
+      if (editorEmpty && !postBtnVisible) {
+        console.log("[post] success: editor empty and no Post button");
+        return true;
+      }
+    }
+
+    await humanDelay(800, 1200);
+  }
+
+  // Final soft check: if we're no longer on compose URL, count as success
+  const finalUrl = page.url();
+  if (!finalUrl.includes("/sharing/compose") && !finalUrl.includes("/preload/sharebox")) {
+    console.log("[post] success (soft): final URL not compose →", finalUrl.split("?")[0]);
+    return true;
+  }
+
+  return false;
 }
 
 export async function createLinkedInPost(
@@ -740,9 +831,20 @@ export async function createLinkedInPost(
 
     await clickPost(page);
 
-    await humanDelay(1000, 1800);
-    const stillOpen = await editorVisible(page);
-    if (stillOpen) {
+    const hadMedia = !!(options.media && options.media.length);
+    const closed = await isComposerClosed(page, hadMedia);
+    if (!closed) {
+      // LinkedIn sometimes keeps a ghost editor briefly after a successful media post.
+      // One more soft pass: if Post button is gone, treat as success.
+      const postStillThere = await page
+        .locator('button:has-text("Post"):not([disabled])')
+        .first()
+        .isVisible({ timeout: 1500 })
+        .catch(() => false);
+      if (!postStillThere) {
+        console.log("[post] success (soft): Post button gone after wait");
+        return { success: true, usedNativeSchedule: false, postUrn: null };
+      }
       return {
         success: false,
         error: "Composer still open after Post click — post may not have published",
