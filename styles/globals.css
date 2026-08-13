@@ -820,3 +820,131 @@ a:focus:not(:focus-visible) {
 [data-theme="linki-dark"] .hq-mini-stat:hover {
   border-color: color-mix(in srgb, var(--hq-primary) 35%, var(--color-base-300));
 }
+
+/* ─── Overview strip (top-line totals) ─────────────────────────────────── */
+.hq-overview-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 640px) {
+  .hq-overview-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ─── Channel cards (LinkedIn / Email performance) ─────────────────────── */
+.hq-channel-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 900px) {
+  .hq-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.hq-channel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.hq-channel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.hq-channel-icon {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hq-channel-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--hq-ink);
+}
+[data-theme="linki-dark"] .hq-channel-name {
+  color: var(--color-base-content);
+}
+.hq-channel-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+@media (min-width: 480px) {
+  .hq-channel-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.hq-channel-stat-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--hq-ink);
+  line-height: 1.1;
+}
+[data-theme="linki-dark"] .hq-channel-stat-value {
+  color: var(--color-base-content);
+}
+.hq-channel-stat-label {
+  font-size: 0.6875rem;
+  color: color-mix(in srgb, var(--color-base-content) 45%, transparent);
+  margin-top: 0.3rem;
+}
+
+/* ─── Slim rate bar (used inside channel cards) ────────────────────────── */
+.hq-rate-block {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--hq-line);
+}
+[data-theme="linki-dark"] .hq-rate-block {
+  border-color: var(--color-base-300);
+}
+.hq-rate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+.hq-rate-row-label {
+  color: color-mix(in srgb, var(--color-base-content) 55%, transparent);
+}
+.hq-rate-row-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.hq-rate-track {
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hq-ink) 7%, transparent);
+  overflow: hidden;
+}
+[data-theme="linki-dark"] .hq-rate-track {
+  background: var(--color-base-300);
+}
+.hq-rate-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.7s ease;
+}
+.hq-rate-sub {
+  font-size: 0.6875rem;
+  color: color-mix(in srgb, var(--color-base-content) 38%, transparent);
+  margin-top: 0.35rem;
+}
+
+/* ─── Task strip (todos / inbox) ───────────────────────────────────────── */
+.hq-task-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 640px) {
+  .hq-task-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

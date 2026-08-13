@@ -1,8 +1,11 @@
 import Head from "next/head";
 import { useEffect, useState, useRef } from "react";
-import { FiUserPlus, FiMessageSquare, FiEye, FiRepeat, FiUsers, FiRefreshCw } from "react-icons/fi";
+import {
+  FiUserPlus, FiMessageSquare, FiEye, FiRepeat, FiUsers, FiRefreshCw,
+  FiTarget, FiActivity, FiCheckSquare, FiAlertCircle, FiClock, FiInbox,
+} from "react-icons/fi";
 import { RiMailSendLine, RiReplyLine, RiRobot2Line, RiLinkedinBoxLine, RiFilterLine } from "react-icons/ri";
-import { ActivityAreaChart, RateKpi, DailyBreakdownTable } from "@/components/analytics/Charts";
+import { ActivityAreaChart, DailyBreakdownTable } from "@/components/analytics/Charts";
 
 interface DashboardStats {
   totals: {
@@ -135,6 +138,101 @@ function FunnelRow({
       <span className="text-sm font-semibold tabular-nums text-base-content w-10 text-right">
         <Counter value={value} />
       </span>
+    </div>
+  );
+}
+
+function RateBar({
+  label, value, sub, color,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  color: string;
+}) {
+  return (
+    <div className="hq-rate-block">
+      <div className="hq-rate-row">
+        <span className="hq-rate-row-label">{label}</span>
+        <span className="hq-rate-row-value" style={{ color }}>{value}%</span>
+      </div>
+      <div className="hq-rate-track">
+        <div
+          className="hq-rate-fill"
+          style={{ width: `${Math.max(2, Math.min(100, value))}%`, background: color }}
+        />
+      </div>
+      <p className="hq-rate-sub">{sub}</p>
+    </div>
+  );
+}
+
+interface ChannelStat {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  color: string;
+}
+
+function ChannelCard({
+  title, icon, color, stats, rate, children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  color: string;
+  stats: ChannelStat[];
+  rate?: { label: string; value: number; sub: string };
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="hq-card p-4 sm:p-5">
+      <div className="hq-channel-head">
+        <div className="hq-channel-title">
+          <span className="hq-channel-icon" style={{ background: `${color}17`, color }}>
+            {icon}
+          </span>
+          <span className="hq-channel-name">{title}</span>
+        </div>
+      </div>
+      <div className="hq-channel-stats">
+        {stats.map((s) => (
+          <div key={s.label} className="hq-mini-stat">
+            <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-base-content/40 mb-1.5">
+              <span style={{ color: s.color }}>{s.icon}</span>
+              {s.label}
+            </span>
+            <span className="hq-channel-stat-value">
+              <Counter value={s.value} />
+            </span>
+          </div>
+        ))}
+      </div>
+      {rate && <RateBar label={rate.label} value={rate.value} sub={rate.sub} color={color} />}
+      {children}
+    </div>
+  );
+}
+
+function TaskStrip({ crm }: { crm: { open_todos: number; overdue_todos: number; due_today: number; inbox_replies: number } }) {
+  const items = [
+    { label: "Open todos", value: crm.open_todos, color: "var(--hq-primary)", icon: <FiCheckSquare size={12} />, href: "/todos" },
+    { label: "Overdue", value: crm.overdue_todos, color: "#f87171", icon: <FiAlertCircle size={12} />, href: "/todos" },
+    { label: "Due today", value: crm.due_today, color: "#f59e0b", icon: <FiClock size={12} />, href: "/todos" },
+    { label: "Inbox replies", value: crm.inbox_replies, color: "var(--hq-primary)", icon: <FiInbox size={12} />, href: "/inbox" },
+  ];
+  return (
+    <div className="hq-task-grid">
+      {items.map((it) => (
+        <a key={it.label} href={it.href} className="hq-mini-stat flex flex-col gap-1">
+          <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-base-content/40">
+            <span style={{ color: it.color }}>{it.icon}</span>
+            {it.label}
+          </span>
+          <span className="text-xl font-bold tabular-nums" style={{ color: it.color }}>
+            <Counter value={it.value} />
+          </span>
+        </a>
+      ))}
     </div>
   );
 }
@@ -485,90 +583,81 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* CRM strip */}
+        {/* Overview — top-line totals across every channel */}
+        <div>
+          <SectionLabel icon={<FiActivity size={11} />} label="Overview" color="var(--hq-primary)" />
+          <div className="hq-overview-grid">
+            <KpiCard label="Total targets" value={totals.total_targets} color="#808080" icon={<FiTarget size={13} />} />
+            <KpiCard label="Connected" value={totals.connected} color="#22c55e" icon={<FiUserPlus size={13} />} />
+            <KpiCard
+              label="Total replies"
+              value={totals.replies_received + totals.email_replies}
+              color="#a78bfa"
+              icon={<RiReplyLine size={13} />}
+            />
+            <KpiCard
+              label="Active campaigns"
+              value={totals.active_runs}
+              color="#f59e0b"
+              icon={<FiActivity size={13} />}
+              pulse={totals.active_runs > 0}
+            />
+          </div>
+        </div>
+
+        {/* Tasks & inbox */}
         {stats.crm && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
-            <a href="/todos" className="hq-mini-stat">
-              <div className="text-[11px] text-base-content/45 mb-1">Open todos</div>
-              <div className="text-xl font-bold tabular-nums" style={{ color: "var(--hq-primary)" }}>{stats.crm.open_todos}</div>
-            </a>
-            <a href="/todos" className="hq-mini-stat">
-              <div className="text-[11px] text-base-content/45 mb-1">Overdue</div>
-              <div className="text-xl font-bold tabular-nums text-error">{stats.crm.overdue_todos}</div>
-            </a>
-            <a href="/todos" className="hq-mini-stat">
-              <div className="text-[11px] text-base-content/45 mb-1">Due today</div>
-              <div className="text-xl font-bold tabular-nums text-warning">{stats.crm.due_today}</div>
-            </a>
-            <a href="/inbox" className="hq-mini-stat">
-              <div className="text-[11px] text-base-content/45 mb-1">Inbox replies</div>
-              <div className="text-xl font-bold tabular-nums" style={{ color: "var(--hq-primary)" }}>{stats.crm.inbox_replies}</div>
-            </a>
+          <div>
+            <SectionLabel icon={<FiCheckSquare size={11} />} label="Tasks & inbox" color="var(--hq-primary)" />
+            <TaskStrip crm={stats.crm} />
           </div>
         )}
 
-        {/* LinkedIn KPIs */}
+        {/* Channel performance */}
         <div>
-          <SectionLabel icon={<RiLinkedinBoxLine size={11} />} label="LinkedIn" color="#60a5fa" />
-          <div className="kpi-grid kpi-grid-5">
-            <KpiCard label="Profiles visited" value={totals.connections_requested} color="#60a5fa" icon={<FiEye size={13} />} />
-            <KpiCard
-              label="Connections sent"
-              value={totals.connections_requested}
-              sub={acceptanceRate > 0 ? `${acceptanceRate}% accepted` : undefined}
-              color="#22c55e"
-              icon={<FiUserPlus size={13} />}
-              pulse={totals.active_runs > 0}
-            />
-            <KpiCard
-              label="Messages sent"
-              value={totals.messages_sent}
-              sub={replyRate > 0 ? `${replyRate}% replied` : undefined}
-              color="#f59e0b"
-              icon={<FiMessageSquare size={13} />}
-            />
-            <KpiCard label="InMails sent" value={totals.inmails_sent} color="#e879f9" icon={<RiLinkedinBoxLine size={13} />} />
-            <KpiCard label="LI Replies" value={totals.replies_received} color="#c084fc" icon={<FiRepeat size={13} />} />
-          </div>
-        </div>
+          <SectionLabel icon={<FiUsers size={11} />} label="Channel performance" color="var(--hq-primary)" />
+          <div className="hq-channel-grid">
+            <ChannelCard
+              title="LinkedIn"
+              icon={<RiLinkedinBoxLine size={16} />}
+              color="#60a5fa"
+              stats={[
+                { icon: <FiEye size={11} />, label: "Profiles visited", value: totals.connections_requested, color: "#60a5fa" },
+                { icon: <FiUserPlus size={11} />, label: "Connections sent", value: totals.connections_requested, color: "#22c55e" },
+                { icon: <FiMessageSquare size={11} />, label: "Messages sent", value: totals.messages_sent, color: "#f59e0b" },
+                { icon: <RiLinkedinBoxLine size={11} />, label: "InMails sent", value: totals.inmails_sent, color: "#e879f9" },
+              ]}
+              rate={{
+                label: "Connection acceptance",
+                value: acceptanceRate,
+                sub: `${totals.connected} of ${totals.connections_requested} connection requests accepted`,
+              }}
+            >
+              <RateBar
+                label="Reply rate"
+                value={replyRate}
+                sub={`${totals.replies_received} replies on ${totals.messages_sent} messages sent`}
+                color="#c084fc"
+              />
+            </ChannelCard>
 
-        {/* Email KPIs */}
-        <div>
-          <SectionLabel icon={<RiMailSendLine size={11} />} label="Email" color="#fb923c" />
-          <div className="kpi-grid">
-            <KpiCard
-              label="Emails sent"
-              value={totals.emails_sent}
-              sub={emailReplyRate > 0 ? `${emailReplyRate}% replied` : undefined}
+            <ChannelCard
+              title="Email"
+              icon={<RiMailSendLine size={16} />}
               color="#fb923c"
-              icon={<RiMailSendLine size={13} />}
+              stats={[
+                { icon: <FiUsers size={11} />, label: "Total targets", value: totals.total_targets, color: "#808080" },
+                { icon: <FiUserPlus size={11} />, label: "Connected", value: totals.connected, color: "#22c55e" },
+                { icon: <RiMailSendLine size={11} />, label: "Emails sent", value: totals.emails_sent, color: "#fb923c" },
+                { icon: <RiReplyLine size={11} />, label: "Email replies", value: totals.email_replies, color: "#22c55e" },
+              ]}
+              rate={{
+                label: "Email reply rate",
+                value: emailReplyRate,
+                sub: `${totals.email_replies} replies on ${totals.emails_sent} emails sent`,
+              }}
             />
-            <KpiCard label="Email replies" value={totals.email_replies} color="#22c55e" icon={<RiReplyLine size={13} />} />
-            <KpiCard label="Total targets" value={totals.total_targets} color="#808080" icon={<FiUsers size={13} />} />
-            <KpiCard label="Connected" value={totals.connected} color="#22c55e" icon={<FiUserPlus size={13} />} />
           </div>
-        </div>
-
-        {/* Rates */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
-          <RateKpi
-            label="Connection acceptance"
-            value={acceptanceRate}
-            color="#22c55e"
-            sub={`${totals.connected} of ${totals.connections_requested} accepted`}
-          />
-          <RateKpi
-            label="LinkedIn reply rate"
-            value={replyRate}
-            color="#a78bfa"
-            sub={`${totals.replies_received} replies on ${totals.messages_sent} messages`}
-          />
-          <RateKpi
-            label="Email reply rate"
-            value={emailReplyRate}
-            color="#fb923c"
-            sub={`${totals.email_replies} replies on ${totals.emails_sent} emails`}
-          />
         </div>
 
         {/* Funnel + Chart */}
