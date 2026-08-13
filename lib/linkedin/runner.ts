@@ -1090,7 +1090,7 @@ trace back to the fields given below.`,
       // AI-generated / plain drafts still go out as proper multipart HTML (not plain-only).
       // Always personalize {{tokens}} in both text and HTML.
       let finalHtml: string | undefined;
-      let plainTextBody = finalEmailBody + unsubscribeFooterText(target.id);
+      const plainTextBody = finalEmailBody + unsubscribeFooterText(target.id);
 
       try {
         let htmlSource: string | null = null;

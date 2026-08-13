@@ -598,7 +598,7 @@ async function createPoll(page: Page, poll: PollData) {
 
   for (let i = 0; i < poll.options.length; i++) {
     let optInputs = page.locator('input[placeholder*="Option" i], input[name*="option"]');
-    let count = await optInputs.count();
+    const count = await optInputs.count();
     if (i >= count) {
       const addBtn = page.locator('button:has-text("Add option"), button:has-text("Add another")').first();
       if (await addBtn.isVisible({ timeout: 2000 }).catch(() => false)) {

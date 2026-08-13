@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { GetServerSideProps } from "next";
 import { useRouter } from "next/router";
 import { getDb } from "@/lib/db";
@@ -108,30 +108,32 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [search]);
 
-  const fetch_ = useCallback(async (p: number, lid: string, q: string, activeFilters: ActiveFilter[]) => {
-    setLoading(true);
-    const params = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE) });
-    if (lid) params.set("list_id", lid);
-    if (q) params.set("search", q);
-    const filterParams = filtersToParams(activeFilters);
-    filterParams.forEach((v, k) => params.set(k, v));
-    const res = await fetch(`/api/targets?${params}`);
-    if (res.ok) {
-      const data = await res.json();
-      setContacts(data.contacts);
-      setTotal(data.total);
-    }
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
-    fetch_(page, listId, debouncedSearch, filters);
-    setSelected(new Set());
-  }, [page, listId, debouncedSearch, filters, fetch_]);
+    let active = true;
+    const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
+    if (listId) params.set("list_id", listId);
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    const filterParams = filtersToParams(filters);
+    filterParams.forEach((v, k) => params.set(k, v));
+    fetch(`/api/targets?${params}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data) {
+          setContacts(data.contacts);
+          setTotal(data.total);
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [page, listId, debouncedSearch, filters]);
 
-  function changeList(lid: string) { setListId(lid); setPage(0); }
-  function changeSearch(q: string) { setSearch(q); setPage(0); }
-  function changeFilters(f: ActiveFilter[]) { setFilters(f); setPage(0); }
+  function changeList(lid: string) { setLoading(true); setListId(lid); setPage(0); setSelected(new Set()); }
+  function changeSearch(q: string) { setLoading(true); setSearch(q); setPage(0); setSelected(new Set()); }
+  function changeFilters(f: ActiveFilter[]) { setLoading(true); setFilters(f); setPage(0); setSelected(new Set()); }
 
   const allPageSelected = contacts.length > 0 && contacts.every((c) => selected.has(c.id));
 

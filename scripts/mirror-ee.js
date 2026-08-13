@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports */
 /*
  * scripts/mirror-ee.js — runs at predev/prebuild.
  *

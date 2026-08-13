@@ -6,7 +6,7 @@ import Link from "next/link";
 import { getDb } from "@/lib/db";
 import { toast } from "sonner";
 import { OrModel } from "@/components/ui/ModelPicker";
-import FilterBar, { ActiveFilter, filtersToParams, FILTER_FIELDS } from "@/components/ui/FilterBar";
+import FilterBar, { ActiveFilter, filtersToParams } from "@/components/ui/FilterBar";
 import {
   RiArrowLeftLine,
   RiAddLine,
@@ -2463,7 +2463,7 @@ function Wizard({
               </button>
 
               {!ws.aiModel && (
-                <p className="text-xs text-base-content/50">No model selected for this step — using the integration's default model.</p>
+                <p className="text-xs text-base-content/50">No model selected for this step — using the integration&apos;s default model.</p>
               )}
 
               {/* Result */}
@@ -2687,11 +2687,21 @@ function AnalyticsPanel({ workflowId, days: initialDays }: { workflowId: string;
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
+    let active = true;
     fetch(`/api/workflows/${workflowId}/analytics?days=${days}`)
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then((r) => r.json())
+      .then((d) => {
+        if (active) {
+          setData(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [workflowId, days]);
 
   if (loading || !data) {
@@ -2711,7 +2721,7 @@ function AnalyticsPanel({ workflowId, days: initialDays }: { workflowId: string;
   const hasAiData = totalAiCost > 0;
   const labelEvery = days <= 7 ? 1 : days <= 14 ? 2 : days <= 30 ? 5 : 15;
 
-  function FunnelBar({ label, value, color }: { label: string; value: number; color: string }) {
+  function renderFunnelBar(label: string, value: number, color: string) {
     const pct = Math.max(2, (value / maxFunnel) * 100);
     const rate = funnel.total > 0 ? Math.round((value / funnel.total) * 100) : 0;
     return (
@@ -2902,16 +2912,16 @@ function AnalyticsPanel({ workflowId, days: initialDays }: { workflowId: string;
               <span className="text-xs font-medium text-base-content/30 uppercase tracking-widest">Funnel</span>
             </div>
             <div className="space-y-0.5">
-              <FunnelBar label="Prospects" value={funnel.total} color="#808080" />
-              <FunnelBar label="Connections sent" value={funnel.connections_sent} color="#32d583" />
-              <FunnelBar label="Connected" value={funnel.connected} color="#32d583" />
-              <FunnelBar label="LI Messages" value={funnel.messages_sent} color="#f4b740" />
-              <FunnelBar label="InMails sent" value={funnel.inmails_sent} color="#e879f9" />
-              <FunnelBar label="LI Replies" value={funnel.li_replies} color="#c084fc" />
-              <FunnelBar label="Emails sent" value={funnel.emails_sent} color="#fb923c" />
-              <FunnelBar label="Email replies" value={funnel.email_replies} color="#32d583" />
+              {renderFunnelBar("Prospects", funnel.total, "#808080")}
+              {renderFunnelBar("Connections sent", funnel.connections_sent, "#32d583")}
+              {renderFunnelBar("Connected", funnel.connected, "#32d583")}
+              {renderFunnelBar("LI Messages", funnel.messages_sent, "#f4b740")}
+              {renderFunnelBar("InMails sent", funnel.inmails_sent, "#e879f9")}
+              {renderFunnelBar("LI Replies", funnel.li_replies, "#c084fc")}
+              {renderFunnelBar("Emails sent", funnel.emails_sent, "#fb923c")}
+              {renderFunnelBar("Email replies", funnel.email_replies, "#32d583")}
               <div className="pt-2 border-t border-base-300/30 mt-2">
-                <FunnelBar label="Completed" value={funnel.completed} color="#5aa2ff" />
+                {renderFunnelBar("Completed", funnel.completed, "#5aa2ff")}
               </div>
             </div>
           </div>
@@ -3002,12 +3012,15 @@ export default function WorkflowDetailPage({
     if (res.ok) setSteps(await res.json());
   }, [initial.id]);
 
-  // Reset to page 0 when filter/search changes
-  useEffect(() => { setProspectsPage(0); }, [selectedStep, search, prospectFilters]);
-
   useEffect(() => {
-    refreshStats();
-    refreshProspects();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        refreshStats();
+        refreshProspects();
+      }
+    });
+    return () => { active = false; };
   }, [refreshStats, refreshProspects]);
 
   useEffect(() => {

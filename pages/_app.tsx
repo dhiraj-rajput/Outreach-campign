@@ -34,9 +34,8 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 function ThemedToaster() {
-  const [theme, setThemeState] = useState<"light" | "dark">("dark");
+  const [theme, setThemeState] = useState<"light" | "dark">(() => (typeof window !== "undefined" ? getStoredTheme() : "dark"));
   useEffect(() => {
-    setThemeState(getStoredTheme());
     const obs = new MutationObserver(() => {
       const t = document.documentElement.getAttribute("data-theme");
       setThemeState(t === "linki-light" ? "light" : "dark");

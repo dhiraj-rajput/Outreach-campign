@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Force a run's next step to fire immediately instead of waiting for the
 // normal delay/recheck schedule. Useful when testing a workflow end-to-end
 // on a single lead, without waiting hours for the real schedule.

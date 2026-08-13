@@ -12,7 +12,7 @@ import {
   RiLinkedinBoxLine, RiMessage2Line, RiSettings3Line, RiFileCopyLine,
   RiLockLine, RiLockUnlockLine, RiFlashlightLine, RiArrowDownSLine, RiCompassLine,
 } from "react-icons/ri";
-import { ALL_TOUR_PAGES, TOUR_PAGE_LABELS, replayPageTour, skipAllTours, type TourPage } from "@/lib/tour";
+import { ALL_TOUR_PAGES, TOUR_PAGE_LABELS, replayPageTour, type TourPage } from "@/lib/tour";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1635,13 +1635,7 @@ function IntegrationsTab({ hasPremium }: { hasPremium: boolean }) {
 function McpCard() {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [mcpUrl, setMcpUrl] = useState("");
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setMcpUrl(`${window.location.origin}/api/mcp`);
-    }
-  }, []);
+  const [mcpUrl] = useState(() => (typeof window !== "undefined" ? `${window.location.origin}/api/mcp` : ""));
 
   async function copy(text: string) {
     try {

@@ -44,7 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const matches = fileBase64.match(/^data:([A-Za-z0-9\-+\.\/]+);base64,(.+)$/);
     let buffer: Buffer;
     let mime = mimeType;
-    let name = filename;
+    const name = filename;
 
     if (matches && matches.length === 3) {
       mime = matches[1];

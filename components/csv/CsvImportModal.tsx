@@ -199,7 +199,7 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
     setBusy(true);
     setImportErrors([]);
     let offset = 0;
-    let totals = { imported: 0, updated: 0, skipped: 0 };
+    const totals = { imported: 0, updated: 0, skipped: 0 };
     const allErrors: string[] = [];
     const total = toImport.length;
 
@@ -254,11 +254,14 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) handleClose();
+      if (e.key === "Escape" && !busy) {
+        reset();
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, busy]);
+  }, [open, busy, reset, onClose]);
 
   if (!open) return null;
 

@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import {
   RiLinkedinBoxLine, RiUserAddLine, RiUserFollowLine, RiMessage2Line,
   RiForbidLine, RiCheckboxCircleLine, RiCloseCircleLine, RiReplyLine, RiEyeLine, RiBarChart2Line,
-  RiSearchLine, RiLoader4Line, RiExternalLinkLine, RiAddLine, RiEditBoxLine, RiTimeLine,
-  RiDeleteBinLine, RiEarthLine, RiGroupLine, RiDraftLine, RiRefreshLine,
+  RiSearchLine, RiLoader4Line, RiExternalLinkLine, RiAddLine, RiEditBoxLine,
+  RiDeleteBinLine, RiEarthLine, RiGroupLine, RiRefreshLine,
 } from "react-icons/ri";
 import PostComposer from "@/components/linkedin/PostComposer";
 import {

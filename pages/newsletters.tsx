@@ -10,7 +10,6 @@ import {
   RiLoader4Line,
   RiTeamLine,
   RiDraftLine,
-  RiCheckLine,
   RiMagicLine,
   RiImageAddLine,
   RiEyeLine,

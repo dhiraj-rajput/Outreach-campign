@@ -39,12 +39,8 @@ type Props = {
 export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const router = useRouter();
   const [hovered, setHovered] = useState(false);
-  const [themePref, setThemePref] = useState<ThemePreference>("dark");
+  const [themePref, setThemePref] = useState<ThemePreference>(() => (typeof window !== "undefined" ? getStoredTheme() : "dark"));
   const [hasPremium, setHasPremium] = useState(true);
-
-  useEffect(() => {
-    setThemePref(getStoredTheme());
-  }, []);
 
   useEffect(() => {
     fetch("/api/premium-status")
@@ -71,61 +67,79 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const ThemeIcon = themePref === "light" ? RiSunLine : RiMoonLine;
   const themeLabel = themePref === "light" ? "Light" : "Dark";
 
-  function NavItem({
-    href,
-    label,
-    icon: Icon,
-    tour,
-    labels,
-  }: {
-    href: string;
-    label: string;
-    icon: React.ComponentType<{ size?: number }>;
-    tour?: string;
-    labels: boolean;
-  }) {
-    const active = isActive(href);
-    return (
-      <Link
-        href={href}
-        data-tour={tour}
-        title={!labels ? label : undefined}
-        onClick={onMobileClose}
-        className={`nav-item ${labels ? "px-2.5" : "justify-center"} ${active ? "active" : ""}`}
-      >
-        <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
-          <Icon size={15} />
-        </span>
-        {labels && <span className="text-sm font-medium truncate">{label}</span>}
-      </Link>
-    );
-  }
-
-  function NavLinks({ labels }: { labels: boolean }) {
+  function renderNavLinks(labels: boolean) {
     return (
       <>
         <nav className="flex-1 py-2 flex flex-col overflow-y-auto">
           {labels && <div className="nav-group-label">Overview</div>}
           <div className="flex flex-col gap-0.5 px-1.5">
-            {mainNav.map((item) => (
-              <NavItem key={item.href} {...item} labels={labels} />
-            ))}
+            {mainNav.map((item) => {
+              const active = isActive(item.href);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  data-tour={item.tour}
+                  title={!labels ? item.label : undefined}
+                  onClick={onMobileClose}
+                  className={`nav-item ${labels ? "px-2.5" : "justify-center"} ${active ? "active" : ""}`}
+                >
+                  <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
+                    <Icon size={15} />
+                  </span>
+                  {labels && <span className="text-sm font-medium truncate">{item.label}</span>}
+                </Link>
+              );
+            })}
           </div>
 
           {labels && <div className="nav-group-label">Channels</div>}
           <div className="flex flex-col gap-0.5 px-1.5 mt-1">
-            {channelNav.map((item) => (
-              <NavItem key={item.href} {...item} labels={labels} />
-            ))}
+            {channelNav.map((item) => {
+              const active = isActive(item.href);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  data-tour={item.tour}
+                  title={!labels ? item.label : undefined}
+                  onClick={onMobileClose}
+                  className={`nav-item ${labels ? "px-2.5" : "justify-center"} ${active ? "active" : ""}`}
+                >
+                  <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
+                    <Icon size={15} />
+                  </span>
+                  {labels && <span className="text-sm font-medium truncate">{item.label}</span>}
+                </Link>
+              );
+            })}
           </div>
 
           {hasPremium && (
             <>
               {labels && <div className="nav-group-label">Premium</div>}
               <div className="flex flex-col gap-0.5 px-1.5 mt-1">
-                {premiumNav.map((item) => (
-                  <NavItem key={item.href} {...item} labels={labels} />
-                ))}
+                {premiumNav.map((item) => {
+                  const active = isActive(item.href);
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      data-tour={item.tour}
+                      title={!labels ? item.label : undefined}
+                      onClick={onMobileClose}
+                      className={`nav-item ${labels ? "px-2.5" : "justify-center"} ${active ? "active" : ""}`}
+                    >
+                      <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
+                        <Icon size={15} />
+                      </span>
+                      {labels && <span className="text-sm font-medium truncate">{item.label}</span>}
+                    </Link>
+                  );
+                })}
               </div>
             </>
           )}
@@ -169,7 +183,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             {labels && <span className="text-sm">Sign out</span>}
           </button>
         </div>
-
       </>
     );
   }
@@ -186,7 +199,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
           <div className="shrink-0 h-12 flex items-center justify-center border-b border-base-300/40">
             <Image src="/logo_linki.png" alt="Linki" width={20} height={20} className="rounded-md opacity-90" />
           </div>
-          <NavLinks labels={false} />
+          {renderNavLinks(false)}
         </div>
 
         {/* Hover expand panel */}
@@ -199,7 +212,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
           <div className="shrink-0 h-12 flex items-center px-4 border-b border-base-300/40">
             <span className="font-semibold text-sm tracking-tight">Linki</span>
           </div>
-          <NavLinks labels={true} />
+          {renderNavLinks(true)}
         </div>
       </aside>
 
@@ -224,7 +237,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             <RiCloseLine size={18} />
           </button>
         </div>
-        <NavLinks labels={true} />
+        {renderNavLinks(true)}
       </aside>
     </>
   );
