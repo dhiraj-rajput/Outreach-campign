@@ -255,8 +255,8 @@ function ActivityChart({
   onDaysChange: (d: number) => void;
 }) {
   return (
-    <div className="hq-card p-4 sm:p-5 flex flex-col" style={{ minHeight: 260 }} data-tour="dashboard-chart">
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+    <div className="hq-card p-3 sm:p-5 flex flex-col min-w-0 overflow-hidden" data-tour="dashboard-chart">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 sm:mb-3">
         <span className="text-sm font-semibold text-base-content">Activity over time</span>
         <div className="hq-pill-group">
           {DAY_OPTIONS.map((d) => (
@@ -271,10 +271,12 @@ function ActivityChart({
           ))}
         </div>
       </div>
-      <ActivityAreaChart data={data} series={SERIES} height={200} />
-      <div className="mt-4 pt-4 border-t border-base-300/30">
+      <div className="chart-box">
+        <ActivityAreaChart data={data} series={SERIES} height={180} />
+      </div>
+      <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-base-300/30 min-w-0">
         <p className="text-[11px] font-medium text-base-content/35 uppercase tracking-wider mb-2">Daily breakdown</p>
-        <div className="table-wrap border-0">
+        <div className="overflow-x-auto max-w-full">
           <DailyBreakdownTable
             data={data}
             columns={[
@@ -663,8 +665,8 @@ export default function Dashboard() {
         {/* Funnel + Chart */}
         <div className="dash-split">
           <div className="space-y-3">
-            <div className="hq-card overflow-hidden" data-tour="dashboard-funnel">
-              <div className="px-4 py-2.5 border-b border-base-300/30">
+            <div className="hq-card overflow-hidden min-w-0" data-tour="dashboard-funnel">
+              <div className="px-3 sm:px-4 py-2 sm:py-2.5 border-b border-base-300/30">
                 <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--hq-primary)" }}>Funnel</span>
               </div>
               <div className="divide-y divide-base-300/20 py-1">

@@ -655,18 +655,20 @@ export default function LinkedInHistoryPage() {
               <Kpi label="Opted out" value={totals.opted_out} icon={<RiForbidLine size={16} />} color="#f87171" />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
-                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4 flex items-center gap-1.5"><RiBarChart2Line size={12} /> Key rates</p>
-                <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3 sm:mb-4 flex items-center gap-1.5"><RiBarChart2Line size={12} /> Key rates</p>
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
                   <RateKpi label="Acceptance" value={rates?.acceptance_rate ?? 0} color="#32d583" />
                   <RateKpi label="Reply" value={rates?.reply_rate ?? 0} color="#5aa2ff" />
                   <RateKpi label="Msg after accept" value={rates?.connect_to_message_rate ?? 0} color="#f4b740" />
                 </div>
-                <RateBars data={rateBars} height={140} />
+                <div className="chart-box">
+                  <RateBars data={rateBars} height={130} />
+                </div>
               </div>
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
-                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4">Outreach funnel</p>
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3 sm:mb-4">Outreach funnel</p>
                 {funnel && (
                   <FunnelBars stages={[
                     { label: "Visits", value: funnel.visits, color: "#5aa2ff" },
@@ -677,16 +679,20 @@ export default function LinkedInHistoryPage() {
                   ]} />
                 )}
               </div>
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
                 <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Activity mix</p>
-                <DonutChart data={compositionData} height={240} />
+                <div className="chart-box">
+                  <DonutChart data={compositionData} height={200} />
+                </div>
               </div>
             </div>
 
-            <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-              <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Activity over time ({days}d)</p>
-              <ActivityAreaChart data={daily} series={SERIES} height={260} />
-              <div className="mt-5 pt-4 border-t border-base-300/30">
+            <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+              <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2 sm:mb-3">Activity over time ({days}d)</p>
+              <div className="chart-box">
+                <ActivityAreaChart data={daily} series={SERIES} height={200} />
+              </div>
+              <div className="mt-3 sm:mt-5 pt-3 sm:pt-4 border-t border-base-300/30 min-w-0">
                 <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Daily breakdown</p>
                 <DailyBreakdownTable
                   data={daily}
@@ -701,19 +707,23 @@ export default function LinkedInHistoryPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
-                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Campaign comparison</p>
-                <GroupedBarChart data={campaignBars} bars={[
-                  { key: "sent", color: "#5aa2ff", label: "Connects" },
-                  { key: "accepted", color: "#32d583", label: "Accepted" },
-                  { key: "messages", color: "#f4b740", label: "Messages" },
-                  { key: "replies", color: "#a78bfa", label: "Replies" },
-                ]} height={280} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2 sm:mb-3">Campaign comparison</p>
+                <div className="chart-box">
+                  <GroupedBarChart data={campaignBars} bars={[
+                    { key: "sent", color: "#5aa2ff", label: "Connects" },
+                    { key: "accepted", color: "#32d583", label: "Accepted" },
+                    { key: "messages", color: "#f4b740", label: "Messages" },
+                    { key: "replies", color: "#a78bfa", label: "Replies" },
+                  ]} height={220} />
+                </div>
               </div>
-              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 min-h-[180px] sm:min-h-[240px]">
-                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Send time distribution (hour of day)</p>
-                <HourBarChart data={hourSeries} height={280} />
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2 sm:mb-3">Send time distribution (hour of day)</p>
+                <div className="chart-box">
+                  <HourBarChart data={hourSeries} height={200} />
+                </div>
               </div>
             </div>
 

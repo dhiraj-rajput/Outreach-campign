@@ -240,21 +240,21 @@ export default function EmailPage() {
                   <Kpi label="Unsubscribed" value={totals.unsubscribed_count} icon={<RiForbidLine size={16} />} color="#f87171" />
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4 flex items-center gap-1.5"><RiBarChart2Line size={12} /> Engagement rates</p>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
+                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3 sm:mb-4 flex items-center gap-1.5"><RiBarChart2Line size={12} /> Engagement rates</p>
                     <div className="grid grid-cols-3 gap-2 mb-3">
                       <RateKpi label="Open" value={rates?.campaign_open_rate ?? 0} color="#38bdf8" />
                       <RateKpi label="Click" value={rates?.campaign_click_rate ?? 0} color="#32d583" />
                       <RateKpi label="Reply" value={rates?.campaign_reply_rate ?? 0} color="#a78bfa" />
                     </div>
-                    <div className="min-h-[180px] sm:min-h-[220px]">
-                      <RateBars data={rateBars} height={160} />
+                    <div className="chart-box">
+                      <RateBars data={rateBars} height={140} />
                     </div>
                   </div>
-                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4">Email funnel</p>
-                    <div className="min-h-[180px] sm:min-h-[220px]">
+                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3 sm:mb-4">Email funnel</p>
+                    <div className="min-w-0">
                       {funnel && (
                         <FunnelBars stages={[
                           { label: "Sent", value: funnel.sent, color: "#f4b740" },
@@ -266,20 +266,20 @@ export default function EmailPage() {
                       )}
                     </div>
                   </div>
-                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
                     <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Volume mix</p>
-                    <div className="min-h-[180px] sm:min-h-[220px]">
-                      <DonutChart data={compositionData} height={240} />
+                    <div className="chart-box">
+                      <DonutChart data={compositionData} height={200} />
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-                  <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Email activity over time ({days}d)</p>
-                  <div className="min-h-[180px] sm:min-h-[260px]">
-                    <ActivityAreaChart data={daily} series={SERIES} height={260} />
+                <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                  <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2 sm:mb-3">Email activity over time ({days}d)</p>
+                  <div className="chart-box">
+                    <ActivityAreaChart data={daily} series={SERIES} height={200} />
                   </div>
-                  <div className="mt-5 pt-4 border-t border-base-300/30">
+                  <div className="mt-3 sm:mt-5 pt-3 sm:pt-4 border-t border-base-300/30 min-w-0">
                     <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">Daily breakdown</p>
                     <DailyBreakdownTable
                       data={daily}
@@ -296,22 +296,22 @@ export default function EmailPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Campaign comparison</p>
-                    <div className="min-h-[280px]">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2 sm:mb-3">Campaign comparison</p>
+                    <div className="chart-box">
                       <GroupedBarChart data={campaignBars} bars={[
                         { key: "sent", color: "#f4b740", label: "Sent" },
                         { key: "opened", color: "#38bdf8", label: "Opened" },
                         { key: "clicked", color: "#32d583", label: "Clicked" },
                         { key: "replied", color: "#a78bfa", label: "Replied" },
-                      ]} height={280} />
+                      ]} height={220} />
                     </div>
                   </div>
-                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Send time distribution (hour of day)</p>
-                    <div className="min-h-[180px] sm:min-h-[220px]">
-                      <HourBarChart data={hourSeries} height={280} />
+                  <div className="bg-base-200 border border-base-300/50 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden">
+                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2 sm:mb-3">Send time distribution (hour of day)</p>
+                    <div className="chart-box">
+                      <HourBarChart data={hourSeries} height={200} />
                     </div>
                   </div>
                 </div>

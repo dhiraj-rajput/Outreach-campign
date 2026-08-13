@@ -323,8 +323,18 @@ a:focus:not(:focus-visible) {
 }
 .table-wrap table {
   width: 100%;
-  min-width: 580px;
+  min-width: 0;
   border-collapse: collapse;
+}
+@media (min-width: 640px) {
+  .table-wrap table {
+    min-width: 480px;
+  }
+}
+@media (min-width: 900px) {
+  .table-wrap table {
+    min-width: 580px;
+  }
 }
 /* Wider tables keep 640 minimum */
 .table-wrap.table-wide table {
@@ -1600,4 +1610,16 @@ a:focus:not(:focus-visible) {
 }
 @media (min-width: 1024px) {
   .kpi-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+
+/* Chart cards — prevent Recharts from overflowing on narrow screens */
+.chart-card {
+  min-width: 0;
+  overflow: hidden;
+}
+.chart-box {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }

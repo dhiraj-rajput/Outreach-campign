@@ -48,6 +48,8 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const title = entity === "companies" ? "Import Companies" : "Import Contacts";
   const templateUrl =
@@ -65,6 +67,8 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
     setImportErrors([]);
     setBusy(false);
     setPasteText("");
+    setPage(1);
+    setPageSize(25);
   }, []);
 
   const handleClose = () => {
@@ -90,6 +94,7 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
       setRows(result.rows);
       // Select all valid rows by default
       setSelected(new Set(result.rows.filter((r) => r.errors.length === 0).map((r) => r._key)));
+      setPage(1);
       setPhase("preview");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to parse CSV");
@@ -184,6 +189,18 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
   );
 
   const validCount = useMemo(() => rows.filter((r) => r.errors.length === 0).length, [rows]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [rows, safePage, pageSize]);
+
+  // Keep page in range when rows shrink
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const allSelected =
     rows.length > 0 && rows.every((r) => selected.has(r._key));
@@ -393,8 +410,9 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r, i) => {
+                    {pageRows.map((r, i) => {
                       const isSel = selected.has(r._key);
+                      const rowIndex = (safePage - 1) * pageSize + i;
                       return (
                         <tr
                           key={r._key}
@@ -408,7 +426,7 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
                               onChange={() => toggleRow(r._key)}
                             />
                           </td>
-                          <td className="text-base-content/40">{i + 1}</td>
+                          <td className="text-base-content/40">{rowIndex + 1}</td>
                           {displayCols.map((c) => (
                             <td key={c} className="p-0.5">
                               <input
@@ -448,6 +466,70 @@ export default function CsvImportModal({ entity, open, onClose, onDone, listId }
                   </tbody>
                 </table>
               </div>
+
+              {rows.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-base-content/60 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base-content/50">Rows per page</span>
+                    <select
+                      className="select select-bordered select-xs w-[4.5rem]"
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setPage(1);
+                      }}
+                    >
+                      {[25, 50, 100, 200].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-base-content/40">
+                      {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, rows.length)} of {rows.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      disabled={safePage <= 1}
+                      onClick={() => setPage(1)}
+                      title="First page"
+                    >
+                      «
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      disabled={safePage <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      Prev
+                    </button>
+                    <span className="px-2 tabular-nums text-base-content/70">
+                      {safePage} / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      disabled={safePage >= totalPages}
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      disabled={safePage >= totalPages}
+                      onClick={() => setPage(totalPages)}
+                      title="Last page"
+                    >
+                      »
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <p className="text-[11px] text-base-content/40">
                 Tip: edit any cell inline, check only the rows you want, then Import. Unchecked rows are skipped.

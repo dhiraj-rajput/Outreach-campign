@@ -81,8 +81,9 @@ export function ActivityAreaChart({
     );
   }
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+    <div className="w-full min-w-0 overflow-hidden" style={{ height }}>
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
         <defs>
           {series.map((s) => (
             <linearGradient key={s.key} id={"grad-" + s.key} x1="0" y1="0" x2="0" y2="1">
@@ -111,6 +112,7 @@ export function ActivityAreaChart({
         ))}
       </AreaChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -134,8 +136,9 @@ export function GroupedBarChart({
     );
   }
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barGap={2}>
+    <div className="w-full min-w-0 overflow-hidden" style={{ height }}>
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }} barGap={2}>
         <CartesianGrid {...GRID} vertical={false} />
         <XAxis dataKey={xKey} {...AXIS} tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={50} />
         <YAxis {...AXIS} allowDecimals={false} width={36} />
@@ -146,6 +149,7 @@ export function GroupedBarChart({
         ))}
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -164,11 +168,12 @@ export function RateBars({
     );
   }
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
+    <div className="w-full min-w-0 overflow-hidden" style={{ height }}>
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
         <CartesianGrid {...GRID} horizontal={false} />
         <XAxis type="number" domain={[0, 100]} {...AXIS} unit="%" />
-        <YAxis type="category" dataKey="name" {...AXIS} width={110} tick={{ fill: "rgba(255,255,255,0.5)", fontSize: 11 }} />
+        <YAxis type="category" dataKey="name" {...AXIS} width={88} tick={{ fill: "rgba(255,255,255,0.5)", fontSize: 10 }} />
         <Tooltip content={<ChartTooltip valueFormatter={(v) => v + "%"} />} />
         <Bar dataKey="rate" name="Rate" radius={[0, 4, 4, 0]} maxBarSize={18}>
           {data.map((d, i) => (
@@ -178,6 +183,7 @@ export function RateBars({
         </Bar>
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -203,7 +209,8 @@ export function DonutChart({
     );
   }
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <div className="w-full min-w-0 overflow-hidden" style={{ height }}>
+    <ResponsiveContainer width="100%" height="100%">
       <PieChart>
         <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={innerRadius} outerRadius={outerRadius} paddingAngle={2} stroke="none">
           {data.map((d, i) => (
@@ -214,6 +221,7 @@ export function DonutChart({
         <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} formatter={(value) => <span className="text-base-content/60">{value}</span>} />
       </PieChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -253,7 +261,8 @@ export function HourBarChart({ data, height = 180 }: { data: { hour: number; lab
     );
   }
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <div className="w-full min-w-0 overflow-hidden" style={{ height }}>
+    <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
         <CartesianGrid {...GRID} vertical={false} />
         <XAxis dataKey="label" {...AXIS} interval={2} tick={{ fontSize: 9 }} />
@@ -262,6 +271,7 @@ export function HourBarChart({ data, height = 180 }: { data: { hour: number; lab
         <Bar dataKey="count" name="Sends" fill="#5aa2ff" radius={[2, 2, 0, 0]} maxBarSize={14} />
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -324,8 +334,8 @@ export function DailyBreakdownTable({
   }
 
   return (
-    <div className="overflow-x-auto max-w-full">
-      <table className="w-full text-[10px] sm:text-xs">
+    <div className="overflow-x-auto max-w-full -mx-1 px-1">
+      <table className="w-full text-[10px] sm:text-xs" style={{ minWidth: Math.max(280, 80 + columns.length * 52) }}>
         <thead>
           <tr className="border-b border-base-300/50">
             <th className="text-left font-medium text-base-content/40 uppercase tracking-wide py-1.5 pr-2 sticky left-0 bg-base-200">Day</th>
