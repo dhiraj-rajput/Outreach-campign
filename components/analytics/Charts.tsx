@@ -324,16 +324,16 @@ export function DailyBreakdownTable({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
+    <div className="overflow-x-auto max-w-full">
+      <table className="w-full text-[10px] sm:text-xs">
         <thead>
           <tr className="border-b border-base-300/50">
-            <th className="text-left font-medium text-base-content/40 uppercase tracking-wide py-2 pr-3 sticky left-0 bg-base-200">Day</th>
+            <th className="text-left font-medium text-base-content/40 uppercase tracking-wide py-1.5 pr-2 sticky left-0 bg-base-200">Day</th>
             {columns.map((c) => (
-              <th key={c.key} className="text-right font-medium text-base-content/40 uppercase tracking-wide py-2 px-2 whitespace-nowrap">
-                <span className="inline-flex items-center gap-1.5 justify-end">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.color }} />
-                  {c.label}
+              <th key={c.key} className="text-right font-medium text-base-content/40 uppercase tracking-wide py-1.5 px-1 sm:px-2 whitespace-nowrap">
+                <span className="inline-flex items-center gap-1 justify-end">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.color }} />
+                  <span className="truncate max-w-[60px] sm:max-w-none">{c.label}</span>
                 </span>
               </th>
             ))}
@@ -344,18 +344,18 @@ export function DailyBreakdownTable({
             const isToday = idx === 0;
             return (
               <tr key={row.day} className={`border-b border-base-300/20 hover:bg-base-300/20 transition-colors ${isToday ? "bg-primary/3" : ""}`}>
-                <td className="py-1.5 pr-3 whitespace-nowrap font-medium text-base-content/70 sticky left-0 bg-base-200">
+                <td className="py-1 pr-2 whitespace-nowrap font-medium text-base-content/70 sticky left-0 bg-base-200">
                   {fmtDay(row.day)}
-                  {isToday && <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-primary/15 text-primary uppercase tracking-wide">Today</span>}
+                  {isToday && <span className="ml-1 text-[8px] sm:text-[9px] px-1 py-0.5 rounded bg-primary/15 text-primary uppercase tracking-wide">Today</span>}
                 </td>
                 {columns.map((c) => {
                   const val = Number(row[c.key]) || 0;
                   const d = delta(row, idx, c.key);
                   return (
-                    <td key={c.key} className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">
+                    <td key={c.key} className="py-1 px-1 sm:px-2 text-right tabular-nums whitespace-nowrap">
                       <span className={val > 0 ? "text-base-content" : "text-base-content/25"}>{val.toLocaleString()}</span>
                       {d !== null && d !== 0 && (
-                        <span className={`ml-1 text-[10px] ${d > 0 ? "text-success" : "text-error"}`}>
+                        <span className={`ml-0.5 text-[9px] ${d > 0 ? "text-success" : "text-error"}`}>
                           {d > 0 ? "▲" : "▼"}{Math.abs(d)}
                         </span>
                       )}
@@ -368,11 +368,11 @@ export function DailyBreakdownTable({
         </tbody>
         <tfoot>
           <tr className="border-t border-base-300/60">
-            <td className="py-2 pr-3 font-semibold text-base-content/60 sticky left-0 bg-base-200">
-              {data.length > maxRows ? `Total (last ${data.length}d)` : "Total"}
+            <td className="py-1.5 pr-2 font-semibold text-base-content/60 sticky left-0 bg-base-200">
+              {data.length > maxRows ? `Total (${data.length}d)` : "Total"}
             </td>
             {columns.map((c) => (
-              <td key={c.key} className="py-2 px-2 text-right tabular-nums font-semibold" style={{ color: c.color }}>
+              <td key={c.key} className="py-1.5 px-1 sm:px-2 text-right tabular-nums font-semibold" style={{ color: c.color }}>
                 {totals[c.key].toLocaleString()}
               </td>
             ))}

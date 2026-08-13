@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { GetServerSideProps } from "next";
 import { useRouter } from "next/router";
 import { getDb } from "@/lib/db";
@@ -108,28 +108,30 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [search]);
 
-  useEffect(() => {
-    let active = true;
+  const loadContacts = useCallback(async () => {
     const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
     if (listId) params.set("list_id", listId);
     if (debouncedSearch) params.set("search", debouncedSearch);
     const filterParams = filtersToParams(filters);
     filterParams.forEach((v, k) => params.set(k, v));
-    fetch(`/api/targets?${params}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (active && data) {
-          setContacts(data.contacts);
-          setTotal(data.total);
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    const res = await fetch(`/api/targets?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      setContacts(data.contacts);
+      setTotal(data.total);
+    }
+    setLoading(false);
+  }, [page, listId, debouncedSearch, filters]);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) loadContacts();
+    });
     return () => {
       active = false;
     };
-  }, [page, listId, debouncedSearch, filters]);
+  }, [loadContacts]);
 
   function changeList(lid: string) { setLoading(true); setListId(lid); setPage(0); setSelected(new Set()); }
   function changeSearch(q: string) { setLoading(true); setSearch(q); setPage(0); setSelected(new Set()); }
@@ -146,7 +148,10 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
   }
 
   function toggleOne(id: string) {
-    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
   }
 
   async function addSelectedToList() {
@@ -185,7 +190,7 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
     toast.success(`Deleted ${data.deleted} contact${data.deleted !== 1 ? "s" : ""}`);
     setShowDeleteConfirm(false);
     setSelected(new Set());
-    fetch_(page, listId, debouncedSearch, filters);
+    loadContacts();
   }
 
   async function createContact(e: React.FormEvent) {
@@ -205,8 +210,8 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
     toast.success("Contact created");
     setShowNewContact(false);
     setNewContactForm({ full_name: "", linkedin_url: "", title: "", company: "", location: "", email: "", phone: "", list_id: "" });
-    fetch_(0, listId, debouncedSearch, filters);
     setPage(0);
+    loadContacts();
   }
 
   const hasActiveFilters = filters.length > 0 || listId || search;
@@ -590,7 +595,7 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
         onClose={() => setShowImport(false)}
         onDone={() => {
           setPage(0);
-          fetch_(0, listId, debouncedSearch, filters);
+          loadContacts();
         }}
       />
     </>

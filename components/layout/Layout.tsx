@@ -38,7 +38,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       <Sidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
 
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      <div className="flex-1 flex flex-col min-w-0 h-full max-w-full overflow-x-hidden">
         {/* Mobile top bar */}
         <header className="lg:hidden shrink-0 h-14 px-3 flex items-center gap-3 border-b border-base-300/50 bg-base-100 z-10">
           <button
@@ -54,8 +54,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           <span className="font-semibold text-sm tracking-tight">Linki</span>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6 lg:ml-13 pb-[env(safe-area-inset-bottom,0)]">
-          <div className="max-w-[1400px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto w-full">{children}</div>
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 lg:p-6 lg:ml-13 pb-[env(safe-area-inset-bottom,0)] max-w-full">
+          <div className="max-w-[1400px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto w-full min-w-0">{children}</div>
         </main>
       </div>
     </div>
