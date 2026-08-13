@@ -45,7 +45,13 @@ export interface CreatePostResult {
 }
 
 const FEED_URL = "https://www.linkedin.com/feed/";
-/** Direct composer entry used by profile "Create a post" (hover shows this href). */
+/**
+ * Current LinkedIn personal post composer (Aug 2026 UI).
+ * Clicking "Start a post" on the feed navigates to /sharing/compose
+ * Editor placeholder: "Share your thoughts ..."
+ */
+const COMPOSE_URL = "https://www.linkedin.com/sharing/compose";
+/** Legacy direct entry used by profile "Create a post" in some layouts. */
 const SHAREBOX_URL = "https://www.linkedin.com/preload/sharebox/";
 /** Alternate feed entry that forces the share box open. */
 const FEED_SHARE_ACTIVE_URL = "https://www.linkedin.com/feed/?shareActive=true";
@@ -81,7 +87,8 @@ async function isLoggedIn(page: Page): Promise<boolean> {
 
     const start = page
       .locator(
-        'button.share-box-feed-entry__trigger, button[aria-label*="Start a post" i], ' +
+        '[aria-label="Start a post"], [aria-label*="Start a post" i], ' +
+          'button.share-box-feed-entry__trigger, button[aria-label*="Start a post" i], ' +
           'div.share-box-feed-entry__trigger, div.share-box-feed-entry__closed-share-box, ' +
           '[data-control-name="share.sharebox_focus"]'
       )
@@ -102,25 +109,36 @@ async function isLoggedIn(page: Page): Promise<boolean> {
   return false;
 }
 
+const EDITOR_SELECTORS = [
+  // Current Aug 2026 composer: "Share your thoughts ..."
+  'div[data-placeholder*="Share your thoughts" i]',
+  'div[aria-placeholder*="Share your thoughts" i]',
+  'div[placeholder*="Share your thoughts" i]',
+  'div[data-placeholder*="Share your thoughts" i][contenteditable="true"]',
+  'div[aria-placeholder*="Share your thoughts" i][contenteditable="true"]',
+  'div[role="textbox"][contenteditable="true"]',
+  'div.ql-editor[contenteditable="true"]',
+  'div.ql-editor',
+  'div.share-creation-state__text-editor div[contenteditable="true"]',
+  'div.share-creation-state__text-editor div.ql-editor',
+  'div[data-placeholder*="talk about" i][contenteditable="true"]',
+  'div[aria-placeholder*="talk about" i][contenteditable="true"]',
+  'div[data-placeholder*="What do you want to talk about" i]',
+  'div[aria-placeholder*="What do you want to talk about" i]',
+  '.share-box div[contenteditable="true"]',
+  '[data-test-id="share-box"] div[contenteditable="true"]',
+  // Any contenteditable in a dialog/modal that looks like the composer
+  'div[role="dialog"] div[contenteditable="true"]',
+  'div.artdeco-modal div[contenteditable="true"]',
+].join(", ");
+
 async function editorVisible(page: Page): Promise<boolean> {
-  const editor = page.locator(
-    'div.ql-editor[contenteditable="true"], ' +
-      'div.share-creation-state__text-editor div[contenteditable="true"], ' +
-      'div[role="textbox"][contenteditable="true"], ' +
-      'div[data-placeholder*="talk about" i][contenteditable="true"], ' +
-      'div[aria-placeholder*="talk about" i][contenteditable="true"]'
-  ).first();
-  return editor.isVisible({ timeout: 8000 }).catch(() => false);
+  const editor = page.locator(EDITOR_SELECTORS).first();
+  return editor.isVisible({ timeout: 10000 }).catch(() => false);
 }
 
 function editorLocator(page: Page) {
-  return page.locator(
-    'div.ql-editor[contenteditable="true"], ' +
-      'div.share-creation-state__text-editor div[contenteditable="true"], ' +
-      'div[role="textbox"][contenteditable="true"], ' +
-      'div[data-placeholder*="talk about" i][contenteditable="true"], ' +
-      'div[aria-placeholder*="talk about" i][contenteditable="true"]'
-  ).first();
+  return page.locator(EDITOR_SELECTORS).first();
 }
 
 async function dismissOverlays(page: Page) {
@@ -159,95 +177,258 @@ async function assertLoggedIn(page: Page) {
 }
 
 async function tryClickStartPost(page: Page): Promise<boolean> {
+  // Aug 2026 feed control (from live DOM):
+  // <div aria-label="Start a post" ...><p>Start a post</p></div>
+  // Classes are hashed; aria-label + text are the stable hooks.
   const startSelectors = [
-    'button.share-box-feed-entry__trigger',
+    '[aria-label="Start a post"]',
+    '[aria-label*="Start a post" i]',
+    'div[aria-label="Start a post"]',
+    'div[aria-label*="Start a post" i]',
+    'button[aria-label="Start a post"]',
     'button[aria-label*="Start a post" i]',
-    'button[aria-label*="Create a post" i]',
+    // Text-based (works when aria-label missing)
+    'div[role="button"]:has-text("Start a post")',
+    'button:has-text("Start a post")',
+    'p:has-text("Start a post")',
+    'span:has-text("Start a post")',
+    'a:has-text("Start a post")',
+    // Compose / sharebox links
+    'a[href*="/sharing/compose"]',
     'a[href*="/preload/sharebox"]',
     'a[href*="sharebox"]',
+    // Legacy class names (older layouts)
+    'button.share-box-feed-entry__trigger',
+    '.share-box-feed-entry__closed-share-box',
+    '.share-box-feed-entry__top-bar',
+    '.share-box-feed-entry__trigger',
     'div.share-box-feed-entry__trigger',
-    'div.share-box-feed-entry__closed-share-box',
+    '[placeholder="Start a post"]',
+    'div[data-placeholder="Start a post"]',
+    'div[data-placeholder*="Start a post" i]',
     'button.artdeco-button:has-text("Start a post")',
     'button.artdeco-button:has-text("Create a post")',
-    'div[role="button"]:has-text("Start a post")',
     'div[role="button"]:has-text("Create a post")',
+    '[aria-label*="Create a post" i]',
+    'button[aria-label*="Create a post" i]',
     '[data-control-name="share.sharebox_focus"]',
     'button.share-box-feed-entry__trigger--v2',
-    'button:has-text("Start a post")',
     'button:has-text("Create a post")',
+    'span:has-text("Create a post")',
   ];
 
   for (const sel of startSelectors) {
     try {
       const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await el.scrollIntoViewIfNeeded().catch(() => {});
-        await humanDelay(200, 450);
-        await el.click({ timeout: 5000 });
-        await humanDelay(700, 1300);
-        if (await editorVisible(page)) return true;
+      if (!(await el.isVisible({ timeout: 1500 }).catch(() => false))) continue;
+
+      await el.scrollIntoViewIfNeeded().catch(() => {});
+      await humanDelay(150, 350);
+
+      // Prefer normal click; fall back to force + JS click (LinkedIn sometimes intercepts)
+      try {
+        await el.click({ timeout: 4000 });
+      } catch {
+        try {
+          await el.click({ force: true, timeout: 3000 });
+        } catch {
+          await el.evaluate((node: HTMLElement) => node.click()).catch(() => {});
+        }
+      }
+
+      await humanDelay(900, 1600);
+      if (await editorVisible(page)) {
+        console.log(`[post] composer opened via selector: ${sel}`);
+        return true;
+      }
+      // Click may navigate to /sharing/compose — treat that as success if editor appears after
+      if (page.url().includes("/sharing/compose")) {
+        await humanDelay(800, 1400);
+        if (await editorVisible(page)) {
+          console.log(`[post] composer opened via nav after: ${sel}`);
+          return true;
+        }
       }
     } catch {
       /* next */
     }
   }
+
+  // Last-resort: any element whose aria-label or text is exactly "Start a post"
+  try {
+    const clicked = await page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll('[aria-label], button, div[role="button"], p, span, a')
+      ) as HTMLElement[];
+      for (const el of candidates) {
+        const label = (el.getAttribute("aria-label") || "").trim();
+        const text = (el.textContent || "").trim();
+        if (label === "Start a post" || text === "Start a post") {
+          el.scrollIntoView({ block: "center", inline: "center" });
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (clicked) {
+      await humanDelay(1200, 2000);
+      if (await editorVisible(page) || page.url().includes("/sharing/compose")) {
+        console.log("[post] composer opened via JS aria-label/text scan");
+        if (page.url().includes("/sharing/compose") && !(await editorVisible(page))) {
+          await humanDelay(1000, 1800);
+        }
+        if (await editorVisible(page)) return true;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
   return false;
 }
 
+/** Diagnostic snapshot when composer fails — helps next fix. */
+async function logComposerDiagnostics(page: Page, stage: string) {
+  try {
+    const info = await page.evaluate(() => {
+      const textSnips = Array.from(document.querySelectorAll("button, a, div[role='button']"))
+        .map((el) => (el.textContent || "").trim().slice(0, 40))
+        .filter((t) => /post|share|start|create|write/i.test(t))
+        .slice(0, 15);
+      return {
+        url: location.href,
+        title: document.title,
+        hasQlEditor: !!document.querySelector(".ql-editor"),
+        hasContentEditable: !!document.querySelector('[contenteditable="true"]'),
+        hasShareBox: !!document.querySelector(
+          ".share-box-feed-entry__trigger, .share-box-feed-entry__closed-share-box, [class*='share-box']"
+        ),
+        bodyTextSample: (document.body?.innerText || "").slice(0, 200),
+        postLikeControls: textSnips,
+      };
+    });
+    console.warn(`[post] composer diagnostic @ ${stage}:`, JSON.stringify(info));
+  } catch (e) {
+    console.warn(`[post] diagnostic failed @ ${stage}:`, e instanceof Error ? e.message : e);
+  }
+}
+
 async function openComposer(page: Page): Promise<boolean> {
-  // 1) Land on feed so restored cookies apply and auth redirects are visible
+  // 1) Auth check on feed (cookies applied, redirects visible)
   try {
     await page.goto(FEED_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
   } catch (e) {
     console.warn("[post] feed navigation failed:", e instanceof Error ? e.message : e);
   }
-  await humanDelay(1500, 2800);
+  await humanDelay(2000, 3500);
+  try {
+    await page.waitForLoadState("networkidle", { timeout: 12000 }).catch(() => {});
+  } catch {
+    /* ignore */
+  }
   await dismissOverlays(page);
   await assertLoggedIn(page);
 
-  // 2) Try native feed / profile-style "Start a post" / "Create a post" clicks
-  if (await tryClickStartPost(page)) return true;
+  // 2) PRIMARY (Aug 2026): direct compose URL after clicking Start a post
+  //    Real UI navigates to https://www.linkedin.com/sharing/compose
+  //    Editor placeholder: "Share your thoughts ..."
+  try {
+    await page.goto(COMPOSE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await humanDelay(2000, 3500);
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+    await dismissOverlays(page);
+    if (await editorVisible(page)) {
+      console.log("[post] composer opened via /sharing/compose");
+      return true;
+    }
+    // Modal may still need a moment / click into the text area
+    const editor = editorLocator(page);
+    if (await editor.count().catch(() => 0)) {
+      await editor.click({ timeout: 3000 }).catch(() => {});
+      await humanDelay(400, 800);
+      if (await editorVisible(page)) {
+        console.log("[post] composer focused via /sharing/compose click");
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn("[post] /sharing/compose navigation failed:", e instanceof Error ? e.message : e);
+  }
 
-  // 3) Direct sharebox URL (the href behind profile Activity → "Create a post")
+  // 3) Feed → click the "Start a post" pill (matches current rounded UI)
+  try {
+    await page.goto(FEED_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await humanDelay(2500, 4000);
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+    await dismissOverlays(page);
+    if (await tryClickStartPost(page)) {
+      // After click, LinkedIn may navigate to /sharing/compose
+      await humanDelay(1500, 2500);
+      if (page.url().includes("/sharing/compose") || (await editorVisible(page))) {
+        console.log("[post] composer opened via feed Start a post click →", page.url());
+        return true;
+      }
+      // Wait for navigation to compose
+      try {
+        await page.waitForURL("**/sharing/compose**", { timeout: 8000 });
+        await humanDelay(1000, 1800);
+        if (await editorVisible(page)) {
+          console.log("[post] composer opened after navigate to /sharing/compose");
+          return true;
+        }
+      } catch {
+        /* no nav */
+      }
+    }
+  } catch (e) {
+    console.warn("[post] feed click path failed:", e instanceof Error ? e.message : e);
+  }
+
+  // 4) shareActive=true (still useful on some account layouts)
+  try {
+    await page.goto(FEED_SHARE_ACTIVE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await humanDelay(2000, 3500);
+    await dismissOverlays(page);
+    if (await editorVisible(page)) {
+      console.log("[post] composer opened via shareActive=true");
+      return true;
+    }
+    if (await tryClickStartPost(page)) return true;
+  } catch (e) {
+    console.warn("[post] shareActive navigation failed:", e instanceof Error ? e.message : e);
+  }
+
+  // 5) Legacy sharebox
   try {
     await page.goto(SHAREBOX_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await humanDelay(1200, 2200);
+    await humanDelay(2000, 3200);
     await dismissOverlays(page);
-    if (await editorVisible(page)) return true;
-    // Sometimes sharebox lands on a shell that still needs a click
+    if (await editorVisible(page)) {
+      console.log("[post] composer opened via /preload/sharebox/");
+      return true;
+    }
     if (await tryClickStartPost(page)) return true;
   } catch (e) {
     console.warn("[post] sharebox navigation failed:", e instanceof Error ? e.message : e);
   }
 
-  // 4) Feed with shareActive=true (another known way to force the composer)
-  try {
-    await page.goto(FEED_SHARE_ACTIVE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await humanDelay(1500, 2500);
-    await dismissOverlays(page);
-    if (await editorVisible(page)) return true;
-    if (await tryClickStartPost(page)) return true;
-  } catch (e) {
-    console.warn("[post] feed shareActive navigation failed:", e instanceof Error ? e.message : e);
-  }
-
-  // 5) Last chance: plain feed reload + click
-  await page.goto(FEED_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await humanDelay(1800, 3000);
-  await dismissOverlays(page);
-  if (await tryClickStartPost(page)) return true;
-
+  await logComposerDiagnostics(page, "all-paths-failed");
   return false;
 }
 
 async function setVisibility(page: Page, visibility: "anyone" | "connections") {
   try {
     const visTriggers = [
-      'button.share-creation-state__visibility-dropdown',
-      'button[aria-label*="visibility" i]',
-      'button[aria-label*="Who can see" i]',
+      // Aug 2026: "Post to Anyone" pill in composer header
+      'button:has-text("Post to Anyone")',
       'button:has-text("Anyone")',
       'button:has-text("Connections only")',
+      'button:has-text("Post to Connections")',
+      'button[aria-label*="Anyone" i]',
+      'button[aria-label*="visibility" i]',
+      'button[aria-label*="Who can see" i]',
+      'button.share-creation-state__visibility-dropdown',
       'div.share-creation-state__audience-selector button',
       'button.share-creation-state__audience-button',
     ];
@@ -263,7 +444,8 @@ async function setVisibility(page: Page, visibility: "anyone" | "connections") {
     }
     if (!opened) return;
 
-    const optionLabel = visibility === "anyone" ? "Anyone" : "Connections only";
+    const optionLabel = visibility === "anyone" ? "Anyone" : "Connections";
+    // Also match "Post to Anyone" / "Post to Connections" wording
     const option = page
       .locator(
         `label:has-text("${optionLabel}"), button:has-text("${optionLabel}"), ` +
@@ -346,14 +528,19 @@ async function attachMedia(page: Page, media: MediaItem[]) {
           'button[aria-label*="Add a document" i]',
           'button[aria-label*="document" i]',
           'button:has-text("Add a document")',
+          'button[aria-label*="Photo" i]',
           'button[aria-label*="Add a photo" i]',
           'button[aria-label*="Add media" i]',
           'button.share-creation-state__media-button',
         ]
       : [
+          // Aug 2026 toolbar: icon buttons (Photo tooltip)
+          'button[aria-label="Photo"]',
+          'button[aria-label*="Photo" i]',
           'button[aria-label*="Add a photo" i]',
           'button[aria-label*="Add media" i]',
           'button[aria-label*="photo" i]',
+          'button:has-text("Photo")',
           'button:has-text("Add media")',
           'button.share-creation-state__media-button',
         ];
@@ -480,10 +667,13 @@ async function tryNativeSchedule(page: Page, scheduleAt: string): Promise<boolea
 async function clickPost(page: Page) {
   const postBtn = page
     .locator(
-      'button.share-actions__primary-action:not([disabled]), ' +
+      // Aug 2026 compose modal: bottom-right "Post" button
+      'button:has-text("Post"):not([disabled]), ' +
+        'button.share-actions__primary-action:not([disabled]), ' +
         'button.share-actions__primary-action:has-text("Post"), ' +
         'div.share-box_actions button:has-text("Post"), ' +
-        'button[aria-label="Post"]:not([disabled])'
+        'button[aria-label="Post"]:not([disabled]), ' +
+        'button[aria-label*="Post" i]:not([disabled])'
     )
     .first();
 
@@ -503,7 +693,7 @@ async function clickPost(page: Page) {
 
   if (await editorVisible(page)) {
     await humanDelay(800, 1200);
-    const again = page.locator('button.share-actions__primary-action:has-text("Post")').first();
+    const again = page.locator('button:has-text("Post"), button.share-actions__primary-action:has-text("Post")').first();
     if (await again.isVisible({ timeout: 2000 }).catch(() => false)) {
       const dis = await again.isDisabled().catch(() => true);
       if (!dis) await again.click().catch(() => {});
