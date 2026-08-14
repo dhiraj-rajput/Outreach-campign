@@ -626,6 +626,63 @@ function runMigrations(db: Database.Database) {
       updated_at TEXT DEFAULT (datetime('now'))
     )`,
     "CREATE INDEX IF NOT EXISTS idx_linkedin_posts_status_scheduled ON linkedin_posts(status, scheduled_at)",
+
+    // ─── Billing / roles / organizations (paid-plan gating + super admin) ───
+    // role: 'user' | 'super_admin'. Super admins bypass every paid-plan gate.
+    "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+    // plan: 'free' | 'paid' — the user's OWN plan (independent of any org they're in).
+    "ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'",
+    `CREATE TABLE IF NOT EXISTS organizations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      plan TEXT NOT NULL DEFAULT 'free' CHECK(plan IN ('free', 'paid')),
+      owner_id TEXT NOT NULL REFERENCES users(id),
+      -- Placeholders for whichever payment gateway gets wired in later (Stripe, Paddle, …).
+      -- Nothing reads/writes these yet outside lib/access.ts's upgrade stub.
+      billing_provider TEXT,
+      billing_customer_id TEXT,
+      billing_subscription_id TEXT,
+      plan_updated_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS organization_members (
+      org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner', 'admin', 'member')),
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (org_id, user_id)
+    )`,
+    // A user may belong to at most one organization. If that org is on the paid plan,
+    // the user gets paid access even if their personal `plan` is still 'free' — see
+    // lib/access.ts:getAccessContext, which computes effective access as
+    // (user.plan === 'paid' OR org.plan === 'paid' OR user.role === 'super_admin').
+    "ALTER TABLE users ADD COLUMN org_id TEXT REFERENCES organizations(id)",
+    // Same placeholder fields as organizations, for users who upgrade individually
+    // rather than through an org.
+    "ALTER TABLE users ADD COLUMN billing_provider TEXT",
+    "ALTER TABLE users ADD COLUMN billing_customer_id TEXT",
+    "ALTER TABLE users ADD COLUMN billing_subscription_id TEXT",
+    "ALTER TABLE users ADD COLUMN plan_updated_at TEXT",
+
+    // ─── CRM pipeline (paid feature) ───
+    `CREATE TABLE IF NOT EXISTS pipeline_deals (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      target_id TEXT REFERENCES targets(id) ON DELETE SET NULL,
+      company_id TEXT REFERENCES companies(id) ON DELETE SET NULL,
+      value REAL DEFAULT 0,
+      currency TEXT DEFAULT 'USD',
+      stage TEXT NOT NULL DEFAULT 'new' CHECK(stage IN ('new', 'contacted', 'qualified', 'proposal', 'won', 'lost')),
+      notes TEXT,
+      owner_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      org_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+      position INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_deals_stage ON pipeline_deals(stage)",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_deals_org ON pipeline_deals(org_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_deals_owner ON pipeline_deals(owner_id)",
 ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch { /* column already exists */ }

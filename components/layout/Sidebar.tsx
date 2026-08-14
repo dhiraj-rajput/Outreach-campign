@@ -8,7 +8,7 @@ import {
   RiUserSettingsLine, RiBuildingLine, RiContactsLine,
   RiInboxLine, RiCheckboxCircleLine,
   RiNewspaperLine, RiLinkedinBoxLine, RiMailSendLine,
-  RiSunLine, RiMoonLine, RiCloseLine,
+  RiSunLine, RiMoonLine, RiCloseLine, RiKanbanView, RiShieldStarLine, RiLockLine,
 } from "react-icons/ri";
 import { getStoredTheme, setTheme, type ThemePreference } from "@/lib/theme";
 
@@ -31,6 +31,9 @@ const premiumNav = [
   { href: "/todos", label: "Todos", icon: RiCheckboxCircleLine, tour: "nav-todos" },
 ];
 
+const pipelineNav = { href: "/pipeline", label: "Pipeline", icon: RiKanbanView, tour: "nav-pipeline" };
+const adminNav = { href: "/admin", label: "Admin", icon: RiShieldStarLine };
+
 type Props = {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
@@ -41,12 +44,23 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const [hovered, setHovered] = useState(false);
   const [themePref, setThemePref] = useState<ThemePreference>(() => (typeof window !== "undefined" ? getStoredTheme() : "dark"));
   const [hasPremium, setHasPremium] = useState(true);
+  const [isPaid, setIsPaid] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   useEffect(() => {
     fetch("/api/premium-status")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d) setHasPremium(!!d.hasPremium);
+      })
+      .catch(() => {});
+    fetch("/api/billing/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) {
+          setIsPaid(!!d.isPaid);
+          setIsSuperAdmin(!!d.isSuperAdmin);
+        }
       })
       .catch(() => {});
   }, []);
@@ -66,6 +80,27 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
 
   const ThemeIcon = themePref === "light" ? RiSunLine : RiMoonLine;
   const themeLabel = themePref === "light" ? "Light" : "Dark";
+
+  function renderNavLink(item: { href: string; label: string; icon: React.ComponentType<{ size?: number }>; tour?: string }, labels: boolean, locked?: boolean) {
+    const active = isActive(item.href);
+    const Icon = item.icon;
+    return (
+      <Link
+        key={item.href}
+        href={locked ? "/pricing" : item.href}
+        data-tour={item.tour}
+        title={!labels ? item.label : locked ? `${item.label} — upgrade to unlock` : undefined}
+        onClick={onMobileClose}
+        className={`nav-item ${labels ? "px-2.5" : "justify-center"} ${active ? "active" : ""}`}
+      >
+        <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
+          <Icon size={15} />
+        </span>
+        {labels && <span className="text-sm font-medium truncate flex-1">{item.label}</span>}
+        {labels && locked && <RiLockLine size={12} className="text-base-content/35 shrink-0" />}
+      </Link>
+    );
+  }
 
   function renderNavLinks(labels: boolean) {
     return (
@@ -143,9 +178,37 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
               </div>
             </>
           )}
+
+          {labels && <div className="nav-group-label">CRM</div>}
+          <div className="flex flex-col gap-0.5 px-1.5 mt-1">
+            {renderNavLink(pipelineNav, labels, !isPaid)}
+          </div>
+
+          {isSuperAdmin && (
+            <>
+              {labels && <div className="nav-group-label">Admin</div>}
+              <div className="flex flex-col gap-0.5 px-1.5 mt-1">
+                {renderNavLink(adminNav, labels)}
+              </div>
+            </>
+          )}
         </nav>
 
         <div className="pb-2 border-t border-base-300/40 pt-2 flex flex-col gap-0.5 px-1.5">
+          {!isPaid && (
+            <Link
+              href="/pricing"
+              onClick={onMobileClose}
+              title={!labels ? "Upgrade" : undefined}
+              className={`nav-item ${labels ? "px-2.5" : "justify-center"} !text-primary`}
+            >
+              <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
+                <RiShieldStarLine size={15} />
+              </span>
+              {labels && <span className="text-sm font-medium">Upgrade</span>}
+            </Link>
+          )}
+
           <button
             type="button"
             onClick={cycleTheme}

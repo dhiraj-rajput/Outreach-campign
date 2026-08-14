@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { getDb } from "@/lib/db";
 import { isRateLimited } from "@/lib/rate-limit";
 import { validateEmail } from "@/lib/password";
+import { getAccessContextForUser, syncEnvSuperAdmin } from "@/lib/access";
 
 type UserRow = { id: string; email: string; password_hash: string; name: string | null };
 
@@ -56,14 +57,28 @@ export const authOptions: NextAuthOptions = {
         token.email = user.email;
         token.name = user.name;
       }
+      // Re-resolve plan/role from the DB on every request (not just at sign-in) so an
+      // admin flipping someone's plan, or promoting a super admin, takes effect on their
+      // very next API call/page load instead of requiring a fresh login.
+      if (token.id) {
+        syncEnvSuperAdmin(token.id as string, (token.email as string) ?? "");
+        const access = getAccessContextForUser(token.id as string);
+        if (access) {
+          token.role = access.role;
+          token.isPaid = access.isPaid;
+          token.orgId = access.orgId;
+        }
+      }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.email = (token.email as string) ?? session.user.email;
         session.user.name = (token.name as string) ?? session.user.name;
-        // @ts-expect-error id is custom
         session.user.id = token.id as string;
+        session.user.role = (token.role as "user" | "super_admin") ?? "user";
+        session.user.isPaid = Boolean(token.isPaid);
+        session.user.orgId = (token.orgId as string | null) ?? null;
       }
       return session;
     },

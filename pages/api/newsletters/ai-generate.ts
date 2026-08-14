@@ -6,6 +6,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from "next";
 import { runAICompletion } from "@/lib/ai/client";
+import { requirePaidAccess } from "@/lib/access";
 
 type NewsletterStyle = "professional" | "friendly" | "bold";
 
@@ -29,6 +30,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader("Allow", ["POST"]);
     return res.status(405).end();
   }
+
+  const access = await requirePaidAccess(req, res);
+  if (!access) return;
 
   const { title, prompt, bannerUrl, style = "professional" } = req.body as {
     title?: string;

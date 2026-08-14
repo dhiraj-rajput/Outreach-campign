@@ -8,7 +8,7 @@ import Layout from "@/components/layout/Layout";
 import { Toaster } from "sonner";
 import { getStoredTheme } from "@/lib/theme";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/pricing"];
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();

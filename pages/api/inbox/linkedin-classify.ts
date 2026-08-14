@@ -10,6 +10,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
 import { classifyLinkedInReply } from "@/lib/ai/linkedin-classifier";
+import { requirePaidAccess } from "@/lib/access";
 
 interface Target {
   id: string;
@@ -24,6 +25,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader("Allow", ["POST"]);
     return res.status(405).end();
   }
+
+  const access = await requirePaidAccess(req, res);
+  if (!access) return;
 
   const { targetId } = req.body as { targetId?: string };
   if (!targetId) return res.status(400).json({ error: "targetId required" });

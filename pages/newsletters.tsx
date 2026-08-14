@@ -1,5 +1,6 @@
 import Head from "next/head";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/router";
 import { toast } from "sonner";
 import {
   RiNewspaperLine,
@@ -13,7 +14,9 @@ import {
   RiMagicLine,
   RiImageAddLine,
   RiEyeLine,
+  RiLockLine,
 } from "react-icons/ri";
+import { useBillingStatus } from "@/components/billing/useBillingStatus";
 
 interface Newsletter {
   id: string;
@@ -58,6 +61,8 @@ interface DBList {
 }
 
 export default function NewslettersPage() {
+  const router = useRouter();
+  const { status: billingStatus } = useBillingStatus();
   const [newsletters, setNewsletters] = useState<Newsletter[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedNewsletter, setSelectedNewsletter] = useState<Newsletter | null>(null);
@@ -259,6 +264,11 @@ export default function NewslettersPage() {
   async function handleGenerateAIContent() {
     if (!edTitle.trim()) {
       toast.error("Please enter an issue title first");
+      return;
+    }
+    if (!billingStatus?.isPaid) {
+      toast.error("AI newsletter generation is a paid feature");
+      router.push("/pricing");
       return;
     }
     setAiGenerating(true);
@@ -776,7 +786,7 @@ export default function NewslettersPage() {
                     disabled={aiGenerating || !edTitle.trim()}
                     className="inline-flex items-center gap-1 text-xs text-secondary hover:text-secondary/80 font-medium disabled:opacity-40 transition-colors"
                   >
-                    {aiGenerating ? <RiLoader4Line size={12} className="animate-spin" /> : <RiMagicLine size={12} />}
+                    {aiGenerating ? <RiLoader4Line size={12} className="animate-spin" /> : billingStatus && !billingStatus.isPaid ? <RiLockLine size={12} /> : <RiMagicLine size={12} />}
                     {aiGenerating ? "Generating..." : "Generate with AI (Gemini)"}
                   </button>
                 </div>

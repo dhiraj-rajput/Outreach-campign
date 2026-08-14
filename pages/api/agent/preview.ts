@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getDb } from "@/lib/db";
 import { runAICompletion } from "@/lib/ai/client";
+import { requirePaidAccess } from "@/lib/access";
 
 /**
  * Preview AI copy for a workflow step.
@@ -13,6 +14,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  const access = await requirePaidAccess(req, res);
+  if (!access) return;
 
   const {
     step_type,

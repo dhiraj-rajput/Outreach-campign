@@ -618,6 +618,10 @@ function Wizard({
 
   async function beautifyStepEmail(idx: number, ws: WizardStep) {
     if (!ws.emailBody.trim()) return;
+    if (!isPaid) {
+      setBeautifyError("AI email formatting is a paid feature — upgrade to unlock.");
+      return;
+    }
     setBeautifyLoadingIdx(idx);
     setBeautifyError(null);
     try {
@@ -640,10 +644,18 @@ function Wizard({
 
   // Open-core: is the AI writer (a premium/ee feature) available in this build?
   const [hasPremium, setHasPremium] = useState(true);
+  // Paid-plan gate — independent of the ee/ build (see lib/access.ts). AI actions on
+  // this page (beautify, agent preview, the Prompt tab) require BOTH.
+  const [isPaid, setIsPaid] = useState(false);
+  const aiAvailable = hasPremium && isPaid;
   useEffect(() => {
     fetch("/api/premium-status")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setHasPremium(!!d.hasPremium); })
+      .catch(() => {});
+    fetch("/api/billing/status")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setIsPaid(!!d.isPaid); })
       .catch(() => {});
   }, []);
 
@@ -703,6 +715,10 @@ function Wizard({
 
   async function runPreview() {
     if (previewIdx === null || !previewListId) return;
+    if (!isPaid) {
+      toast.error("AI-personalized preview is a paid feature");
+      return;
+    }
     const ws = wizardSteps[previewIdx];
     setPreviewLoading(true);
     setPreviewResult(null);
@@ -1048,14 +1064,14 @@ function Wizard({
     : ["prospects", "prompt", "linkedin-steps", "email-steps", "account", "summary"];
   // Open-core: "Campaign Context" is AI-only (feeds the AI writer). Hide it entirely
   // in the free build — no page, no nav entry, no upgrade stub.
-  const pages = hasPremium ? basePages : basePages.filter((p) => p !== "prompt");
+  const pages = aiAvailable ? basePages : basePages.filter((p) => p !== "prompt");
   const pageIdx = pages.indexOf(page);
 
   const prospectsReady = !!listId && !allBlocked && selectedTargetIds.size > 0;
   const stepsReady = wizardSteps.length > 0;
 
   function canGoTo(p: WizardPage) {
-    if (p === "prompt" && !hasPremium) return false; // AI-only page, hidden in free build
+    if (p === "prompt" && !aiAvailable) return false; // AI-only page, hidden until paid
     if (isStepsOnly) return p === "prompt" || p === "linkedin-steps" || p === "email-steps";
     if (isEditMode) {
       if (p === "prompt" || p === "linkedin-steps" || p === "email-steps") return true;
@@ -1953,7 +1969,7 @@ function Wizard({
                     {ws.type === "sales_inmail" && hasPremium && ws.aiEnabled && (
                       <p className="text-xs text-base-content/30 -mt-1">The AI writer generates both the subject and body for each InMail.</p>
                     )}
-                    {hasPremium ? (
+                    {aiAvailable ? (
                     <div className="flex items-center gap-3 p-3 rounded-xl bg-base-300/40 border border-base-300/50">
                       <RiRobot2Line size={15} className="text-base-content/40 shrink-0" />
                       <div className="flex-1">
@@ -1992,17 +2008,17 @@ function Wizard({
                       </button>
                     </div>
                     ) : (
-                      <a href="https://opsily.com?utm_source=linki&utm_medium=app&utm_campaign=ai-writer" target="_blank" rel="noopener noreferrer"
+                      <a href="/pricing"
                         className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors">
                         <RiRobot2Line size={15} className="text-primary/70 shrink-0" />
                         <div className="flex-1">
-                          <p className="text-sm text-base-content/80">AI message writer <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary align-middle">Premium</span></p>
+                          <p className="text-sm text-base-content/80">AI message writer <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary align-middle">Paid</span></p>
                           <p className="text-xs text-base-content/40 mt-0.5">Auto-personalise every message from lead context. Upgrade to enable.</p>
                         </div>
                         <span className="text-xs font-medium text-primary shrink-0">Upgrade →</span>
                       </a>
                     )}
-                    {hasPremium && ws.aiEnabled ? (
+                    {aiAvailable && ws.aiEnabled ? (
                         <div className="space-y-4">
                         <div className="flex items-center gap-3">
                           <div className="text-xs text-base-content/60">Model:</div>
@@ -2086,7 +2102,7 @@ function Wizard({
 
                 {ws.type === "email" && (
                   <div className="space-y-4">
-                    {hasPremium ? (
+                    {aiAvailable ? (
                     <div className="flex items-center gap-3 p-3 rounded-xl bg-base-300/40 border border-base-300/50">
                       <RiRobot2Line size={15} className="text-base-content/40 shrink-0" />
                       <div className="flex-1">
@@ -2118,17 +2134,17 @@ function Wizard({
                       </button>
                     </div>
                     ) : (
-                      <a href="https://opsily.com?utm_source=linki&utm_medium=app&utm_campaign=ai-writer" target="_blank" rel="noopener noreferrer"
+                      <a href="/pricing"
                         className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors">
                         <RiRobot2Line size={15} className="text-primary/70 shrink-0" />
                         <div className="flex-1">
-                          <p className="text-sm text-base-content/80">AI email writer <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary align-middle">Premium</span></p>
+                          <p className="text-sm text-base-content/80">AI email writer <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary align-middle">Paid</span></p>
                           <p className="text-xs text-base-content/40 mt-0.5">Auto-generate subject + body from lead context. Upgrade to enable.</p>
                         </div>
                         <span className="text-xs font-medium text-primary shrink-0">Upgrade →</span>
                       </a>
                     )}
-                    {hasPremium && ws.aiEnabled ? (
+                    {aiAvailable && ws.aiEnabled ? (
                       <div className="space-y-4">
                         <div className="flex items-center gap-3">
                           <div className="text-xs text-base-content/60">Model:</div>

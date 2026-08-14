@@ -401,10 +401,16 @@ export default function InboxPage() {
   // Open-core: AI reply classification + backfill are premium (ee/). Replies are still
   // shown; only the AI action controls are gated behind an upgrade.
   const [hasPremium, setHasPremium] = useState(true);
+  // Paid-plan gate (independent of the ee/ build being present — see lib/access.ts).
+  const [isPaid, setIsPaid] = useState(false);
   useEffect(() => {
     fetch("/api/premium-status").then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setHasPremium(!!d.hasPremium); }).catch(() => {});
+    fetch("/api/billing/status").then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setIsPaid(!!d.isPaid); }).catch(() => {});
   }, []);
+  // AI reply classification requires BOTH the ee/ build to be present AND a paid plan.
+  const aiAvailable = hasPremium && isPaid;
 
   async function handleBackfill() {
     setBackfilling(true);
@@ -483,7 +489,7 @@ export default function InboxPage() {
           reply={selectedReply}
           onClose={() => setSelectedReply(null)}
           onActionDone={load}
-          hasPremium={hasPremium}
+          hasPremium={aiAvailable}
         />
       )}
 
@@ -501,7 +507,7 @@ export default function InboxPage() {
           <p className="text-base-content/40 text-sm mt-0.5">Contacts who replied to your outreach</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {hasPremium ? (
+          {aiAvailable ? (
             <>
               <button
                 onClick={handleBackfill}
@@ -523,8 +529,8 @@ export default function InboxPage() {
               </button>
             </>
           ) : (
-            <a href="https://opsily.com?utm_source=linki&utm_medium=app&utm_campaign=reply-ai" target="_blank" rel="noopener noreferrer"
-              title="AI reply classification + auto-followup is a premium feature"
+            <a href="/pricing"
+              title="AI reply classification + auto-followup is a paid feature"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-lg text-xs font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors">
               Auto-classify replies · Upgrade →
             </a>
