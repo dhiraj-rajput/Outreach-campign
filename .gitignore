@@ -11,8 +11,8 @@
 !.yarn/plugins
 
 # package lockfiles
-package-lock.json
-bun.lock
+
+/bun.lock
 bun.lockb
 
 /public/uploads/posts/
