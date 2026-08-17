@@ -1,24 +1,23 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") return res.status(405).end();
 
   try {
-    const db = getDb();
     const days = Math.min(Math.max(Number(req.query.days) || 7, 7), 90);
 
-    const daily = db.prepare(`
+    const daily = await dbAll<{ day: string; cost_usd: number; input_tokens: number; output_tokens: number }>(`
       SELECT
-        date(created_at) AS day,
+        DATE(created_at) AS day,
         SUM(cost_usd) AS cost_usd,
         SUM(input_tokens) AS input_tokens,
         SUM(output_tokens) AS output_tokens
       FROM agent_sessions
-      WHERE created_at >= datetime('now', '-${days} days')
-      GROUP BY date(created_at)
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+      GROUP BY DATE(created_at)
       ORDER BY day ASC
-    `).all() as { day: string; cost_usd: number; input_tokens: number; output_tokens: number }[];
+    `);
 
     // Fill missing days with zeros
     const filled: typeof daily = [];

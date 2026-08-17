@@ -1,22 +1,20 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const id = req.query.id as string;
 
   if (req.method === "GET") {
-    const workflow = db.prepare("SELECT * FROM workflows WHERE id = ?").get(id);
+    const workflow = await dbGet("SELECT * FROM workflows WHERE id = ?", [id]);
     if (!workflow) return res.status(404).json({ error: "not found" });
-    const steps = db
-      .prepare(
+    const steps = await dbAll(
         `SELECT ws.*, t.name as template_name
          FROM workflow_steps ws
          LEFT JOIN templates t ON t.id = ws.template_id
          WHERE ws.workflow_id = ?
-         ORDER BY ws.step_order`
-      )
-      .all(id);
+         ORDER BY ws.step_order`,
+         [id]
+      );
     return res.json({ ...workflow as object, steps });
   }
 
@@ -25,28 +23,30 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     // name/description: COALESCE so a rename-only request doesn't null them out
     // prompt: always update when present in body (even "" to clear it)
     if (prompt !== undefined) {
-      db.prepare(
-        "UPDATE workflows SET name = COALESCE(?, name), description = COALESCE(?, description), prompt = ? WHERE id = ?"
-      ).run(name ?? null, description ?? null, prompt || null, id);
+      await dbRun(
+        "UPDATE workflows SET name = COALESCE(?, name), description = COALESCE(?, description), prompt = ? WHERE id = ?",
+        [name ?? null, description ?? null, prompt || null, id]
+      );
     } else {
-      db.prepare(
-        "UPDATE workflows SET name = COALESCE(?, name), description = COALESCE(?, description) WHERE id = ?"
-      ).run(name ?? null, description ?? null, id);
+      await dbRun(
+        "UPDATE workflows SET name = COALESCE(?, name), description = COALESCE(?, description) WHERE id = ?",
+        [name ?? null, description ?? null, id]
+      );
     }
-    return res.json(db.prepare("SELECT * FROM workflows WHERE id = ?").get(id));
+    return res.json(await dbGet("SELECT * FROM workflows WHERE id = ?", [id]));
   }
 
   if (req.method === "PATCH") {
     const { is_archived } = req.body;
     if (is_archived !== undefined) {
-      db.prepare("UPDATE workflows SET is_archived = ? WHERE id = ?").run(is_archived ? 1 : 0, id);
+      await dbRun("UPDATE workflows SET is_archived = ? WHERE id = ?", [is_archived ? 1 : 0, id]);
     }
-    return res.json(db.prepare("SELECT * FROM workflows WHERE id = ?").get(id));
+    return res.json(await dbGet("SELECT * FROM workflows WHERE id = ?", [id]));
   }
 
   if (req.method === "DELETE") {
-    db.prepare("DELETE FROM runs WHERE workflow_id = ?").run(id);
-    db.prepare("DELETE FROM workflows WHERE id = ?").run(id);
+    await dbRun("DELETE FROM runs WHERE workflow_id = ?", [id]);
+    await dbRun("DELETE FROM workflows WHERE id = ?", [id]);
     return res.json({ ok: true });
   }
 

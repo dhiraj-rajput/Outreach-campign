@@ -1,22 +1,17 @@
-/**
- * API route for newsletters: GET (list) and POST (create)
- */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
-
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
-    const rows = db.prepare(`
+    const rows = await dbAll(`
       SELECT 
         n.*,
         (SELECT COUNT(*) FROM newsletter_subscribers ns WHERE ns.newsletter_id = n.id AND ns.status = 'subscribed') AS subscriber_count,
         (SELECT COUNT(*) FROM newsletter_editions ne WHERE ne.newsletter_id = n.id) AS edition_count
       FROM newsletters n
       ORDER BY n.created_at DESC
-    `).all();
+    `);
     return res.json({ newsletters: rows });
   }
 
@@ -33,12 +28,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     }
 
     const id = randomUUID();
-    db.prepare(`
+    await dbRun(`
       INSERT INTO newsletters (id, name, description, sender_name, sender_email)
       VALUES (?, ?, ?, ?, ?)
-    `).run(id, name.trim(), description?.trim() ?? null, sender_name?.trim() ?? null, sender_email.trim());
+    `, [id, name.trim(), description?.trim() ?? null, sender_name?.trim() ?? null, sender_email.trim()]);
 
-    const created = db.prepare("SELECT * FROM newsletters WHERE id = ?").get(id);
+    const created = await dbGet("SELECT * FROM newsletters WHERE id = ?", [id]);
     return res.status(201).json({ newsletter: created });
   }
 

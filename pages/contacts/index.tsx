@@ -2,7 +2,7 @@ import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { GetServerSideProps } from "next";
 import { useRouter } from "next/router";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiExternalLinkLine, RiArrowLeftSLine, RiArrowRightSLine,
@@ -43,21 +43,15 @@ interface ListOption {
 }
 
 export const getServerSideProps: GetServerSideProps = async () => {
-  const db = getDb();
-  const lists = db
-    .prepare(
+  const lists = await dbAll<ListOption>(
       `SELECT l.id, l.name, COUNT(lt.target_id) as target_count
        FROM lists l
        LEFT JOIN list_targets lt ON lt.list_id = l.id
        GROUP BY l.id
        ORDER BY l.name ASC`
-    )
-    .all() as ListOption[];
-  const total = (
-    db
-      .prepare("SELECT COUNT(*) as c FROM targets t WHERE EXISTS (SELECT 1 FROM list_targets lt WHERE lt.target_id = t.id)")
-      .get() as { c: number }
-  ).c;
+  );
+  const row = await dbGet<{ c: number }>("SELECT COUNT(*) as c FROM targets t WHERE EXISTS (SELECT 1 FROM list_targets lt WHERE lt.target_id = t.id)");
+  const total = row?.c ?? 0;
   return { props: { lists, total } };
 };
 
@@ -247,7 +241,7 @@ export default function ContactsPage({ lists, total: initialTotal }: { lists: Li
             </span>
             <input
               type="text"
-              className="w-full sm:w-48 md:w-56 bg-base-200 border border-base-300/50 rounded-lg pl-8 pr-3 py-1.5 text-sm text-base-content placeholder:text-base-content/30 focus:outline-none focus:border-primary/40"
+              className="w-full sm:w-48 md:w-56 bg-base-200 border border-base-300 rounded-lg pl-8 pr-3 py-1.5 text-sm text-base-content placeholder:text-base-content/50 focus:outline-none focus:border-primary/60"
               placeholder="Search name, company…"
               value={search}
               onChange={(e) => changeSearch(e.target.value)}

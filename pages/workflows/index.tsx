@@ -2,7 +2,7 @@ import Head from "next/head";
 import { useState } from "react";
 import { GetServerSideProps } from "next";
 import { useRouter } from "next/router";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiAddLine,
@@ -99,22 +99,28 @@ const CAMPAIGN_TEMPLATES = [
 ];
 
 export const getServerSideProps: GetServerSideProps = async () => {
-  const db = getDb();
-
   // Steps subquery — isolated to avoid row multiplication when joined with runs
-  const stepRows = db.prepare(
+  const stepRows = await dbAll<{ workflow_id: string; step_types: string; step_count: number; action_step_count: number }>(
     `SELECT workflow_id,
        GROUP_CONCAT(step_type ORDER BY step_order) as step_types,
        COUNT(*) as step_count,
        SUM(CASE WHEN step_type != 'delay' THEN 1 ELSE 0 END) as action_step_count
      FROM workflow_steps
      GROUP BY workflow_id`
-  ).all() as { workflow_id: string; step_types: string; step_count: number; action_step_count: number }[];
+  );
 
   const stepMap = Object.fromEntries(stepRows.map(s => [s.workflow_id, s]));
 
   // Prospects/runs subquery — separate from steps to avoid GROUP_CONCAT multiplication
-  const prospectRows = db.prepare(
+  const prospectRows = await dbAll<{
+    workflow_id: string;
+    total_prospects: number;
+    completed_prospects: number;
+    connections_sent: number;
+    connections_accepted: number;
+    active_run_id: string | null;
+    active_status: string | null;
+  }>(
     `SELECT r.workflow_id,
        COUNT(DISTINCT rp.id) as total_prospects,
        COUNT(DISTINCT CASE WHEN NOT EXISTS (
@@ -132,21 +138,13 @@ export const getServerSideProps: GetServerSideProps = async () => {
      LEFT JOIN run_profiles rp ON rp.run_id = r.id
      LEFT JOIN targets t ON t.id = rp.target_id
      GROUP BY r.workflow_id`
-  ).all() as {
-    workflow_id: string;
-    total_prospects: number;
-    completed_prospects: number;
-    connections_sent: number;
-    connections_accepted: number;
-    active_run_id: string | null;
-    active_status: string | null;
-  }[];
+  );
 
   const prospectMap = Object.fromEntries(prospectRows.map(r => [r.workflow_id, r]));
 
-  const workflows = db.prepare(
+  const workflows = await dbAll<{ id: string; name: string; description: string | null; is_archived: number; created_at: string }>(
     "SELECT id, name, description, is_archived, created_at FROM workflows ORDER BY created_at DESC"
-  ).all() as { id: string; name: string; description: string | null; is_archived: number; created_at: string }[];
+  );
 
   const merged: WorkflowCard[] = workflows.map(w => ({
     ...w,
@@ -269,7 +267,7 @@ export default function WorkflowsPage({ initialWorkflows }: { initialWorkflows: 
           <input
             type="text"
             placeholder="Search campaigns..."
-            className="input input-bordered input-sm w-full pl-9 bg-base-200/50"
+            className="input input-sm w-full pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

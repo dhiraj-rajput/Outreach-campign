@@ -9,14 +9,25 @@ const hasEE = existsSync(join(__dirname, "ee"));
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ["better-sqlite3", "playwright", "playwright-extra", "puppeteer-extra-plugin-stealth"],
+  serverExternalPackages: ["mysql2", "playwright", "playwright-extra", "puppeteer-extra-plugin-stealth"],
 
   // OAuth discovery for the hosted MCP server must live at /.well-known/* (RFC 8414 / 9728).
   // Map those well-known paths to the pages-router API routes that serve the metadata.
   // Present only in the commercial build (see hasEE above).
   async rewrites() {
-    if (!hasEE) return [];
+    const list = [
+      {
+        source: "/api/organizations/:path*",
+        destination: "/api/organisations/:path*",
+      },
+      {
+        source: "/api/organizations",
+        destination: "/api/organisations",
+      },
+    ];
+    if (!hasEE) return list;
     return [
+      ...list,
       {
         source: "/.well-known/oauth-authorization-server",
         destination: "/api/oauth/metadata-authorization-server",

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { GetServerSideProps } from "next";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiArrowLeftLine, RiDownloadLine, RiExternalLinkLine, RiDeleteBinLine,
@@ -60,24 +60,22 @@ interface Account {
 }
 
 export const getServerSideProps: GetServerSideProps = async ({ params }) => {
-  const db = getDb();
   const id = params?.id as string;
-  const list = db.prepare("SELECT * FROM lists WHERE id = ?").get(id);
+  const list = await dbGet<Record<string, unknown>>("SELECT * FROM lists WHERE id = ?", [id]);
   if (!list) return { notFound: true };
-  const targets = db
-    .prepare(
+
+  const targets = await dbAll<Target>(
       `SELECT t.* FROM targets t
        JOIN list_targets lt ON lt.target_id = t.id
-       WHERE lt.list_id = ? ORDER BY t.created_at DESC`
-    )
-    .all(id);
-  const accounts = db.prepare("SELECT id, name, is_authenticated FROM accounts ORDER BY name").all();
-  const allLists = db.prepare("SELECT id, name FROM lists WHERE id != ? ORDER BY name").all(id);
-  const runHistory = db
-    .prepare(
+       WHERE lt.list_id = ? ORDER BY t.created_at DESC`, [id]
+  );
+
+  const accounts = await dbAll<Account>("SELECT id, name, is_authenticated FROM accounts ORDER BY name");
+  const allLists = await dbAll<{ id: string; name: string }>("SELECT id, name FROM lists WHERE id != ? ORDER BY name", [id]);
+  const runHistory = await dbAll<RunHistoryItem>(
       `SELECT r.id, r.status, r.created_at, r.started_at, r.completed_at,
-              w.name as workflow_name,
-              a.name as account_name,
+              MAX(w.name) as workflow_name,
+              MAX(a.name) as account_name,
               COUNT(DISTINCT rp.id) as total_profiles,
               COUNT(DISTINCT CASE WHEN NOT EXISTS (
                 SELECT 1 FROM run_profile_tracks rt2
@@ -92,9 +90,8 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
        LEFT JOIN run_profiles rp ON rp.run_id = r.id
        WHERE r.list_id = ?
        GROUP BY r.id
-       ORDER BY r.created_at DESC`
-    )
-    .all(id) as RunHistoryItem[];
+       ORDER BY r.created_at DESC`, [id]
+  );
   return { props: { list: { ...list, targets }, accounts, allLists, runHistory } };
 };
 
@@ -226,32 +223,21 @@ export default function ListDetailPage({
   }
 
   function toggleOne(id: string) {
-    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) {
+        n.delete(id);
+      } else {
+        n.add(id);
+      }
+      return n;
+    });
   }
 
   const effectiveSelectedIds = allFilteredSelected
     ? filteredTargets.map((t) => t.id)
     : [...selected];
   const effectiveSelectedCount = allFilteredSelected ? filteredTargets.length : selected.size;
-
-  async function deleteSelected() {
-    if (effectiveSelectedCount === 0) return;
-    setDeleting(true);
-    const res = await fetch(`/api/lists/${initialList.id}/targets`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_ids: effectiveSelectedIds }),
-    });
-    setDeleting(false);
-    if (!res.ok) { toast.error("Failed to remove leads"); return; }
-    const data = await res.json();
-    toast.success(`Removed ${data.removed} lead${data.removed !== 1 ? "s" : ""}`);
-    const removedSet = new Set(effectiveSelectedIds);
-    setTargets((prev) => prev.filter((t) => !removedSet.has(t.id)));
-    setSelected(new Set());
-    setAllFilteredSelected(false);
-    setPage(0);
-  }
 
   async function removeFromList() {
     if (effectiveSelectedCount === 0) return;
@@ -803,128 +789,126 @@ export default function ListDetailPage({
                   >
                     <RiDownloadLine size={18} className="text-primary mt-0.5" />
                     <span>
-                      <span className="block text-sm font-medium">CSV file</span>
-                      <span className="block text-xs text-base-content/50 mt-0.5">Upload leads you already have — from another export, or emails scraped from websites.</span>
+                      <span className="block text-sm font-medium">CSV Upload</span>
+                      <span className="block text-xs text-base-content/50 mt-0.5">Upload a CSV containing LinkedIn URLs. Linki matches them or creates new contacts.</span>
                     </span>
                   </button>
                 </div>
                 <div className="modal-action mt-4">
-                  <button type="button" className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors" onClick={closeImportModal}>Cancel</button>
+                  <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={closeImportModal}>Cancel</button>
                 </div>
               </>
             )}
 
-            {/* Step 2a: Sales Navigator form (existing flow) */}
+            {/* Step 2a: Sales Navigator */}
             {importSource === "sales_nav" && (
               <>
-                <h3 className="font-semibold text-base mb-1">Import from Sales Navigator</h3>
-                <p className="text-base-content/50 text-xs mb-3">
-                  Paste a Sales Navigator people list URL. The selected account must be authenticated.
-                </p>
-                <div className="bg-base-300/40 border border-base-300/60 rounded-lg p-3 mb-4 space-y-1.5 text-xs text-base-content/50">
-                  <p className="font-medium text-base-content/70">What gets fetched and when</p>
-                  <p><span className="text-base-content/60">Now —</span> Basic profile data only (name, title, company, location). One page load per 25 contacts with ~90s gaps.</p>
-                  <p><span className="text-base-content/60">When a run starts —</span> LinkedIn URL resolved per contact right before first action.</p>
-                  <p><span className="text-base-content/60">Before message —</span> Full Sales Nav profile (headline, positions) fetched for AI context.</p>
-                  <p><span className="text-base-content/60">Before email —</span> Apollo enrichment runs to get email address + company data.</p>
-                </div>
+                <h3 className="font-semibold text-base mb-1">Sales Navigator search</h3>
+                <p className="text-base-content/50 text-xs mb-4">Linki will visit this URL and scrape the leads on every page.</p>
                 <form onSubmit={runImport} className="flex flex-col gap-3">
                   <div>
-                    <label className="label text-xs text-base-content/50 pb-1">Sales Navigator URL</label>
+                    <label className="label text-xs text-base-content/50 pb-1">Sales Navigator URL *</label>
                     <input
-                      className="input input-bordered input-sm w-full bg-base-300/50 font-mono text-xs"
-                      placeholder="https://www.linkedin.com/sales/lists/people/..."
+                      className="input input-bordered input-sm w-full bg-base-300/50"
+                      placeholder="https://www.linkedin.com/sales/search/people?..."
                       value={importForm.sales_nav_url}
                       onChange={(e) => setImportForm({ ...importForm, sales_nav_url: e.target.value })}
                       required
                     />
                   </div>
                   <div>
-                    <label className="label text-xs text-base-content/50 pb-1">Account to use</label>
+                    <label className="label text-xs text-base-content/50 pb-1">LinkedIn Account *</label>
                     <select
-                      className="w-full px-3 py-1.5 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50 cursor-pointer"
+                      className="w-full px-3 py-1.5 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50"
                       value={importForm.account_id}
                       onChange={(e) => setImportForm({ ...importForm, account_id: e.target.value })}
                       required
                     >
-                      <option value="">Select account...</option>
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id} disabled={!a.is_authenticated}>
-                          {a.name} {!a.is_authenticated ? "(not authenticated)" : ""}
-                        </option>
+                      <option value="" disabled>Select an account</option>
+                      {accounts.filter(a => a.is_authenticated === 1).map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
                       ))}
                     </select>
+                    {accounts.filter(a => a.is_authenticated === 1).length === 0 && (
+                      <p className="text-error text-xs mt-1">No authenticated accounts. Connect one first.</p>
+                    )}
                   </div>
-                  <div className="modal-action mt-1">
-                    <button type="button" className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors" onClick={() => setImportSource("pick")} disabled={importing}>Back</button>
-                    <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50" disabled={importing}>
-                      {importing ? <><span className="loading loading-spinner loading-xs" /> Importing...</> : "Start Import"}
+                  <div className="modal-action mt-2">
+                    <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={() => setImportSource("pick")}>Back</button>
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50"
+                      disabled={!importForm.account_id || !importForm.sales_nav_url || accounts.filter(a => a.is_authenticated === 1).length === 0}
+                    >
+                      Start scraping
                     </button>
                   </div>
                 </form>
               </>
             )}
 
-            {/* Step 2b: CSV import */}
+            {/* Step 2b: CSV Upload */}
             {importSource === "csv" && (
               <>
-                <h3 className="font-semibold text-base mb-1">Import from CSV</h3>
-                <p className="text-base-content/50 text-xs mb-3">
-                  One template for everything — leads you already have, whether that&apos;s a LinkedIn export, an email list, or both.
-                </p>
+                <h3 className="font-semibold text-base mb-1">CSV Upload</h3>
+                <p className="text-base-content/50 text-xs mb-4">Upload a CSV of leads to add to this list.</p>
 
-                <div className="bg-base-300/40 border border-base-300/60 rounded-lg p-3 mb-4 space-y-1.5 text-xs text-base-content/50">
-                  <p className="font-medium text-base-content/70">Rules</p>
-                  <p>• Each row needs a <span className="text-base-content/60">linkedin_url</span> and/or an <span className="text-base-content/60">email</span> — fill in whichever you have, or both.</p>
-                  <p>• <span className="text-base-content/60">linkedin_url</span> must be a real linkedin.com/in/ profile URL — used for connect/message/visit steps.</p>
-                  <p>• <span className="text-base-content/60">sales_nav_url</span> is optional — speeds up enrichment and InMail if you have it.</p>
-                  <p>• <span className="text-base-content/60">email</span> can be personal or generic (info@, contact@…) — used for email steps.</p>
-                  <p>• Rows missing both are skipped and reported as errors.</p>
-                  <p>• first_name, last_name, title, company, location, city, country, phone, headline, summary, notes are all optional.</p>
-                </div>
-
-                <form onSubmit={runCsvImport} className="flex flex-col gap-3">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-primary hover:underline"
-                    onClick={downloadCsvTemplate}
-                  >
-                    <RiDownloadLine size={13} /> Download template
-                  </button>
-                  <div>
-                    <label className="label text-xs text-base-content/50 pb-1">CSV file</label>
-                    <input
-                      type="file"
-                      accept=".csv,text/csv"
-                      className="file-input file-input-bordered file-input-sm w-full bg-base-300/50"
-                      onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
-                      required
-                    />
-                  </div>
-
-                  {csvResult && (
-                    <div className="bg-base-300/40 border border-base-300/60 rounded-lg p-3 text-xs space-y-1">
-                      <p><span className="text-success font-medium">{csvResult.imported}</span> new, <span className="text-info font-medium">{csvResult.updated}</span> updated, <span className="text-base-content/50">{csvResult.skipped} already in list</span></p>
-                      {csvResult.errors.length > 0 && (
-                        <div className="text-error/80 max-h-24 overflow-y-auto">
-                          {csvResult.errors.slice(0, 20).map((err, i) => <p key={i}>{err}</p>)}
-                          {csvResult.errors.length > 20 && <p>…and {csvResult.errors.length - 20} more</p>}
-                        </div>
-                      )}
+                {csvResult ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="p-3 bg-base-300/50 rounded-lg text-sm">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-base-content/60">Imported new:</span>
+                        <span className="font-medium">{csvResult.imported}</span>
+                      </div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-base-content/60">Updated existing:</span>
+                        <span className="font-medium">{csvResult.updated}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-base-content/60">Skipped (already in list):</span>
+                        <span className="font-medium">{csvResult.skipped}</span>
+                      </div>
                     </div>
-                  )}
-
-                  <div className="modal-action mt-1">
-                    <button type="button" className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors" onClick={() => setImportSource("pick")} disabled={csvImporting}>Back</button>
-                    {csvResult ? (
-                      <button type="button" className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors" onClick={closeImportModal}>Done</button>
-                    ) : (
-                      <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50" disabled={csvImporting}>
-                        {csvImporting ? <><span className="loading loading-spinner loading-xs" /> Importing...</> : "Import CSV"}
-                      </button>
+                    {csvResult.errors.length > 0 && (
+                      <div className="p-3 bg-error/10 border border-error/20 rounded-lg max-h-32 overflow-y-auto custom-scrollbar">
+                        <p className="text-xs font-semibold text-error mb-2">Errors ({csvResult.errors.length}):</p>
+                        <ul className="list-disc list-inside text-xs text-error/80 space-y-0.5">
+                          {csvResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                        </ul>
+                      </div>
                     )}
+                    <div className="modal-action mt-2">
+                      <button type="button" className="btn btn-primary btn-sm" onClick={closeImportModal}>Done</button>
+                    </div>
                   </div>
-                </form>
+                ) : (
+                  <form onSubmit={runCsvImport} className="flex flex-col gap-3">
+                    <div className="p-3 bg-base-300/30 border border-base-300 rounded-lg text-xs text-base-content/70">
+                      <p className="mb-2">Your CSV must have a <code className="bg-base-100 px-1 py-0.5 rounded text-primary">linkedin_url</code> column.</p>
+                      <p className="mb-2">Optional columns: <code className="bg-base-100 px-1 py-0.5 rounded">first_name</code>, <code className="bg-base-100 px-1 py-0.5 rounded">last_name</code>, <code className="bg-base-100 px-1 py-0.5 rounded">company</code>, <code className="bg-base-100 px-1 py-0.5 rounded">title</code>, <code className="bg-base-100 px-1 py-0.5 rounded">email</code>.</p>
+                      <button type="button" onClick={downloadCsvTemplate} className="text-primary hover:underline font-medium">Download template</button>
+                    </div>
+                    <div>
+                      <input
+                        type="file"
+                        accept=".csv"
+                        className="file-input file-input-bordered file-input-sm w-full bg-base-300/50"
+                        onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
+                        required
+                      />
+                    </div>
+                    <div className="modal-action mt-2">
+                      <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={() => setImportSource("pick")} disabled={csvImporting}>Back</button>
+                      <button
+                        type="submit"
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        disabled={!csvFile || csvImporting}
+                      >
+                        {csvImporting ? <span className="loading loading-spinner loading-xs" /> : "Upload"}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </>
             )}
           </div>
@@ -932,94 +916,37 @@ export default function ListDetailPage({
         </div>
       )}
 
-      {/* Apollo enrich confirm modal */}
-      {showApolloConfirm && (() => {
-        const effectiveSet = new Set(effectiveSelectedIds);
-        const pool = effectiveSelectedCount > 0
-          ? targets.filter((t) => effectiveSet.has(t.id) && !t.email)
-          : targets.filter((t) => !t.apollo_enriched_at && !t.email);
-        const alreadyHaveEmail = effectiveSelectedCount > 0 ? targets.filter((t) => effectiveSet.has(t.id) && t.email).length : 0;
-        return (
-          <div className="modal modal-open">
-            <div className="modal-box bg-base-200 border border-base-300/50 max-w-sm">
-              <div className="flex items-center gap-2 mb-3">
-                <RiSparklingLine size={16} className="text-primary" />
-                <h3 className="font-semibold text-base">Apollo Enrichment</h3>
-              </div>
-              <p className="text-base-content/60 text-sm mb-4 leading-relaxed">
-                This will look up each contact on Apollo to find their email, seniority, and company data.
-                Each lookup costs <span className="text-base-content font-medium">1 Apollo credit</span>.
-              </p>
-              <div className="rounded-lg bg-base-300/50 border border-base-300/50 p-3 mb-4 flex flex-col gap-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-base-content/50">Contacts to enrich</span>
-                  <span className="font-medium">{pool.length}</span>
-                </div>
-                {alreadyHaveEmail > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-base-content/50">Skipped (email already found)</span>
-                    <span className="text-success">{alreadyHaveEmail}</span>
-                  </div>
-                )}
-                <div className="flex justify-between border-t border-base-300/50 pt-1.5 mt-0.5">
-                  <span className="text-base-content/50">Credits used</span>
-                  <span className="font-medium text-warning">{pool.length}</span>
-                </div>
-              </div>
-              {pool.length === 0 ? (
-                <p className="text-sm text-base-content/40 mb-4">No contacts to enrich — all selected contacts already have an email.</p>
-              ) : null}
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors"
-                  onClick={() => setShowApolloConfirm(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-40"
-                  onClick={enrichWithApollo}
-                  disabled={pool.length === 0}
-                >
-                  <RiSparklingLine size={14} />
-                  Use {pool.length} credit{pool.length !== 1 ? "s" : ""}
-                </button>
-              </div>
-            </div>
-            <div className="modal-backdrop" onClick={() => setShowApolloConfirm(false)} />
-          </div>
-        );
-      })()}
-
-      {/* Sync Status modal — no URL needed, uses saved list URL */}
       {showSync && (
         <div className="modal modal-open">
           <div className="modal-box bg-base-200 border border-base-300/50 max-w-sm">
-            <h3 className="font-semibold text-base mb-1">Sync Connection Status</h3>
-            <p className="text-base-content/50 text-xs mb-4">
-              Re-fetches the Sales Navigator list to check who accepted your connection requests.
-            </p>
+            <h3 className="font-semibold text-base mb-1">Sync connection status</h3>
+            <p className="text-xs text-base-content/50 mb-4">Linki will check Sales Navigator to see if any of these leads accepted your connection request.</p>
             <form onSubmit={runSync} className="flex flex-col gap-3">
               <div>
-                <label className="label text-xs text-base-content/50 pb-1">Account to use</label>
+                <label className="label text-xs text-base-content/50 pb-1">LinkedIn Account *</label>
                 <select
-                  className="w-full px-3 py-1.5 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50 cursor-pointer"
+                  className="w-full px-3 py-1.5 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50"
                   value={syncAccountId}
                   onChange={(e) => setSyncAccountId(e.target.value)}
                   required
                 >
-                  <option value="">Select account...</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id} disabled={!a.is_authenticated}>
-                      {a.name} {!a.is_authenticated ? "(not authenticated)" : ""}
-                    </option>
+                  <option value="" disabled>Select an account</option>
+                  {accounts.filter(a => a.is_authenticated === 1).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
+                {accounts.filter(a => a.is_authenticated === 1).length === 0 && (
+                  <p className="text-error text-xs mt-1">No authenticated accounts. Connect one first.</p>
+                )}
               </div>
-              <div className="modal-action mt-1">
-                <button type="button" className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors" onClick={() => setShowSync(false)} disabled={syncing}>Cancel</button>
-                <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50" disabled={syncing}>
-                  {syncing ? <><span className="loading loading-spinner loading-xs" /> Syncing...</> : "Sync Now"}
+              <div className="modal-action mt-2">
+                <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={() => setShowSync(false)}>Cancel</button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  disabled={!syncAccountId || accounts.filter(a => a.is_authenticated === 1).length === 0 || syncing}
+                >
+                  {syncing ? <span className="loading loading-spinner loading-xs" /> : "Start sync"}
                 </button>
               </div>
             </form>
@@ -1028,16 +955,15 @@ export default function ListDetailPage({
         </div>
       )}
 
-      {/* Move to list modal */}
       {showMoveModal && (
         <div className="modal modal-open">
           <div className="modal-box bg-base-200 border border-base-300/50 max-w-sm">
-            <h3 className="font-semibold text-base mb-1">Move to another list</h3>
-            <p className="text-base-content/50 text-xs mb-4">
-              {effectiveSelectedCount} lead{effectiveSelectedCount !== 1 ? "s" : ""} will be removed from <span className="text-base-content/70">{initialList.name}</span> and added to the selected list.
+            <h3 className="font-semibold text-base mb-1">Move to list</h3>
+            <p className="text-xs text-base-content/50 mb-4">
+              {effectiveSelectedCount} lead{effectiveSelectedCount !== 1 ? "s" : ""} will be removed from {initialList.name} and added to the new list.
             </p>
             <select
-              className="w-full px-3 py-1.5 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50 cursor-pointer mb-4"
+              className="w-full px-3 py-2 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50 cursor-pointer"
               value={destListId}
               onChange={(e) => setDestListId(e.target.value)}
             >
@@ -1046,23 +972,47 @@ export default function ListDetailPage({
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
             </select>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm text-base-content/60 hover:text-base-content hover:bg-base-300/50 transition-colors"
-                onClick={() => { setShowMoveModal(false); setDestListId(""); }}
-              >
+            <div className="modal-action mt-4">
+              <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={() => { setShowMoveModal(false); setDestListId(""); }}>
                 Cancel
               </button>
               <button
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-40"
-                onClick={moveToList}
+                type="button"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50"
                 disabled={!destListId}
+                onClick={moveToList}
               >
-                <RiArrowRightLine size={14} /> Move {effectiveSelectedCount}
+                Move
               </button>
             </div>
           </div>
           <div className="modal-backdrop" onClick={() => { setShowMoveModal(false); setDestListId(""); }} />
+        </div>
+      )}
+
+      {showApolloConfirm && (
+        <div className="modal modal-open">
+          <div className="modal-box bg-base-200 border border-base-300/50 max-w-sm">
+            <h3 className="font-semibold text-base mb-1">Enrich with Apollo</h3>
+            <p className="text-xs text-base-content/50 mb-4 leading-relaxed">
+              {effectiveSelectedCount > 0
+                ? `Linki will attempt to find emails and extra details for the ${effectiveSelectedCount} selected contact(s). Each match costs 1 Apollo credit.`
+                : "Linki will attempt to find emails and extra details for all contacts in this list that haven't been enriched yet. Each match costs 1 Apollo credit."}
+            </p>
+            <div className="modal-action mt-2">
+              <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={() => setShowApolloConfirm(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors"
+                onClick={enrichWithApollo}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={() => setShowApolloConfirm(false)} />
         </div>
       )}
     </div>

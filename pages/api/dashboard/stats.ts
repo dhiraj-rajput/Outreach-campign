@@ -1,36 +1,34 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet } from "@/lib/db";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") return res.status(405).end();
 
   try {
-    const db = getDb();
-
     const listId = req.query.list_id as string | undefined;
     const workflowId = req.query.workflow_id as string | undefined;
     const days = Math.min(Math.max(Number(req.query.days) || 7, 7), 90);
 
     // Fetch lists and workflows for filter dropdowns (always unfiltered)
-    const lists = db.prepare("SELECT id, name FROM lists ORDER BY name").all() as { id: string; name: string }[];
-    const workflows = db.prepare("SELECT id, name FROM workflows ORDER BY name").all() as { id: string; name: string }[];
+    const lists = await dbAll<{ id: string; name: string }>("SELECT id, name FROM lists ORDER BY name");
+    const workflows = await dbAll<{ id: string; name: string }>("SELECT id, name FROM workflows ORDER BY name");
 
     // Today's summary (always global — not scoped to filter)
-    const today = db.prepare(`
+    const today = await dbGet<Record<string, number>>(`
       SELECT
         COUNT(CASE WHEN message LIKE 'Visited%' THEN 1 END) AS visits_today,
         COUNT(CASE WHEN message LIKE 'Connection request sent%' THEN 1 END) AS connections_today,
         COUNT(CASE WHEN message LIKE 'Message sent%' THEN 1 END) AS messages_today,
         COUNT(CASE WHEN message LIKE 'InMail sent%' THEN 1 END) AS inmails_today
       FROM logs
-      WHERE date(created_at) = date('now')
-    `).get() as Record<string, number>;
+      WHERE DATE(created_at) = CURDATE()
+    `) || {};
 
     if (!workflowId && !listId) {
       // ── Unfiltered: use targets fields (fast, global) ──────────────────────
       const ACTIVE = `id IN (SELECT DISTINCT target_id FROM list_targets)`;
 
-      const totals = db.prepare(`
+      const totals = await dbGet<Record<string, number>>(`
         SELECT
           (SELECT COUNT(*) FROM targets WHERE ${ACTIVE}) AS total_targets,
           (SELECT COUNT(*) FROM targets WHERE ${ACTIVE} AND connection_requested_at IS NOT NULL) AS connections_requested,
@@ -43,35 +41,36 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
           (SELECT COUNT(*) FROM workflows) AS total_workflows,
           (SELECT COUNT(*) FROM logs WHERE message LIKE 'Email sent%') AS emails_sent,
           (SELECT COUNT(*) FROM targets WHERE ${ACTIVE} AND email_replied_at IS NOT NULL) AS email_replies
-      `).get() as Record<string, number>;
+      `) || {};
 
-      const activity = db.prepare(`
+      const activity = await dbAll<{ day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }>(`
         SELECT
-          date(created_at) AS day,
+          DATE(created_at) AS day,
           COUNT(CASE WHEN message LIKE 'Visited%' THEN 1 END) AS visits,
           COUNT(CASE WHEN message LIKE 'Connection request sent%' THEN 1 END) AS connections,
           COUNT(CASE WHEN message LIKE 'Message sent%' THEN 1 END) AS messages,
           COUNT(CASE WHEN message LIKE 'InMail sent%' THEN 1 END) AS inmails,
           COUNT(CASE WHEN message LIKE 'Email sent%' THEN 1 END) AS emails
         FROM logs
-        WHERE created_at >= datetime('now', '-${days} days')
-        GROUP BY date(created_at)
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+        GROUP BY DATE(created_at)
         ORDER BY day ASC
-      `).all() as { day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }[];
+      `);
 
       const filled = fillDays(activity, days);
       
-    let crm = { open_todos: 0, overdue_todos: 0, due_today: 0, inbox_replies: 0 };
-    try {
-      crm = db.prepare(`
-        SELECT
-          (SELECT COUNT(*) FROM todos WHERE status = 'open') AS open_todos,
-          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) < date('now')) AS overdue_todos,
-          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) = date('now')) AS due_today,
-          (SELECT COUNT(*) FROM targets WHERE email_replied_at IS NOT NULL OR last_replied_at IS NOT NULL) AS inbox_replies
-      `).get() as typeof crm;
-    } catch { /* ok */ }
-    return res.json({ totals, today, activity: filled, lists, workflows, crm });
+      let crm = { open_todos: 0, overdue_todos: 0, due_today: 0, inbox_replies: 0 };
+      try {
+        const crmRes = await dbGet<typeof crm>(`
+          SELECT
+            (SELECT COUNT(*) FROM todos WHERE status = 'open') AS open_todos,
+            (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND DATE(due_date) < CURDATE()) AS overdue_todos,
+            (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND DATE(due_date) = CURDATE()) AS due_today,
+            (SELECT COUNT(*) FROM targets WHERE email_replied_at IS NOT NULL OR last_replied_at IS NOT NULL) AS inbox_replies
+        `);
+        if (crmRes) crm = crmRes;
+      } catch { /* ok */ }
+      return res.json({ totals, today, activity: filled, lists, workflows, crm });
     }
 
     // ── Filtered by workflow or list: use logs as source of truth ─────────────
@@ -89,7 +88,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     // Targets in scope = distinct targets that appeared in scoped runs
     const SCOPED_TARGETS = `SELECT DISTINCT target_id FROM run_profiles WHERE run_id IN (${runsSubquery})`;
 
-    const totals = db.prepare(`
+    const totals = await dbGet<Record<string, number>>(`
       SELECT
         (SELECT COUNT(*) FROM (${SCOPED_TARGETS})) AS total_targets,
 
@@ -130,7 +129,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
           WHERE l.run_id IN (${runsSubquery})
             AND l.message LIKE 'Email sent%'
             AND t.email_replied_at IS NOT NULL) AS email_replies
-    `).get(
+    `, [
       runsArg,  // SCOPED_TARGETS
       runsArg,  // connections_requested
       runsArg,  // connected
@@ -139,34 +138,35 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       runsArg,  // replies_received
       runsArg,  // emails_sent
       runsArg,  // email_replies
-    ) as Record<string, number>;
+    ]) || {};
 
-    const activity = db.prepare(`
+    const activity = await dbAll<{ day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }>(`
       SELECT
-        date(created_at) AS day,
+        DATE(created_at) AS day,
         COUNT(CASE WHEN message LIKE 'Visited%' THEN 1 END) AS visits,
         COUNT(CASE WHEN message LIKE 'Connection request sent%' THEN 1 END) AS connections,
         COUNT(CASE WHEN message LIKE 'Message sent%' THEN 1 END) AS messages,
         COUNT(CASE WHEN message LIKE 'InMail sent%' THEN 1 END) AS inmails,
         COUNT(CASE WHEN message LIKE 'Email sent%' THEN 1 END) AS emails
       FROM logs
-      WHERE created_at >= datetime('now', '-${days} days')
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
         AND run_id IN (${runsSubquery})
-      GROUP BY date(created_at)
+      GROUP BY DATE(created_at)
       ORDER BY day ASC
-    `).all(runsArg) as { day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }[];
+    `, [runsArg]);
 
     const filled = fillDays(activity, days);
     
     let crm = { open_todos: 0, overdue_todos: 0, due_today: 0, inbox_replies: 0 };
     try {
-      crm = db.prepare(`
+      const crmRes = await dbGet<typeof crm>(`
         SELECT
           (SELECT COUNT(*) FROM todos WHERE status = 'open') AS open_todos,
-          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) < date('now')) AS overdue_todos,
-          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND date(due_date) = date('now')) AS due_today,
+          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND DATE(due_date) < CURDATE()) AS overdue_todos,
+          (SELECT COUNT(*) FROM todos WHERE status = 'open' AND due_date IS NOT NULL AND DATE(due_date) = CURDATE()) AS due_today,
           (SELECT COUNT(*) FROM targets WHERE email_replied_at IS NOT NULL OR last_replied_at IS NOT NULL) AS inbox_replies
-      `).get() as typeof crm;
+      `);
+      if (crmRes) crm = crmRes;
     } catch { /* ok */ }
     return res.json({ totals, today, activity: filled, lists, workflows, crm });
 

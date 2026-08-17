@@ -4,7 +4,7 @@ import Sidebar from "./Sidebar";
 import TourGate from "@/components/onboarding/TourGate";
 import { initTheme } from "@/lib/theme";
 
-const NO_LAYOUT_PATHS = ["/login", "/pricing"];
+const NO_LAYOUT_PATHS = ["/login"];
 
 export default function Layout({ children }: { children: ReactNode }) {
   const router = useRouter();

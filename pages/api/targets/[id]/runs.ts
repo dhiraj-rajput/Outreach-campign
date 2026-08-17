@@ -1,18 +1,17 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 
 // Which runs/campaigns a contact is enrolled in, with per-track (linkedin/email) state + step.
 // Answers "is this person in a campaign, and where are they in it?" without scanning a whole run.
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") return res.status(405).end();
 
-  const db = getDb();
   const targetId = req.query.id as string;
 
-  const target = db.prepare("SELECT id FROM targets WHERE id = ?").get(targetId);
+  const target = await dbGet("SELECT id FROM targets WHERE id = ?", [targetId]);
   if (!target) return res.status(404).json({ error: "Not found" });
 
-  const rows = db.prepare(`
+  const rows = await dbAll<Record<string, unknown>>(`
     SELECT
       rp.id AS run_profile_id,
       r.id AS run_id,
@@ -34,7 +33,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     LEFT JOIN run_profile_tracks rt ON rt.run_profile_id = rp.id
     WHERE rp.target_id = ?
     ORDER BY r.created_at DESC, rt.track
-  `).all(targetId) as Array<Record<string, unknown>>;
+  `, [targetId]);
 
   // Group tracks under their run.
   const byRun = new Map<string, Record<string, unknown>>();

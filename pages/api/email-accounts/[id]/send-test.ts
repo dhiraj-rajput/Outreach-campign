@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { sendEmail } from "@/lib/email/sender";
 import { decryptSecret } from "@/lib/crypto";
 
@@ -9,19 +9,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end();
   }
 
-  const db = getDb();
   const id = req.query.id as string;
   const { to, subject, body } = req.body as { to?: string; subject?: string; body?: string };
 
   if (!to) return res.status(400).json({ error: "to is required" });
 
-  const account = db
-    .prepare("SELECT * FROM email_accounts WHERE id = ?")
-    .get(id) as {
+  const account = await dbGet<{
       id: string; from_email: string; from_name: string | null;
       smtp_host: string; smtp_port: number; smtp_secure: number;
       username: string; password: string; signature: string | null;
-    } | undefined;
+    }>(
+    "SELECT * FROM email_accounts WHERE id = ?",
+    [id]
+  );
 
   if (!account) return res.status(404).json({ error: "not found" });
 

@@ -5,7 +5,7 @@
  */
 import type { NextApiRequest, NextApiResponse } from "next";
 import { requireSuperAdmin } from "@/lib/access";
-import { getDb } from "@/lib/db";
+import { dbAll, dbRun } from "@/lib/db";
 
 type OrgRow = {
   id: string;
@@ -20,18 +20,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const admin = await requireSuperAdmin(req, res);
   if (!admin) return;
 
-  const db = getDb();
-
   if (req.method === "GET") {
-    const organizations = db
-      .prepare(
+    const organizations = await dbAll<OrgRow>(
         `SELECT o.id, o.name, o.plan, u.email as owner_email,
                 (SELECT COUNT(*) FROM organization_members m WHERE m.org_id = o.id) as member_count,
                 o.created_at
          FROM organizations o JOIN users u ON u.id = o.owner_id
          ORDER BY o.created_at DESC`
-      )
-      .all() as OrgRow[];
+      );
     return res.status(200).json({ organizations });
   }
 
@@ -40,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!orgId || (plan !== "free" && plan !== "paid")) {
       return res.status(400).json({ error: "orgId and a valid plan ('free' | 'paid') are required" });
     }
-    db.prepare("UPDATE organizations SET plan = ?, plan_updated_at = datetime('now') WHERE id = ?").run(plan, orgId);
+    await dbRun("UPDATE organizations SET plan = ?, plan_updated_at = NOW() WHERE id = ?", [plan, orgId]);
     return res.status(200).json({ ok: true });
   }
 

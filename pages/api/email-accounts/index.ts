@@ -1,15 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 import { encryptSecret } from "@/lib/crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
-
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
     // Never return passwords to the client
-    const accounts = db
-      .prepare(`
+    const accounts = await dbAll(`
         SELECT ea.id, ea.name, ea.from_email, ea.from_name, ea.reply_to,
                ea.smtp_host, ea.smtp_port, ea.smtp_secure,
                ea.imap_host, ea.imap_port, ea.username, ea.imap_username,
@@ -21,8 +18,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
                 WHERE rp.email_account_id = ea.id
                 AND r.status IN ('running', 'paused')) AS active_run_count
         FROM email_accounts ea ORDER BY ea.created_at DESC
-      `)
-      .all();
+      `);
     return res.json(accounts);
   }
 
@@ -47,7 +43,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
     const id = randomUUID();
     const resolvedRampStart = ramp_start_date ?? new Date().toISOString().slice(0, 10);
-    db.prepare(`
+    await dbRun(`
       INSERT INTO email_accounts
         (id, name, from_email, from_name, reply_to, smtp_host, smtp_port, smtp_secure,
          imap_host, imap_port, username, password,
@@ -55,7 +51,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
          daily_email_limit, active_hours_start, active_hours_end, timezone, working_days, signature,
          ramp_up_enabled, ramp_start_date)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
       id, name, from_email, from_name ?? null, reply_to ?? null,
       smtp_host, smtp_port, smtp_secure,
       imap_host ?? null, imap_port,
@@ -64,7 +60,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       daily_email_limit, active_hours_start, active_hours_end, timezone, working_days,
       signature ?? null,
       ramp_up_enabled ? 1 : 0, resolvedRampStart
-    );
+    ]);
 
     return res.status(201).json({ id });
   }

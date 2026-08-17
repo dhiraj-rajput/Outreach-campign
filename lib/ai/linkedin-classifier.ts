@@ -47,7 +47,7 @@ export async function classifyLinkedInReply(
   senderName: string,
   ourLastMessage: string
 ): Promise<ClassifyResult> {
-  const cfg = getAIClient();
+  const cfg = await getAIClient();
   if (!cfg) {
     return { intent: "unclear", confidence: 0, suggested_action: "Set Google AI Studio or OpenRouter API key in Settings → Integrations" };
   }

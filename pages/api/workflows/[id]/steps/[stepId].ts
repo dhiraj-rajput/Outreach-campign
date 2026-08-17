@@ -1,13 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbRun } from "@/lib/db";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const stepId = req.query.stepId as string;
 
   if (req.method === "PUT") {
     const { step_type, template_id, delay_seconds, step_order, connect_note, message_body, email_subject, email_body } = req.body;
-    db.prepare(
+    await dbRun(
       `UPDATE workflow_steps SET
         step_type = COALESCE(?, step_type),
         template_id = COALESCE(?, template_id),
@@ -17,13 +16,14 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         message_body = ?,
         email_subject = ?,
         email_body = ?
-       WHERE id = ?`
-    ).run(step_type ?? null, template_id ?? null, delay_seconds ?? null, step_order ?? null, connect_note ?? null, message_body ?? null, email_subject ?? null, email_body ?? null, stepId);
+       WHERE id = ?`,
+       [step_type ?? null, template_id ?? null, delay_seconds ?? null, step_order ?? null, connect_note ?? null, message_body ?? null, email_subject ?? null, email_body ?? null, stepId]
+    );
     return res.json({ ok: true });
   }
 
   if (req.method === "DELETE") {
-    db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+    await dbRun("DELETE FROM workflow_steps WHERE id = ?", [stepId]);
     return res.json({ ok: true });
   }
 

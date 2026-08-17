@@ -1,30 +1,29 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 import { getDailyImportCap } from "@/lib/import-jobs";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).end();
   }
 
-  const db = getDb();
   const listId = req.query.id as string;
-  const dailyCap = getDailyImportCap(db);
+  const dailyCap = await getDailyImportCap();
 
   // All batches for this list, newest first
-  const batches = db.prepare(`
+  const batches = await dbAll<{
+    id: string; status: string; phase: string | null; page: number; total_pages: number;
+    count: number; total: number; imported: number; skipped: number; error: string | null;
+    scheduled_for: string | null; start_page: number; batch_index: number;
+    started_at: string; finished_at: string | null;
+  }>(`
     SELECT id, status, phase, page, total_pages, count, total, imported, skipped, error,
            scheduled_for, start_page, batch_index, started_at, finished_at
     FROM list_imports
     WHERE list_id = ?
     ORDER BY batch_index ASC, started_at DESC
-  `).all(listId) as Array<{
-    id: string; status: string; phase: string | null; page: number; total_pages: number;
-    count: number; total: number; imported: number; skipped: number; error: string | null;
-    scheduled_for: string | null; start_page: number; batch_index: number;
-    started_at: string; finished_at: string | null;
-  }>;
+  `, [listId]);
 
   if (batches.length === 0) return res.json({ status: "idle", dailyCap });
 

@@ -1,12 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
-
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
-    const templates = db.prepare("SELECT * FROM templates ORDER BY created_at DESC").all();
+    const templates = await dbAll("SELECT * FROM templates ORDER BY created_at DESC");
     return res.json(templates);
   }
 
@@ -14,8 +12,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const { name, body } = req.body;
     if (!name || !body) return res.status(400).json({ error: "name and body required" });
     const id = randomUUID();
-    db.prepare("INSERT INTO templates (id, name, body) VALUES (?, ?, ?)").run(id, name, body);
-    return res.status(201).json(db.prepare("SELECT * FROM templates WHERE id = ?").get(id));
+    await dbRun("INSERT INTO templates (id, name, body) VALUES (?, ?, ?)", [id, name, body]);
+    return res.status(201).json(await dbGet("SELECT * FROM templates WHERE id = ?", [id]));
   }
 
   res.setHeader("Allow", ["GET", "POST"]);

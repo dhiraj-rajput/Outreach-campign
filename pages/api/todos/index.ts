@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth";
 import { randomUUID } from "crypto";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 import { authOptions } from "@/pages/api/auth/[...nextauth]";
 
 export type TodoRow = {
@@ -22,8 +22,6 @@ export type TodoRow = {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getServerSession(req, res, authOptions);
   if (!session) return res.status(401).json({ error: "Unauthorized" });
-
-  const db = getDb();
 
   if (req.method === "GET") {
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
@@ -51,8 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
-    const rows = db
-      .prepare(
+    const rows = await dbAll<TodoRow>(
         `SELECT td.id, td.target_id, td.title, td.description, td.due_date, td.status, td.created_at,
                 t.full_name, t.email, t.company, t.linkedin_url, t.title AS title_role
          FROM todos td
@@ -62,22 +59,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
            CASE WHEN td.status = 'open' THEN 0 ELSE 1 END,
            CASE WHEN td.due_date IS NULL THEN 1 ELSE 0 END,
            td.due_date ASC,
-           td.created_at DESC`
-      )
-      .all(...params) as TodoRow[];
+           td.created_at DESC`,
+           params
+      );
 
-    const summary = db
-      .prepare(
+    const summary = await dbGet(
         `SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_count,
           SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_count,
-          SUM(CASE WHEN status = 'open' AND due_date IS NOT NULL AND date(due_date) < date('now') THEN 1 ELSE 0 END) AS overdue,
-          SUM(CASE WHEN status = 'open' AND due_date IS NOT NULL AND date(due_date) = date('now') THEN 1 ELSE 0 END) AS due_today,
-          SUM(CASE WHEN status = 'open' AND due_date IS NOT NULL AND date(due_date) > date('now') AND date(due_date) <= date('now', '+7 days') THEN 1 ELSE 0 END) AS due_week
+          SUM(CASE WHEN status = 'open' AND due_date IS NOT NULL AND DATE(due_date) < CURDATE() THEN 1 ELSE 0 END) AS overdue,
+          SUM(CASE WHEN status = 'open' AND due_date IS NOT NULL AND DATE(due_date) = CURDATE() THEN 1 ELSE 0 END) AS due_today,
+          SUM(CASE WHEN status = 'open' AND due_date IS NOT NULL AND DATE(due_date) > CURDATE() AND DATE(due_date) <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS due_week
          FROM todos`
-      )
-      .get();
+      );
 
     return res.status(200).json({ todos: rows, summary });
   }
@@ -93,7 +88,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!trimmedTitle) return res.status(400).json({ error: "Title is required." });
     if (trimmedTitle.length > 200) return res.status(400).json({ error: "Title must be at most 200 characters." });
 
-    const target = db.prepare("SELECT id FROM targets WHERE id = ?").get(target_id);
+    const target = await dbGet("SELECT id FROM targets WHERE id = ?", [target_id]);
     if (!target) return res.status(404).json({ error: "Contact not found." });
 
     let due: string | null = null;
@@ -106,13 +101,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const id = randomUUID();
     const desc = description?.trim() ? description.trim().slice(0, 4000) : null;
-    db.prepare(
-      `INSERT INTO todos (id, target_id, title, description, due_date, status) VALUES (?, ?, ?, ?, ?, 'open')`
-    ).run(id, target_id, trimmedTitle, desc, due);
+    await dbRun(
+      `INSERT INTO todos (id, target_id, title, description, due_date, status) VALUES (?, ?, ?, ?, ?, 'open')`,
+      [id, target_id, trimmedTitle, desc, due]
+    );
 
-    const row = db.prepare(
-      `SELECT id, target_id, title, description, due_date, status, created_at FROM todos WHERE id = ?`
-    ).get(id);
+    const row = await dbGet(
+      `SELECT id, target_id, title, description, due_date, status, created_at FROM todos WHERE id = ?`,
+      [id]
+    );
     return res.status(201).json(row);
   }
 

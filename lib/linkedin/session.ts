@@ -1,7 +1,7 @@
 import { chromium } from "playwright-extra";
 import type { Browser, BrowserContext, Page } from "playwright";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 
 chromium.use(StealthPlugin());
@@ -56,10 +56,7 @@ async function getBrowser(headless = HEADLESS): Promise<Browser> {
 }
 
 async function getOrCreateContext(accountId: string): Promise<BrowserContext> {
-  const db = getDb();
-  const account = db.prepare("SELECT * FROM accounts WHERE id = ?").get(accountId) as
-    | { cookies_json: string | null; email: string }
-    | undefined;
+  const account = await dbGet<{ cookies_json: string | null; email: string }>("SELECT * FROM accounts WHERE id = ?", [accountId]);
 
   if (!account) throw new Error(`Account ${accountId} not found`);
 
@@ -163,12 +160,8 @@ export async function getSessionPage(accountId: string): Promise<Page> {
 export async function saveSessionState(accountId: string): Promise<void> {
   const ctx = contexts.get(accountId);
   if (!ctx) return;
-  const db = getDb();
   const state = await ctx.storageState();
-  db.prepare("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?").run(
-    encryptSecret(JSON.stringify(state)),
-    accountId
-  );
+  await dbRun("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?", [encryptSecret(JSON.stringify(state)), accountId]);
 }
 
 export async function closeSession(accountId: string): Promise<void> {
@@ -185,8 +178,7 @@ export async function closeSession(accountId: string): Promise<void> {
  * and drops the live context. The user re-authenticates from Settings.
  */
 export async function markNeedsReauth(accountId: string): Promise<void> {
-  const db = getDb();
-  db.prepare("UPDATE accounts SET is_authenticated = 0 WHERE id = ?").run(accountId);
+  await dbRun("UPDATE accounts SET is_authenticated = 0 WHERE id = ?", [accountId]);
   try { await closeSession(accountId); } catch { /* ignore */ }
   console.warn(`[session] account ${accountId} flagged needs-reauth (session logged out)`);
 }
@@ -197,10 +189,7 @@ export async function markNeedsReauth(accountId: string): Promise<void> {
  * Saves the full storage state to DB and marks account as authenticated.
  */
 export async function authenticateAccount(accountId: string): Promise<void> {
-  const db = getDb();
-  const account = db.prepare("SELECT * FROM accounts WHERE id = ?").get(accountId) as
-    | { email: string }
-    | undefined;
+  const account = await dbGet<{ email: string }>("SELECT * FROM accounts WHERE id = ?", [accountId]);
   if (!account) throw new Error(`Account ${accountId} not found`);
 
   // Close any existing context for this account — start fresh
@@ -243,10 +232,7 @@ export async function authenticateAccount(accountId: string): Promise<void> {
 
     // Save full storage state (cookies + localStorage) to DB
     const state = await ctx.storageState();
-    db.prepare("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?").run(
-      encryptSecret(JSON.stringify(state)),
-      accountId
-    );
+    await dbRun("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?", [encryptSecret(JSON.stringify(state)), accountId]);
 
     await ctx.close();
   } finally {
@@ -315,12 +301,8 @@ async function persistLogin(accountId: string, ctx: BrowserContext, page?: Page)
       // Non-fatal — a missing seat / slow load must not fail the whole login.
     }
   }
-  const db = getDb();
   const state = await ctx.storageState();
-  db.prepare("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?").run(
-    encryptSecret(JSON.stringify(state)),
-    accountId
-  );
+  await dbRun("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?", [encryptSecret(JSON.stringify(state)), accountId]);
   // Drop any stale runtime context so the runner reloads the fresh cookies.
   await closeSession(accountId);
 }

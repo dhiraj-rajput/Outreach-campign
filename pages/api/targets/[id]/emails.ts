@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Imap from "imap";
 import { simpleParser } from "mailparser";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import { sendEmail, type EmailAccount } from "@/lib/email/sender";
 import { decryptSecret } from "@/lib/crypto";
 
@@ -21,36 +21,36 @@ type AccountRow = {
   imap_username: string | null; imap_password: string | null;
 };
 
-function resolveAccount(db: ReturnType<typeof getDb>, targetId: string, explicitId?: string): AccountRow | null {
+async function resolveAccount(targetId: string, explicitId?: string): Promise<AccountRow | null> {
   const cols = `id, from_email, from_name, reply_to, smtp_host, smtp_port, smtp_secure,
                 imap_host, imap_port, username, password, imap_username, imap_password`;
   if (explicitId) {
-    return (db.prepare(`SELECT ${cols} FROM email_accounts WHERE id = ?`).get(explicitId) as AccountRow) ?? null;
+    const acc = await dbGet<AccountRow>(`SELECT ${cols} FROM email_accounts WHERE id = ?`, [explicitId]);
+    return acc ?? null;
   }
-  const assigned = db.prepare(`
+  const assigned = await dbGet<{ email_account_id: string }>(`
     SELECT rp.email_account_id FROM run_profiles rp
     WHERE rp.target_id = ? AND rp.email_account_id IS NOT NULL
     ORDER BY rp.created_at DESC LIMIT 1
-  `).get(targetId) as { email_account_id: string } | undefined;
+  `, [targetId]);
   if (assigned?.email_account_id) {
-    return (db.prepare(`SELECT ${cols} FROM email_accounts WHERE id = ?`).get(assigned.email_account_id) as AccountRow) ?? null;
+    const acc = await dbGet<AccountRow>(`SELECT ${cols} FROM email_accounts WHERE id = ?`, [assigned.email_account_id]);
+    return acc ?? null;
   }
-  const all = db.prepare(`SELECT ${cols} FROM email_accounts`).all() as AccountRow[];
+  const all = await dbAll<AccountRow>(`SELECT ${cols} FROM email_accounts`);
   return all.length === 1 ? all[0] : null;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
   const targetId = req.query.id as string;
 
-  const target = db.prepare("SELECT id, email FROM targets WHERE id = ?").get(targetId) as
-    | { id: string; email: string | null } | undefined;
+  const target = await dbGet<{ id: string; email: string | null }>("SELECT id, email FROM targets WHERE id = ?", [targetId]);
   if (!target) return res.status(404).json({ error: "Contact not found" });
   if (!target.email) return res.status(400).json({ error: "Contact has no email address" });
 
   // ── Read thread ──
   if (req.method === "GET") {
-    const account = resolveAccount(db, targetId, req.query.email_account_id as string | undefined);
+    const account = await resolveAccount(targetId, req.query.email_account_id as string | undefined);
     if (!account?.imap_host) {
       return res.status(400).json({ error: "No email account with IMAP config could be resolved for this contact" });
     }
@@ -90,15 +90,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     };
     if (!body?.trim()) return res.status(400).json({ error: "body is required" });
 
-    const account = resolveAccount(db, targetId, email_account_id);
+    const account = await resolveAccount(targetId, email_account_id);
     if (!account) return res.status(400).json({ error: "No email account could be resolved for this contact" });
 
     // No subject → treat as a reply: reuse the last subject in the thread (Re: …) or a sane default.
     let finalSubject = subject?.trim();
     if (!finalSubject) {
-      const lastReply = db.prepare(
-        "SELECT subject FROM email_replies WHERE target_id = ? AND subject IS NOT NULL ORDER BY received_at DESC LIMIT 1"
-      ).get(targetId) as { subject: string } | undefined;
+      const lastReply = await dbGet<{ subject: string }>(
+        "SELECT subject FROM email_replies WHERE target_id = ? AND subject IS NOT NULL ORDER BY received_at DESC LIMIT 1",
+        [targetId]
+      );
       finalSubject = lastReply?.subject
         ? (/^re:/i.test(lastReply.subject) ? lastReply.subject : `Re: ${lastReply.subject}`)
         : "Re:";

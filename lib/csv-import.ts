@@ -1,8 +1,6 @@
 import Papa from "papaparse";
-import type DatabaseType from "better-sqlite3";
 import { randomUUID } from "crypto";
-
-type DB = DatabaseType.Database;
+import { dbTransaction } from "@/lib/db";
 
 // User-fillable target fields — everything else on `targets` (URNs, JSON blobs,
 // enrichment timestamps, apollo/automation internals) is system-owned and not
@@ -72,7 +70,7 @@ function get(row: Record<string, string>, key: string): string | null {
   return t.length > 0 ? t : null;
 }
 
-export function importCsv(db: DB, listId: string, csvText: string): CsvImportResult {
+export async function importCsv(db: any, listId: string, csvText: string): Promise<CsvImportResult> {
   const parsed = Papa.parse<Record<string, string>>(csvText, {
     header: true,
     skipEmptyLines: true,
@@ -113,57 +111,54 @@ export function importCsv(db: DB, listId: string, csvText: string): CsvImportRes
 
   const editableCols = [...EDITABLE_FIELDS, "full_name", "sales_nav_url"] as const;
 
-  const insertByLinkedin = db.prepare(`
-    INSERT INTO targets (id, linkedin_url, email, sales_nav_url, full_name, ${EDITABLE_FIELDS.join(", ")})
-    VALUES (?, ?, ?, ?, ?, ${EDITABLE_FIELDS.map(() => "?").join(", ")})
-    ON CONFLICT(linkedin_url) DO UPDATE SET
-      email = COALESCE(excluded.email, targets.email),
-      ${editableCols.map((c) => `${c} = COALESCE(excluded.${c}, targets.${c})`).join(",\n      ")}
-  `);
-  const findByLinkedin = db.prepare("SELECT id FROM targets WHERE linkedin_url = ?");
-  const findByEmail = db.prepare("SELECT id FROM targets WHERE email = ? LIMIT 1");
-  const insertByEmail = db.prepare(`
-    INSERT INTO targets (id, email, full_name, ${EDITABLE_FIELDS.join(", ")}, sales_nav_url)
-    VALUES (?, ?, ?, ${EDITABLE_FIELDS.map(() => "?").join(", ")}, ?)
-  `);
-  const updateByEmail = db.prepare(`
-    UPDATE targets SET
-      ${editableCols.map((c) => `${c} = COALESCE(?, ${c})`).join(",\n      ")}
-    WHERE id = ?
-  `);
-  const linkToList = db.prepare("INSERT OR IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)");
-
-  db.transaction(() => {
+  await dbTransaction(async (conn) => {
     for (const row of rows) {
       let targetId: string;
       let isNew: boolean;
       const fieldValues = EDITABLE_FIELDS.map((f) => row.fields[f]);
 
       if (row.linkedin_url) {
-        const existing = findByLinkedin.get(row.linkedin_url) as { id: string } | undefined;
+        const [existingResult] = await conn.execute("SELECT id FROM targets WHERE linkedin_url = ?", [row.linkedin_url]) as [any[], any];
+        const existing = existingResult[0];
         isNew = !existing;
         targetId = existing?.id ?? randomUUID();
-        insertByLinkedin.run(targetId, row.linkedin_url, row.email, row.sales_nav_url, row.full_name, ...fieldValues);
+        
+        await conn.execute(`
+          INSERT INTO targets (id, linkedin_url, email, sales_nav_url, full_name, ${EDITABLE_FIELDS.join(", ")})
+          VALUES (?, ?, ?, ?, ?, ${EDITABLE_FIELDS.map(() => "?").join(", ")})
+          ON DUPLICATE KEY UPDATE
+            email = COALESCE(VALUES(email), targets.email),
+            ${editableCols.map((c) => `${c} = COALESCE(VALUES(${c}), targets.${c})`).join(",\n            ")}
+        `, [targetId, row.linkedin_url, row.email, row.sales_nav_url, row.full_name, ...fieldValues]);
       } else {
-        const existing = findByEmail.get(row.email) as { id: string } | undefined;
+        const [existingResult] = await conn.execute("SELECT id FROM targets WHERE email = ? LIMIT 1", [row.email]) as [any[], any];
+        const existing = existingResult[0];
         isNew = !existing;
+        
         if (existing) {
           targetId = existing.id;
-          updateByEmail.run(...fieldValues, row.full_name, row.sales_nav_url, targetId);
+          await conn.execute(`
+            UPDATE targets SET
+              ${editableCols.map((c) => `${c} = COALESCE(?, ${c})`).join(",\n              ")}
+            WHERE id = ?
+          `, [...fieldValues, row.full_name, row.sales_nav_url, targetId]);
         } else {
           targetId = randomUUID();
-          insertByEmail.run(targetId, row.email, row.full_name, ...fieldValues, row.sales_nav_url);
+          await conn.execute(`
+            INSERT INTO targets (id, email, full_name, ${EDITABLE_FIELDS.join(", ")}, sales_nav_url)
+            VALUES (?, ?, ?, ${EDITABLE_FIELDS.map(() => "?").join(", ")}, ?)
+          `, [targetId, row.email, row.full_name, ...fieldValues, row.sales_nav_url]);
         }
       }
 
-      const linkResult = linkToList.run(listId, targetId);
-      if (linkResult.changes > 0) {
+      const [linkResult] = await conn.execute("INSERT IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)", [listId, targetId]) as [any, any];
+      if (linkResult.affectedRows > 0) {
         if (isNew) imported++; else updated++;
       } else {
         skipped++; // already in this list, no changes
       }
     }
-  })();
+  });
 
   return { imported, updated, skipped, errors };
 }

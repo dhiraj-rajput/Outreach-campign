@@ -1,15 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { encryptSecret } from "@/lib/crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const id = req.query.id as string;
 
   if (req.method === "GET") {
-    const account = db
-      .prepare("SELECT id, name, from_email, from_name, reply_to, smtp_host, smtp_port, smtp_secure, imap_host, imap_port, username, imap_username, daily_email_limit, active_hours_start, active_hours_end, timezone, working_days, is_verified, signature, ramp_up_enabled, ramp_start_date, created_at FROM email_accounts WHERE id = ?")
-      .get(id);
+    const account = await dbGet(
+      "SELECT id, name, from_email, from_name, reply_to, smtp_host, smtp_port, smtp_secure, imap_host, imap_port, username, imap_username, daily_email_limit, active_hours_start, active_hours_end, timezone, working_days, is_verified, signature, ramp_up_enabled, ramp_start_date, created_at FROM email_accounts WHERE id = ?",
+      [id]
+    );
     if (!account) return res.status(404).json({ error: "not found" });
     return res.json(account);
   }
@@ -38,7 +38,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const pwParams = password ? [encryptSecret(password)] : [];
     const imapPwParams = imap_password ? [encryptSecret(imap_password)] : [];
 
-    db.prepare(`
+    await dbRun(`
       UPDATE email_accounts SET
         name = COALESCE(?, name), from_email = COALESCE(?, from_email),
         from_name = ?, reply_to = ?, smtp_host = COALESCE(?, smtp_host),
@@ -53,7 +53,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         signature = ?, ramp_up_enabled = COALESCE(?, ramp_up_enabled),
         ramp_start_date = COALESCE(?, ramp_start_date)
       WHERE id = ?
-    `).run(
+    `, [
       name ?? null, from_email ?? null, from_name ?? null, reply_to ?? null,
       smtp_host ?? null, smtp_port ?? null, smtp_secure ?? null,
       imap_host ?? null, imap_port ?? null,
@@ -64,13 +64,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       timezone ?? null, working_days ?? null,
       signature ?? null, rampEnabled, ramp_start_date ?? null,
       id
-    );
+    ]);
 
     return res.json({ ok: true });
   }
 
   if (req.method === "DELETE") {
-    db.prepare("DELETE FROM email_accounts WHERE id = ?").run(id);
+    await dbRun("DELETE FROM email_accounts WHERE id = ?", [id]);
     return res.json({ ok: true });
   }
 

@@ -29,8 +29,8 @@ export async function sendEmail(
       user: account.username,
       pass: account.password,
     },
-    // Allow self-signed certs (common in some corp SMTP setups)
-    tls: { rejectUnauthorized: false },
+    // Note: users with self-signed certs need to add their CA
+    tls: { rejectUnauthorized: true },
   });
 
   const from = account.from_name
@@ -59,7 +59,7 @@ export async function testSmtpConnection(account: Omit<EmailAccount, "id">): Pro
       port: account.smtp_port,
       secure: account.smtp_secure === 1,
       auth: { user: account.username, pass: account.password },
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: true }, // Note: users with self-signed certs need to add their CA
       connectionTimeout: 10_000,
       greetingTimeout: 10_000,
     });
@@ -89,7 +89,7 @@ export async function testImapConnection(account: ImapTestAccount): Promise<stri
       host: account.imap_host,
       port: account.imap_port,
       tls: true,
-      tlsOptions: { rejectUnauthorized: false },
+      tlsOptions: { rejectUnauthorized: true }, // Note: users with self-signed certs need to add their CA
       user: account.imap_username ?? account.username,
       password: account.imap_password ?? account.password,
       authTimeout: 10_000,

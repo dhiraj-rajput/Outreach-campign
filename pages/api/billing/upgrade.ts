@@ -18,9 +18,10 @@
  *                  in that org); every member of the org gets paid access.
  */
 import type { NextApiRequest, NextApiResponse } from "next";
+import { randomUUID } from "crypto";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/pages/api/auth/[...nextauth]";
-import { getDb } from "@/lib/db";
+import { dbRun, dbTransaction } from "@/lib/db";
 import { getAccessContextForUser } from "@/lib/access";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -34,23 +35,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   const scope = (req.body?.scope as string) === "org" ? "org" : "self";
-  const access = getAccessContextForUser(userId);
+  const access = await getAccessContextForUser(userId);
   if (!access) return res.status(404).json({ error: "User not found" });
-
-  const db = getDb();
 
   if (scope === "org") {
     if (!access.orgId) {
-      return res.status(400).json({ error: "You're not part of an organization yet. Create one first." });
+      // Automatically create a workspace for the user so they immediately have org access!
+      const orgId = randomUUID();
+      const inviteCode = "ORG-" + randomUUID().substring(0, 8).toUpperCase();
+      const orgName = session?.user?.name ? `${session.user.name}'s Organization` : "My Organization";
+      await dbTransaction(async (conn) => {
+        await conn.execute(
+          "INSERT INTO organizations (id, name, invite_code, owner_id, plan) VALUES (?, ?, ?, ?, 'paid')",
+          [orgId, orgName, inviteCode, userId]
+        );
+        await conn.execute(
+          "INSERT INTO organization_members (org_id, user_id, role) VALUES (?, ?, 'owner')",
+          [orgId, userId]
+        );
+        await conn.execute("UPDATE users SET org_id = ?, plan = 'paid' WHERE id = ?", [orgId, userId]);
+      });
+    } else {
+      if (access.orgRole !== "owner" && access.orgRole !== "admin" && !access.isSuperAdmin) {
+        return res.status(403).json({ error: "Only the organization owner or an admin can upgrade the org plan" });
+      }
+      await dbRun("UPDATE organizations SET plan = 'paid', plan_updated_at = NOW() WHERE id = ?", [access.orgId]);
     }
-    if (access.orgRole !== "owner" && access.orgRole !== "admin" && !access.isSuperAdmin) {
-      return res.status(403).json({ error: "Only the organization owner or an admin can upgrade the org plan" });
-    }
-    db.prepare("UPDATE organizations SET plan = 'paid', plan_updated_at = datetime('now') WHERE id = ?").run(access.orgId);
   } else {
-    db.prepare("UPDATE users SET plan = 'paid', plan_updated_at = datetime('now') WHERE id = ?").run(userId);
+    await dbRun("UPDATE users SET plan = 'paid', plan_updated_at = NOW() WHERE id = ?", [userId]);
   }
 
-  const updated = getAccessContextForUser(userId);
+  const updated = await getAccessContextForUser(userId);
   return res.status(200).json(updated);
 }

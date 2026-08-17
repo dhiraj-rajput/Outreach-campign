@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 import { matchPerson } from "@/lib/apollo";
 import { randomUUID } from "crypto";
 import { decryptSecret } from "@/lib/crypto";
@@ -10,15 +10,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end();
   }
 
-  const db = getDb();
   const listId = req.query.id as string;
 
-  const list = db.prepare("SELECT id FROM lists WHERE id = ?").get(listId);
+  const list = await dbGet("SELECT id FROM lists WHERE id = ?", [listId]);
   if (!list) return res.status(404).json({ error: "List not found" });
 
-  const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'apollo'").get() as
-    | { api_key: string }
-    | undefined;
+  const integration = await dbGet<{ api_key: string }>("SELECT api_key FROM integrations WHERE \`key\` = 'apollo'");
   if (!integration?.api_key) {
     return res.status(400).json({ error: "Apollo integration not configured" });
   }
@@ -30,21 +27,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let targets: { id: string; linkedin_url: string | null; sales_nav_url: string | null }[];
   if (target_ids && target_ids.length > 0) {
     const placeholders = target_ids.map(() => "?").join(",");
-    targets = db.prepare(`
+    targets = await dbAll<{ id: string; linkedin_url: string | null; sales_nav_url: string | null }>(`
       SELECT t.id, t.linkedin_url, t.sales_nav_url
       FROM targets t
       INNER JOIN list_targets lt ON lt.target_id = t.id
       WHERE lt.list_id = ? AND t.id IN (${placeholders}) AND t.email IS NULL
         AND (t.linkedin_url IS NOT NULL OR t.sales_nav_url IS NOT NULL)
-    `).all(listId, ...target_ids) as { id: string; linkedin_url: string | null; sales_nav_url: string | null }[];
+    `, [listId, ...target_ids]);
   } else {
-    targets = db.prepare(`
+    targets = await dbAll<{ id: string; linkedin_url: string | null; sales_nav_url: string | null }>(`
       SELECT t.id, t.linkedin_url, t.sales_nav_url
       FROM targets t
       INNER JOIN list_targets lt ON lt.target_id = t.id
       WHERE lt.list_id = ? AND t.apollo_enriched_at IS NULL AND t.email IS NULL
         AND (t.linkedin_url IS NOT NULL OR t.sales_nav_url IS NOT NULL)
-    `).all(listId) as { id: string; linkedin_url: string | null; sales_nav_url: string | null }[];
+    `, [listId]);
   }
 
   let enriched = 0;
@@ -67,7 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!result) {
         notFound++;
         // Mark as attempted so we don't retry endlessly
-        db.prepare("UPDATE targets SET apollo_enriched_at = datetime('now') WHERE id = ?").run(target.id);
+        await dbRun("UPDATE targets SET apollo_enriched_at = NOW() WHERE id = ?", [target.id]);
         continue;
       }
 
@@ -75,14 +72,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let companyId: string | null = null;
       if (result.organization?.domain) {
         const domain = result.organization.domain.replace(/^www\./, "").toLowerCase();
-        const existing = db.prepare("SELECT id FROM companies WHERE domain = ?").get(domain) as
-          | { id: string }
-          | undefined;
+        const existing = await dbGet<{ id: string }>("SELECT id FROM companies WHERE domain = ?", [domain]);
         const org = result.organization;
         if (existing) {
           companyId = existing.id;
           // Update company with richer data if we have it
-          db.prepare(`
+          await dbRun(`
             UPDATE companies SET
               industry = COALESCE(industry, ?),
               location = COALESCE(location, ?),
@@ -99,7 +94,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               description = COALESCE(description, ?),
               employee_count = COALESCE(employee_count, ?)
             WHERE id = ?
-          `).run(
+          `, [
             org.industry ?? null,
             org.location ?? null,
             org.linkedin_url ?? null,
@@ -115,13 +110,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             org.short_description ?? null,
             org.estimated_num_employees ?? null,
             existing.id
-          );
+          ]);
         } else {
           companyId = randomUUID();
-          db.prepare(`
+          await dbRun(`
             INSERT INTO companies (id, name, domain, industry, location, linkedin_url, website, founded_year, logo_url, phone, annual_revenue, technology_names, keywords, city, country, description, employee_count)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
+          `, [
             companyId,
             org.name ?? "",
             domain,
@@ -139,14 +134,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             org.country ?? null,
             org.short_description ?? null,
             org.estimated_num_employees ?? null
-          );
+          ]);
         }
       }
 
       // Apollo returns a real /in/ URL — always write it, even if target already has a Sales Nav URL
       const apolloLinkedinUrl = result.linkedin_url?.includes("/in/") ? result.linkedin_url : null;
 
-      db.prepare(`
+      await dbRun(`
         UPDATE targets SET
           apollo_id = ?,
           seniority = ?,
@@ -163,9 +158,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           company_id = COALESCE(company_id, ?),
           linkedin_url = COALESCE(?, linkedin_url),
           company_size = COALESCE(company_size, ?),
-          apollo_enriched_at = datetime('now')
+          apollo_enriched_at = NOW()
         WHERE id = ?
-      `).run(
+      `, [
         result.apollo_id,
         result.seniority ?? null,
         result.functions ? JSON.stringify(result.functions) : null,
@@ -182,7 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         apolloLinkedinUrl,
         result.organization?.estimated_num_employees ?? null,
         target.id
-      );
+      ]);
 
       enriched++;
     } catch {

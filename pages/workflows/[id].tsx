@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { GetServerSideProps } from "next";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import { OrModel } from "@/components/ui/ModelPicker";
 import FilterBar, { ActiveFilter, filtersToParams } from "@/components/ui/FilterBar";
@@ -222,74 +222,66 @@ function formatNextAction(next_step_at: string | null, state: string): string {
 // ─── Server-side ──────────────────────────────────────────────────────────────
 
 export const getServerSideProps: GetServerSideProps = async ({ params, query }) => {
-  const db = getDb();
   const id = params?.id as string;
-  const workflow = db.prepare("SELECT * FROM workflows WHERE id = ?").get(id);
+  const workflow = await dbGet<WorkflowData>("SELECT * FROM workflows WHERE id = ?", [id]);
   if (!workflow) return { notFound: true };
 
-  const rawSteps = db
-    .prepare(
+  const rawSteps = await dbAll<Step>(
       `SELECT ws.*, t.name as template_name
        FROM workflow_steps ws
        LEFT JOIN templates t ON t.id = ws.template_id
-       WHERE ws.workflow_id = ? ORDER BY ws.track, ws.step_order`
-    )
-    .all(id);
-
-  const getStepTemplates = db.prepare(
-    `SELECT wst.template_id, t.name FROM workflow_step_templates wst JOIN templates t ON t.id = wst.template_id WHERE wst.step_id = ?`
+       WHERE ws.workflow_id = ? ORDER BY ws.track, ws.step_order`, [id]
   );
-  const steps = (rawSteps as Array<Record<string, unknown>>).map((s) => {
-    const rows = getStepTemplates.all(s.id) as Array<{ template_id: string; name: string }>;
-    return { ...s, template_ids: rows.map((r) => r.template_id), template_names: rows.map((r) => r.name) };
-  });
 
-  const activeRun = db
-    .prepare(
+  const steps = [];
+  for (const s of rawSteps) {
+    const rows = await dbAll<{ template_id: string; name: string }>(
+      `SELECT wst.template_id, t.name FROM workflow_step_templates wst JOIN templates t ON t.id = wst.template_id WHERE wst.step_id = ?`,
+      [s.id]
+    );
+    steps.push({ ...s, template_ids: rows.map((r) => r.template_id), template_names: rows.map((r) => r.name) });
+  }
+
+  const activeRun = await dbGet<{ id: string; status: string; list_id: string; list_name: string; account_name: string }>(
       `SELECT r.id, r.status, r.list_id, l.name as list_name, a.name as account_name
        FROM runs r
        LEFT JOIN lists l ON l.id = r.list_id
        LEFT JOIN accounts a ON a.id = r.account_id
        WHERE r.workflow_id = ? AND r.status IN ('running','paused')
-       LIMIT 1`
-    )
-    .get(id) as { id: string; status: string; list_id: string; list_name: string; account_name: string } | undefined;
+       LIMIT 1`, [id]
+  );
 
-  const lists = db
-    .prepare(
+  const lists = await dbAll<List>(
       `SELECT l.id, l.name, COUNT(lt.target_id) as target_count
        FROM lists l LEFT JOIN list_targets lt ON lt.list_id = l.id
        GROUP BY l.id ORDER BY l.name`
-    )
-    .all();
-  const accounts = db
-    .prepare(
+  );
+  const accounts = await dbAll<Account>(
       `SELECT a.id, a.name, a.is_authenticated, a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
          (SELECT COUNT(*) FROM logs l JOIN runs r ON r.id = l.run_id
-          WHERE r.account_id = a.id AND l.message LIKE 'Connection request sent%' AND date(l.created_at) = date('now')) as connections_today,
+          WHERE r.account_id = a.id AND l.message LIKE 'Connection request sent%' AND DATE(l.created_at) = CURDATE()) as connections_today,
          (SELECT COUNT(*) FROM logs l JOIN runs r ON r.id = l.run_id
-          WHERE r.account_id = a.id AND l.message LIKE 'Message sent%' AND date(l.created_at) = date('now')) as messages_today,
+          WHERE r.account_id = a.id AND l.message LIKE 'Message sent%' AND DATE(l.created_at) = CURDATE()) as messages_today,
          (SELECT COUNT(*) FROM logs l JOIN runs r ON r.id = l.run_id
-          WHERE r.account_id = a.id AND l.message LIKE 'InMail sent%' AND date(l.created_at) = date('now')) as inmails_today
+          WHERE r.account_id = a.id AND l.message LIKE 'InMail sent%' AND DATE(l.created_at) = CURDATE()) as inmails_today
        FROM accounts a ORDER BY a.name`
-    )
-    .all();
+  );
 
-  const templates = db.prepare("SELECT id, name FROM templates ORDER BY name").all();
-  const emailAccounts = db.prepare(`
+  const templates = await dbAll<Template>("SELECT id, name FROM templates ORDER BY name");
+  const emailAccounts = await dbAll<EmailAccount>(`
     SELECT ea.id, ea.name, ea.from_email, ea.is_verified, ea.signature,
            (SELECT COUNT(DISTINCT rp.run_id) FROM run_profiles rp
             JOIN runs r ON rp.run_id = r.id
             WHERE rp.email_account_id = ea.id
             AND r.status IN ('running', 'paused')) AS active_run_count
     FROM email_accounts ea ORDER BY ea.name
-  `).all();
+  `);
 
   // Email accounts currently assigned to the active run's profiles (locked during edit)
   const activeRunEmailAccountIds: string[] = activeRun
-    ? (db.prepare(
-        `SELECT DISTINCT email_account_id FROM run_profiles WHERE run_id = ? AND email_account_id IS NOT NULL`
-      ).all(activeRun.id) as Array<{ email_account_id: string }>).map((r) => r.email_account_id)
+    ? (await dbAll<{ email_account_id: string }>(
+        `SELECT DISTINCT email_account_id FROM run_profiles WHERE run_id = ? AND email_account_id IS NOT NULL`, [activeRun.id]
+      )).map((r) => r.email_account_id)
     : [];
 
   return {
@@ -1997,7 +1989,7 @@ function Wizard({
                                   await runPreview();
                                 }
                               }
-                            } catch (e) {
+                            } catch {
                               // ignore and leave modal open
                             }
                           }
@@ -2008,7 +2000,7 @@ function Wizard({
                       </button>
                     </div>
                     ) : (
-                      <a href="/pricing"
+                      <Link href="/pricing"
                         className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors">
                         <RiRobot2Line size={15} className="text-primary/70 shrink-0" />
                         <div className="flex-1">
@@ -2016,7 +2008,7 @@ function Wizard({
                           <p className="text-xs text-base-content/40 mt-0.5">Auto-personalise every message from lead context. Upgrade to enable.</p>
                         </div>
                         <span className="text-xs font-medium text-primary shrink-0">Upgrade →</span>
-                      </a>
+                      </Link>
                     )}
                     {aiAvailable && ws.aiEnabled ? (
                         <div className="space-y-4">
@@ -2031,7 +2023,7 @@ function Wizard({
                             onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
                             onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
                             onSearch={setOrModelSearch}
-                            onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
+                            onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); if (n.has(p)) { n.delete(p); } else { n.add(p); } return n; })}
                           />
                         )}
                         <div>
@@ -2127,14 +2119,16 @@ function Wizard({
                                   await runPreview();
                                 }
                               }
-                            } catch (e) {}
+                            } catch {
+                              // ignore
+                            }
                           }
                         })(); }} className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${ws.aiEnabled ? "bg-primary" : "bg-base-300"}`}>
                         <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${ws.aiEnabled ? "translate-x-5" : "translate-x-0"}`} />
                       </button>
                     </div>
                     ) : (
-                      <a href="/pricing"
+                      <Link href="/pricing"
                         className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 transition-colors">
                         <RiRobot2Line size={15} className="text-primary/70 shrink-0" />
                         <div className="flex-1">
@@ -2142,7 +2136,7 @@ function Wizard({
                           <p className="text-xs text-base-content/40 mt-0.5">Auto-generate subject + body from lead context. Upgrade to enable.</p>
                         </div>
                         <span className="text-xs font-medium text-primary shrink-0">Upgrade →</span>
-                      </a>
+                      </Link>
                     )}
                     {aiAvailable && ws.aiEnabled ? (
                       <div className="space-y-4">
@@ -2157,7 +2151,7 @@ function Wizard({
                             onClose={() => { setOrModelOpen(null); setOrModelSearch(""); }}
                             onSelect={(id) => { updateStep(idx, { aiModel: id }); setOrModelOpen(null); setOrModelSearch(""); }}
                             onSearch={setOrModelSearch}
-                            onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
+                            onToggleProvider={(p) => setCollapsedProviders(prev => { const n = new Set(prev); if (n.has(p)) { n.delete(p); } else { n.add(p); } return n; })}
                           />
                         )}
                         <div>
@@ -2990,6 +2984,7 @@ export default function WorkflowDetailPage({
   // Strip ?setup=1 from URL so refreshing doesn't re-open the wizard
   useEffect(() => {
     if (autoSetup) router.replace(`/workflows/${initial.id}`, undefined, { shallow: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeRun = stats?.active_run ?? initial.active_run;
@@ -3580,7 +3575,15 @@ export default function WorkflowDetailPage({
                             type="checkbox"
                             className="checkbox checkbox-xs"
                             checked={selected.has(p.target_id)}
-                            onChange={() => setSelected((prev) => { const n = new Set(prev); n.has(p.target_id) ? n.delete(p.target_id) : n.add(p.target_id); return n; })}
+                            onChange={() => setSelected((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(p.target_id)) {
+                                n.delete(p.target_id);
+                              } else {
+                                n.add(p.target_id);
+                              }
+                              return n;
+                            })}
                           />
                         </td>
                         <td>

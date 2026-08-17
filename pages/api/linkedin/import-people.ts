@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { randomUUID } from "crypto";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun, dbTransaction } from "@/lib/db";
 import { isRateLimited } from "@/lib/rate-limit";
 import {
   linkedInUrlMatchKey,
@@ -34,7 +34,7 @@ type UpsertRow = {
  * list_targets is many-to-many; same person can sit on many lists without cloning.
  * Later email enrichment updates the same target id.
  */
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     return res.status(405).end();
@@ -59,10 +59,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(400).json({ error: "Import at most 100 people per request." });
   }
 
-  const db = getDb();
-  const list = db.prepare("SELECT id, name FROM lists WHERE id = ?").get(list_id) as
-    | { id: string; name: string }
-    | undefined;
+  const list = await dbGet<{ id: string; name: string }>("SELECT id, name FROM lists WHERE id = ?", [list_id]);
   if (!list) return res.status(404).json({ error: "List not found." });
 
   const byKey = new Map<string, UpsertRow>();
@@ -94,48 +91,6 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     });
   }
 
-  const findExact = db.prepare(
-    "SELECT id, linkedin_url, email FROM targets WHERE linkedin_url = ?"
-  );
-  const findLoose = db.prepare(
-    `SELECT id, linkedin_url, email FROM targets
-     WHERE lower(trim(linkedin_url, '/')) = lower(trim(?, '/'))
-     LIMIT 1`
-  );
-
-  const insertTarget = db.prepare(`
-    INSERT INTO targets (
-      id, linkedin_url, full_name, first_name, last_name, title, location,
-      degree, profile_image_url, headline
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  // Fill empty fields only — never wipe enriched email / apollo data
-  const updateTarget = db.prepare(`
-    UPDATE targets SET
-      full_name = CASE WHEN ? IS NOT NULL AND (full_name IS NULL OR full_name = '') THEN ? ELSE full_name END,
-      first_name = CASE WHEN ? IS NOT NULL AND (first_name IS NULL OR first_name = '') THEN ? ELSE first_name END,
-      last_name = CASE WHEN ? IS NOT NULL AND (last_name IS NULL OR last_name = '') THEN ? ELSE last_name END,
-      title = CASE WHEN ? IS NOT NULL AND (title IS NULL OR title = '') THEN ? ELSE title END,
-      location = CASE WHEN ? IS NOT NULL AND (location IS NULL OR location = '') THEN ? ELSE location END,
-      degree = COALESCE(degree, ?),
-      profile_image_url = CASE WHEN ? IS NOT NULL AND (profile_image_url IS NULL OR profile_image_url = '') THEN ? ELSE profile_image_url END,
-      headline = CASE WHEN ? IS NOT NULL AND (headline IS NULL OR headline = '') THEN ? ELSE headline END,
-      linkedin_url = CASE
-        WHEN linkedin_url IS NULL OR linkedin_url = '' THEN ?
-        WHEN lower(trim(linkedin_url, '/')) = lower(trim(?, '/')) THEN ?
-        ELSE linkedin_url
-      END
-    WHERE id = ?
-  `);
-
-  const alreadyInList = db.prepare(
-    `SELECT 1 AS ok FROM list_targets WHERE list_id = ? AND target_id = ?`
-  );
-  const linkList = db.prepare(
-    `INSERT OR IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)`
-  );
-
   const splitName = (full: string | null) => {
     if (!full) return { first: null as string | null, last: null as string | null };
     const parts = full.trim().split(/\s+/);
@@ -151,82 +106,124 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   const targetIds: string[] = [];
   let alreadyHadEmail = 0;
 
-  const tx = db.transaction(() => {
-    for (const row of byKey.values()) {
-      const { first, last } = splitName(row.fullName);
-      const title = row.headline;
-
-      let existing = findExact.get(row.url) as
-        | { id: string; linkedin_url: string | null; email: string | null }
-        | undefined;
-      if (!existing) {
-        existing = findLoose.get(row.url) as
-          | { id: string; linkedin_url: string | null; email: string | null }
-          | undefined;
-      }
-
-      let id: string;
-      if (existing) {
-        id = existing.id;
-        updateTarget.run(
-          row.fullName, row.fullName,
-          first, first,
-          last, last,
-          title, title,
-          row.location, row.location,
-          row.degree,
-          row.profileImageUrl, row.profileImageUrl,
-          row.headline, row.headline,
-          row.url, row.url, row.url,
-          id
-        );
-        updated++;
-        if (existing.email) alreadyHadEmail++;
-      } else {
-        id = randomUUID();
-        try {
-          insertTarget.run(
-            id,
-            row.url,
-            row.fullName,
-            first,
-            last,
-            title,
-            row.location,
-            row.degree,
-            row.profileImageUrl,
-            row.headline
-          );
-          created++;
-        } catch (e: unknown) {
-          const again =
-            (findExact.get(row.url) as { id: string; email: string | null } | undefined) ||
-            (findLoose.get(row.url) as { id: string; email: string | null } | undefined);
-          if (!again) {
-            console.error("[import-people] unique insert failed", e);
-            skipped++;
-            continue;
-          }
-          id = again.id;
-          updated++;
-          if (again.email) alreadyHadEmail++;
-        }
-      }
-
-      const onList = alreadyInList.get(list_id, id) as { ok: number } | undefined;
-      if (onList) {
-        already_on_list++;
-      } else {
-        const r = linkList.run(list_id, id);
-        if (r.changes > 0) linked++;
-        else already_on_list++;
-      }
-      targetIds.push(id);
-    }
-  });
-
   try {
-    tx();
+    await dbTransaction(async (conn) => {
+      for (const row of byKey.values()) {
+        const { first, last } = splitName(row.fullName);
+        const title = row.headline;
+
+        let existing = await conn.execute(
+          "SELECT id, linkedin_url, email FROM targets WHERE linkedin_url = ?",
+          [row.url]
+        ).then((res: any) => res[0]?.[0] as { id: string; linkedin_url: string | null; email: string | null } | undefined);
+
+        if (!existing) {
+          existing = await conn.execute(
+            `SELECT id, linkedin_url, email FROM targets
+             WHERE lower(trim(TRAILING '/' FROM linkedin_url)) = lower(trim(TRAILING '/' FROM ?))
+             LIMIT 1`,
+            [row.url]
+          ).then((res: any) => res[0]?.[0] as { id: string; linkedin_url: string | null; email: string | null } | undefined);
+        }
+
+        let id: string;
+        if (existing) {
+          id = existing.id;
+          await conn.execute(`
+            UPDATE targets SET
+              full_name = CASE WHEN ? IS NOT NULL AND (full_name IS NULL OR full_name = '') THEN ? ELSE full_name END,
+              first_name = CASE WHEN ? IS NOT NULL AND (first_name IS NULL OR first_name = '') THEN ? ELSE first_name END,
+              last_name = CASE WHEN ? IS NOT NULL AND (last_name IS NULL OR last_name = '') THEN ? ELSE last_name END,
+              title = CASE WHEN ? IS NOT NULL AND (title IS NULL OR title = '') THEN ? ELSE title END,
+              location = CASE WHEN ? IS NOT NULL AND (location IS NULL OR location = '') THEN ? ELSE location END,
+              degree = COALESCE(degree, ?),
+              profile_image_url = CASE WHEN ? IS NOT NULL AND (profile_image_url IS NULL OR profile_image_url = '') THEN ? ELSE profile_image_url END,
+              headline = CASE WHEN ? IS NOT NULL AND (headline IS NULL OR headline = '') THEN ? ELSE headline END,
+              linkedin_url = CASE
+                WHEN linkedin_url IS NULL OR linkedin_url = '' THEN ?
+                WHEN lower(trim(TRAILING '/' FROM linkedin_url)) = lower(trim(TRAILING '/' FROM ?)) THEN ?
+                ELSE linkedin_url
+              END
+            WHERE id = ?
+          `, [
+            row.fullName, row.fullName,
+            first, first,
+            last, last,
+            title, title,
+            row.location, row.location,
+            row.degree,
+            row.profileImageUrl, row.profileImageUrl,
+            row.headline, row.headline,
+            row.url, row.url, row.url,
+            id
+          ]);
+          updated++;
+          if (existing.email) alreadyHadEmail++;
+        } else {
+          id = randomUUID();
+          try {
+            await conn.execute(`
+              INSERT INTO targets (
+                id, linkedin_url, full_name, first_name, last_name, title, location,
+                degree, profile_image_url, headline
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+              id,
+              row.url,
+              row.fullName,
+              first,
+              last,
+              title,
+              row.location,
+              row.degree,
+              row.profileImageUrl,
+              row.headline
+            ]);
+            created++;
+          } catch (e: any) {
+            let again = await conn.execute(
+              "SELECT id, email FROM targets WHERE linkedin_url = ?",
+              [row.url]
+            ).then((res: any) => res[0]?.[0] as { id: string; email: string | null } | undefined);
+
+            if (!again) {
+              again = await conn.execute(
+                `SELECT id, email FROM targets
+                 WHERE lower(trim(TRAILING '/' FROM linkedin_url)) = lower(trim(TRAILING '/' FROM ?))
+                 LIMIT 1`,
+                [row.url]
+              ).then((res: any) => res[0]?.[0] as { id: string; email: string | null } | undefined);
+            }
+
+            if (!again) {
+              console.error("[import-people] unique insert failed", e);
+              skipped++;
+              continue;
+            }
+            id = again.id;
+            updated++;
+            if (again.email) alreadyHadEmail++;
+          }
+        }
+
+        const onList = await conn.execute(
+          "SELECT 1 AS ok FROM list_targets WHERE list_id = ? AND target_id = ?",
+          [list_id, id]
+        ).then((res: any) => res[0]?.[0] as { ok: number } | undefined);
+
+        if (onList) {
+          already_on_list++;
+        } else {
+          const r = await conn.execute(
+            "INSERT IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)",
+            [list_id, id]
+          ).then((res: any) => res[0]);
+          if (r.affectedRows > 0) linked++;
+          else already_on_list++;
+        }
+        targetIds.push(id);
+      }
+    });
   } catch (err) {
     console.error("[api/import-people]", err);
     return res.status(500).json({ error: "Failed to import people." });

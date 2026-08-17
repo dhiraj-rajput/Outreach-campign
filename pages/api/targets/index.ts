@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun, dbTransaction } from "@/lib/db";
 import { randomUUID } from "crypto";
 import type { ActiveFilter, FilterOp } from "@/components/ui/FilterBar";
 
@@ -112,35 +112,34 @@ function buildFilterClause(filters: ActiveFilter[]): { sql: string; params: unkn
   };
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "POST") {
-    const db = getDb();
     const { full_name, linkedin_url, title, company, location, email, phone, list_id } = req.body;
     if (!full_name || !linkedin_url) {
       return res.status(400).json({ error: "full_name and linkedin_url are required" });
     }
     const id = randomUUID();
     try {
-      db.prepare(
+      await dbRun(
         `INSERT INTO targets (id, full_name, linkedin_url, title, company, location, email, phone)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(id, full_name, linkedin_url, title ?? null, company ?? null, location ?? null, email ?? null, phone ?? null);
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         [id, full_name, linkedin_url, title ?? null, company ?? null, location ?? null, email ?? null, phone ?? null]
+      );
     } catch (e: unknown) {
-      if (e instanceof Error && e.message.includes("UNIQUE")) {
+      if (e instanceof Error && (e.message.includes("UNIQUE") || e.message.includes("ER_DUP_ENTRY"))) {
         return res.status(409).json({ error: "A contact with this LinkedIn URL already exists" });
       }
       throw e;
     }
     if (list_id) {
       try {
-        db.prepare("INSERT OR IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)").run(list_id, id);
+        await dbRun("INSERT IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)", [list_id, id]);
       } catch { /* ignore */ }
     }
-    return res.status(201).json(db.prepare("SELECT * FROM targets WHERE id = ?").get(id));
+    return res.status(201).json(await dbGet("SELECT * FROM targets WHERE id = ?", [id]));
   }
 
   if (req.method === "DELETE") {
-    const db = getDb();
     const { target_ids } = req.body as { target_ids?: string[] };
     if (!Array.isArray(target_ids) || target_ids.length === 0) {
       return res.status(400).json({ error: "target_ids must be a non-empty array" });
@@ -148,12 +147,14 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const placeholders = target_ids.map(() => "?").join(",");
     // run_profiles/logs have no ON DELETE CASCADE — clear them first so the FK
     // constraint doesn't block the delete. run_profile_tracks cascade off run_profiles.
-    const result = db.transaction(() => {
-      db.prepare(`DELETE FROM run_profiles WHERE target_id IN (${placeholders})`).run(...target_ids);
-      db.prepare(`DELETE FROM logs WHERE target_id IN (${placeholders})`).run(...target_ids);
-      return db.prepare(`DELETE FROM targets WHERE id IN (${placeholders})`).run(...target_ids);
-    })();
-    return res.json({ deleted: result.changes });
+    let deletedCount = 0;
+    await dbTransaction(async (conn) => {
+      await conn.execute(`DELETE FROM run_profiles WHERE target_id IN (${placeholders})`, target_ids);
+      await conn.execute(`DELETE FROM logs WHERE target_id IN (${placeholders})`, target_ids);
+      const [result] = await conn.execute(`DELETE FROM targets WHERE id IN (${placeholders})`, target_ids) as unknown as [{ affectedRows: number }, unknown];
+      deletedCount = result.affectedRows;
+    });
+    return res.json({ deleted: deletedCount });
   }
 
   if (req.method !== "GET") {
@@ -161,7 +162,6 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(405).end();
   }
 
-  const db = getDb();
   const { list_id, page = "0", limit = "50", search } = req.query;
   const offset = Number(page) * Number(limit);
 
@@ -193,41 +193,34 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   let total: number;
 
   if (list_id) {
-    rows = db
-      .prepare(
+    rows = await dbAll(
         `${SELECT}
          JOIN list_targets lt ON lt.target_id = t.id
          WHERE lt.list_id = ?${extraWhere}
          ORDER BY t.full_name ASC
-         LIMIT ? OFFSET ?`
-      )
-      .all(list_id, ...allExtraParams, Number(limit), offset);
-    total = (
-      db
-        .prepare(
+         LIMIT ? OFFSET ?`,
+         [list_id, ...allExtraParams, Number(limit), offset]
+      );
+    const countRes = await dbGet<{ c: number }>(
           `SELECT COUNT(*) as c FROM targets t
            JOIN list_targets lt ON lt.target_id = t.id
-           WHERE lt.list_id = ?${extraWhere}`
-        )
-        .get(list_id, ...allExtraParams) as { c: number }
-    ).c;
+           WHERE lt.list_id = ?${extraWhere}`,
+           [list_id, ...allExtraParams]
+        );
+    total = countRes?.c || 0;
   } else {
     // All contacts — including list-less ones (e.g. created via the MCP without a list_id).
     // Previously gated behind EXISTS(list_targets), which hid them entirely.
     const whereClause = extraWhere ? `WHERE 1=1${extraWhere}` : "";
-    rows = db
-      .prepare(
+    rows = await dbAll(
         `${SELECT}
          ${whereClause}
          ORDER BY t.full_name ASC
-         LIMIT ? OFFSET ?`
-      )
-      .all(...allExtraParams, Number(limit), offset);
-    total = (
-      db
-        .prepare(`SELECT COUNT(*) as c FROM targets t ${whereClause}`)
-        .get(...allExtraParams) as { c: number }
-    ).c;
+         LIMIT ? OFFSET ?`,
+         [...allExtraParams, Number(limit), offset]
+      );
+    const countRes = await dbGet<{ c: number }>(`SELECT COUNT(*) as c FROM targets t ${whereClause}`, allExtraParams);
+    total = countRes?.c || 0;
   }
 
   return res.json({ contacts: rows, total });

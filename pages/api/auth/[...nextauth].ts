@@ -1,10 +1,10 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { isRateLimited } from "@/lib/rate-limit";
 import { validateEmail } from "@/lib/password";
-import { getAccessContextForUser, syncEnvSuperAdmin } from "@/lib/access";
+import { getAccessContextForUser } from "@/lib/access";
 
 type UserRow = { id: string; email: string; password_hash: string; name: string | null };
 
@@ -22,18 +22,15 @@ export const authOptions: NextAuthOptions = {
         if (!emailCheck.ok) return null;
         const email = credentials.email.trim().toLowerCase();
 
-        if (isRateLimited(req, "login", 10, 15 * 60 * 1000)) {
+        if (isRateLimited(req as any, "login", 10, 15 * 60 * 1000)) {
           throw new Error("Too many attempts. Try again later.");
         }
 
-        const db = getDb();
-        let user: UserRow | undefined;
+        let user: UserRow | undefined | null;
         try {
-          user = db.prepare("SELECT id, email, password_hash, name FROM users WHERE email = ?")
-            .get(email) as UserRow | undefined;
+          user = await dbGet<UserRow>("SELECT id, email, password_hash, name FROM users WHERE email = ?", [email]);
         } catch {
-          user = db.prepare("SELECT id, email, password_hash FROM users WHERE email = ?")
-            .get(email) as UserRow | undefined;
+          user = await dbGet<UserRow>("SELECT id, email, password_hash FROM users WHERE email = ?", [email]);
         }
         if (!user) return null;
 
@@ -61,8 +58,7 @@ export const authOptions: NextAuthOptions = {
       // admin flipping someone's plan, or promoting a super admin, takes effect on their
       // very next API call/page load instead of requiring a fresh login.
       if (token.id) {
-        syncEnvSuperAdmin(token.id as string, (token.email as string) ?? "");
-        const access = getAccessContextForUser(token.id as string);
+        const access = await getAccessContextForUser(token.id as string);
         if (access) {
           token.role = access.role;
           token.isPaid = access.isPaid;

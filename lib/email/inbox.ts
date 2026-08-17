@@ -1,7 +1,7 @@
 import Imap from "imap";
 import { simpleParser } from "mailparser";
 import { randomUUID } from "crypto";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { premium } from "@/lib/premium";
 import { decryptSecret } from "@/lib/crypto";
 
@@ -60,11 +60,11 @@ interface EmailAccount {
  */
 export function captureReplyBody(
   imap: Imap,
-  db: ReturnType<typeof getDb>,
   targetId: string,
   fromEmail: string,
   uid: number,
 ): Promise<string | null> {
+  const MAX_EMAIL_SIZE = 10 * 1024 * 1024; // 10MB
   return new Promise<string | null>((resolve) => {
     // Fetch the full raw RFC822 message — mailparser handles MIME multipart,
     // base64 / quoted-printable transfer encodings, and charset decoding. The
@@ -74,9 +74,18 @@ export function captureReplyBody(
 
     const chunks: Buffer[] = [];
 
+    let totalBytes = 0;
     fetch.on("message", (msg) => {
       msg.on("body", (stream) => {
-        stream.on("data", (c: Buffer) => chunks.push(c));
+        stream.on("data", (c: Buffer) => {
+          totalBytes += c.length;
+          if (totalBytes > MAX_EMAIL_SIZE) {
+            // abort the stream if the buffer exceeds max size
+            (stream as any).destroy?.(new Error("Max email size exceeded"));
+            return;
+          }
+          chunks.push(c);
+        });
       });
     });
 
@@ -106,26 +115,29 @@ export function captureReplyBody(
           if (!bodyText) { resolve(null); return; }
 
           // Dedup: skip if we already have a row for this target with the same received_at
-          const existing = db.prepare(
-            "SELECT id FROM email_replies WHERE target_id = ? AND received_at = ?"
-          ).get(targetId, receivedAt) as { id: string } | undefined;
+          const existing = await dbGet<{ id: string }>(
+            "SELECT id FROM email_replies WHERE target_id = ? AND received_at = ?",
+            [targetId, receivedAt]
+          );
 
           if (existing) { resolve(null); return; }
 
           // Look up the most recent active run for this target — the dispatcher needs
           // it to find the email track to reschedule / enroll a substitute into.
-          const runRow = db.prepare(
+          const runRow = await dbGet<{ id: string }>(
             `SELECT r.id FROM runs r
              JOIN run_profiles rp ON rp.run_id = r.id
              WHERE rp.target_id = ? AND r.status IN ('running', 'paused')
-             ORDER BY r.created_at DESC LIMIT 1`
-          ).get(targetId) as { id: string } | undefined;
+             ORDER BY r.created_at DESC LIMIT 1`,
+            [targetId]
+          );
 
           const replyId = randomUUID();
-          db.prepare(
+          await dbRun(
             `INSERT INTO email_replies (id, target_id, run_id, from_email, subject, body_text, received_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
-          ).run(replyId, targetId, runRow?.id ?? null, parsedFrom, subject, bodyText, receivedAt);
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [replyId, targetId, runRow?.id ?? null, parsedFrom, subject, bodyText, receivedAt]
+          );
           resolve(replyId);
         } catch (err) {
           console.warn(`[email-inbox] captureReplyBody parse/insert failed:`, err);
@@ -136,11 +148,11 @@ export function captureReplyBody(
   });
 }
 
-export function shouldSyncEmailInbox(emailAccountId: string): boolean {
-  const db = getDb();
-  const account = db
-    .prepare("SELECT inbox_synced_at FROM email_accounts WHERE id = ?")
-    .get(emailAccountId) as { inbox_synced_at: string | null } | undefined;
+export async function shouldSyncEmailInbox(emailAccountId: string): Promise<boolean> {
+  const account = await dbGet<{ inbox_synced_at: string | null }>(
+    "SELECT inbox_synced_at FROM email_accounts WHERE id = ?",
+    [emailAccountId]
+  );
   if (!account?.inbox_synced_at) return true;
   const dueAfterMs = IMAP_POLL_INTERVAL_MS + accountJitterMs(emailAccountId);
   return Date.now() - new Date(account.inbox_synced_at).getTime() >= dueAfterMs;
@@ -154,11 +166,10 @@ export function shouldSyncEmailInbox(emailAccountId: string): boolean {
  * Also scans the last 50 messages for bounces (mailer-daemon etc.).
  */
 export async function syncEmailInbox(emailAccountId: string): Promise<{ replies: number; bounces: number }> {
-  const db = getDb();
-
-  const account = db
-    .prepare("SELECT id, imap_host, imap_port, username, password, imap_username, imap_password, inbox_synced_at FROM email_accounts WHERE id = ?")
-    .get(emailAccountId) as EmailAccount | undefined;
+  const account = await dbGet<EmailAccount>(
+    "SELECT id, imap_host, imap_port, username, password, imap_username, imap_password, inbox_synced_at FROM email_accounts WHERE id = ?",
+    [emailAccountId]
+  );
 
   if (!account?.imap_host) {
     console.warn(`[email-inbox] Account ${emailAccountId} has no IMAP config — skipping`);
@@ -166,7 +177,7 @@ export async function syncEmailInbox(emailAccountId: string): Promise<{ replies:
   }
 
   // Leads that were emailed via this account and haven't replied yet
-  const pendingTargets = db.prepare(`
+  const pendingTargets = await dbAll<{ id: string; email: string }>(`
     SELECT DISTINCT t.id, t.email
     FROM targets t
     JOIN run_profiles rp ON rp.target_id = t.id
@@ -177,10 +188,10 @@ export async function syncEmailInbox(emailAccountId: string): Promise<{ replies:
       AND rt.track = 'email'
       AND rt.state NOT IN ('pending')
       AND rp.email_account_id = ?
-  `).all(emailAccountId) as { id: string; email: string }[];
+  `, [emailAccountId]);
 
   if (pendingTargets.length === 0) {
-    db.prepare("UPDATE email_accounts SET inbox_synced_at = datetime('now') WHERE id = ?").run(emailAccountId);
+    await dbRun("UPDATE email_accounts SET inbox_synced_at = NOW() WHERE id = ?", [emailAccountId]);
     return { replies: 0, bounces: 0 };
   }
 
@@ -197,7 +208,7 @@ export async function syncEmailInbox(emailAccountId: string): Promise<{ replies:
       host: account.imap_host!,
       port: account.imap_port ?? 993,
       tls: true,
-      tlsOptions: { rejectUnauthorized: false },
+      tlsOptions: { rejectUnauthorized: true }, // Note: users with self-signed certs need to add their CA
       user: imapUser,
       password: imapPass,
       authTimeout: 10_000,
@@ -235,7 +246,7 @@ export async function syncEmailInbox(emailAccountId: string): Promise<{ replies:
                 // On any failure the contact stays enrolled (safe fallback, plan §3.2).
                 try {
                   const latestUid = uids[uids.length - 1];
-                  const replyId = await captureReplyBody(imap, db, target.id, target.email, latestUid);
+                  const replyId = await captureReplyBody(imap, target.id, target.email, latestUid);
                   // The reply is always STORED (open-core). AI classification + auto-followup
                   // is a premium feature — skipped cleanly when ee/ is absent.
                   if (replyId && premium?.replies) {
@@ -280,7 +291,7 @@ export async function syncEmailInbox(emailAccountId: string): Promise<{ replies:
             });
 
             fetch.once("error", () => resFetch());
-            fetch.once("end", () => {
+            fetch.once("end", async () => {
               for (const msg of msgs) {
                 const fromRaw = parseHeaderValue(msg.header, "From");
                 const toRaw = parseHeaderValue(msg.header, "To");
@@ -295,49 +306,50 @@ export async function syncEmailInbox(emailAccountId: string): Promise<{ replies:
                 for (const candidate of candidates) {
                   if (BOUNCE_SENDER_PATTERNS.some(p => p.test(candidate))) continue;
 
-                  const target = db
-                    .prepare("SELECT id, email_status, company_id FROM targets WHERE lower(email) = ?")
-                    .get(candidate) as { id: string; email_status: string | null; company_id: string | null } | undefined;
+                  const target = await dbGet<{ id: string; email_status: string | null; company_id: string | null }>(
+                    "SELECT id, email_status, company_id FROM targets WHERE lower(email) = ?",
+                    [candidate]
+                  );
 
                   if (!target || target.email_status === "invalid") continue;
 
                   const note = `Email bounced on ${new Date().toISOString().slice(0, 10)} — marked invalid`;
-                  db.prepare(`
+                  await dbRun(`
                     UPDATE targets SET email_status = 'invalid',
-                      notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END
+                      notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE CONCAT(notes, CHAR(10), ?) END
                     WHERE id = ?
-                  `).run(note, note, target.id);
+                  `, [note, note, target.id]);
 
-                  db.prepare(`
+                  await dbRun(`
                     UPDATE run_profile_tracks SET state = 'skipped', error_message = 'Email bounced — invalid address'
                     WHERE run_profile_id IN (SELECT id FROM run_profiles WHERE target_id = ?)
                     AND state IN ('pending', 'in_progress')
-                  `).run(target.id);
+                  `, [target.id]);
 
                   if (target.company_id) {
                     const companyNote = `Email domain flagged invalid — bounce for ${candidate} on ${new Date().toISOString().slice(0, 10)}`;
-                    db.prepare(`
+                    await dbRun(`
                       UPDATE companies SET email_domain_invalid = 1,
-                        notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END
+                        notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE CONCAT(notes, CHAR(10), ?) END
                       WHERE id = ?
-                    `).run(companyNote, companyNote, target.company_id);
+                    `, [companyNote, companyNote, target.company_id]);
 
-                    const siblings = db.prepare(`
+                    const siblings = await dbAll<{ id: string }>(`
                       SELECT id FROM targets WHERE company_id = ? AND id != ? AND email IS NOT NULL AND email_status != 'invalid'
-                    `).all(target.company_id, target.id) as { id: string }[];
+                    `, [target.company_id, target.id]);
 
                     for (const sibling of siblings) {
                       const sibNote = `Email bounced on ${new Date().toISOString().slice(0, 10)} — marked invalid (domain flagged via company)`;
-                      db.prepare(`
+                      await dbRun(`
                         UPDATE targets SET email_status = 'invalid',
-                          notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END
+                          notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE CONCAT(notes, CHAR(10), ?) END
                         WHERE id = ?
-                      `).run(sibNote, sibNote, sibling.id);
-                      db.prepare(`
+                      `, [sibNote, sibNote, sibling.id]);
+                      await dbRun(`
                         UPDATE run_profile_tracks SET state = 'skipped', error_message = 'Email domain invalid — company flagged'
                         WHERE run_profile_id IN (SELECT id FROM run_profiles WHERE target_id = ?)
                         AND state IN ('pending', 'in_progress')
-                      `).run(sibling.id);
+                      `, [sibling.id]);
                     }
 
                     if (siblings.length > 0) {
@@ -362,6 +374,6 @@ export async function syncEmailInbox(emailAccountId: string): Promise<{ replies:
     imap.connect();
   });
 
-  db.prepare("UPDATE email_accounts SET inbox_synced_at = datetime('now') WHERE id = ?").run(emailAccountId);
+  await dbRun("UPDATE email_accounts SET inbox_synced_at = NOW() WHERE id = ?", [emailAccountId]);
   return { replies, bounces };
 }

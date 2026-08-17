@@ -4,7 +4,7 @@
  * DELETE /api/linkedin/posts/:id
  */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 
 type PostRow = {
   id: string;
@@ -38,14 +38,11 @@ function serializePost(r: PostRow) {
   };
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const id = req.query.id as string;
   if (!id) return res.status(400).json({ error: "id required" });
 
-  const existing = db.prepare("SELECT * FROM linkedin_posts WHERE id = ?").get(id) as
-    | PostRow
-    | undefined;
+  const existing = await dbGet<PostRow>("SELECT * FROM linkedin_posts WHERE id = ?", [id]);
   if (!existing) return res.status(404).json({ error: "Post not found" });
 
   if (req.method === "GET") {
@@ -116,9 +113,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     values.push(new Date().toISOString());
     values.push(id);
 
-    db.prepare(`UPDATE linkedin_posts SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    await dbRun(`UPDATE linkedin_posts SET ${fields.join(", ")} WHERE id = ?`, values);
 
-    const row = db.prepare("SELECT * FROM linkedin_posts WHERE id = ?").get(id) as PostRow;
+    const row = await dbGet<PostRow>("SELECT * FROM linkedin_posts WHERE id = ?", [id]);
+    if (!row) return res.status(404).json({ error: "Post not found after update" });
     return res.json(serializePost(row));
   }
 
@@ -126,7 +124,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (existing.status === "posting") {
       return res.status(400).json({ error: "Cannot delete a post that is currently being published" });
     }
-    db.prepare("DELETE FROM linkedin_posts WHERE id = ?").run(id);
+    await dbRun("DELETE FROM linkedin_posts WHERE id = ?", [id]);
     return res.status(204).end();
   }
 

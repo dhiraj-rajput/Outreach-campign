@@ -1,10 +1,5 @@
-/**
- * PATCH  /api/pipeline/deals/:id   → update stage/title/value/notes/position
- * DELETE /api/pipeline/deals/:id
- * Paid feature: gated by requirePaidAccess.
- */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { requirePaidAccess } from "@/lib/access";
 
 const STAGES = new Set(["new", "contacted", "qualified", "proposal", "won", "lost"]);
@@ -14,7 +9,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!access) return;
 
   const id = req.query.id as string;
-  const db = getDb();
 
   if (req.method === "PATCH") {
     const { title, stage, value, notes, position, target_id, company_id } = req.body as {
@@ -40,28 +34,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (position !== undefined) { fields.push("position = ?"); params.push(position); }
     if (target_id !== undefined) { fields.push("target_id = ?"); params.push(target_id); }
     if (company_id !== undefined) { fields.push("company_id = ?"); params.push(company_id); }
-    fields.push("updated_at = datetime('now')");
+    fields.push("updated_at = NOW()");
 
     if (fields.length === 1) return res.status(400).json({ error: "Nothing to update" });
 
     params.push(id);
-    db.prepare(`UPDATE pipeline_deals SET ${fields.join(", ")} WHERE id = ?`).run(...params);
+    await dbRun(`UPDATE pipeline_deals SET ${fields.join(", ")} WHERE id = ?`, params);
 
-    const deal = db
-      .prepare(
+    const deal = await dbGet(
         `SELECT d.*, t.full_name as contact_name, c.name as company_name
          FROM pipeline_deals d
          LEFT JOIN targets t ON t.id = d.target_id
          LEFT JOIN companies c ON c.id = d.company_id
-         WHERE d.id = ?`
-      )
-      .get(id);
+         WHERE d.id = ?`, [id]
+      );
     if (!deal) return res.status(404).json({ error: "Deal not found" });
     return res.status(200).json({ deal });
   }
 
   if (req.method === "DELETE") {
-    db.prepare("DELETE FROM pipeline_deals WHERE id = ?").run(id);
+    await dbRun("DELETE FROM pipeline_deals WHERE id = ?", [id]);
     return res.status(200).json({ ok: true });
   }
 

@@ -1,15 +1,14 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 
 // Remove contacts from a list (membership only — never deletes the contact). Filters are OR'd:
 // titles (exact), title_patterns (LIKE %p%), exclude_location_substrings (LIKE %l%). dry_run previews.
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const db = getDb();
   const list_id = req.query.id as string;
 
-  const list = db.prepare("SELECT id FROM lists WHERE id = ?").get(list_id);
+  const list = await dbGet("SELECT id FROM lists WHERE id = ?", [list_id]);
   if (!list) return res.status(404).json({ error: "List not found" });
 
   const { contact_ids, titles, title_patterns, exclude_location_substrings, dry_run = true } = req.body as {
@@ -53,19 +52,19 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
   const whereFilter = conditions.join(" OR ");
 
-  const preview = db.prepare(`
+  const preview = await dbAll(`
     SELECT t.id, t.full_name, t.title, t.location
     FROM list_targets lt
     JOIN targets t ON t.id = lt.target_id
     WHERE lt.list_id = ? AND (${whereFilter})
     ORDER BY t.title
-  `).all(...params);
+  `, params);
 
   if (dry_run) {
     return res.json({ dry_run: true, would_remove: preview.length, contacts: preview });
   }
 
-  db.prepare(`
+  await dbRun(`
     DELETE FROM list_targets
     WHERE list_id = ?
       AND target_id IN (
@@ -73,9 +72,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         JOIN targets t ON t.id = lt.target_id
         WHERE lt.list_id = ? AND (${whereFilter})
       )
-  `).run(list_id, list_id, ...params.slice(1));
+  `, [list_id, list_id, ...params.slice(1)]);
 
-  const remaining = (db.prepare("SELECT COUNT(*) as c FROM list_targets WHERE list_id = ?").get(list_id) as { c: number }).c;
+  const remainingRow = await dbGet<{ c: number }>("SELECT COUNT(*) as c FROM list_targets WHERE list_id = ?", [list_id]);
+  const remaining = remainingRow?.c ?? 0;
 
   // Surface the exact removed IDs so a removal is trivially reversible:
   // feed removed_contact_ids straight into add_to_list to undo this batch.

@@ -285,9 +285,9 @@ export default function LoginPage() {
                   <div className="relative">
                     <RiKeyLine size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/30" />
                     <input
-                      type="password"
+                      type="text"
                       className="input input-sm w-full pl-8 bg-base-100 border-base-300/60"
-                      placeholder="Ask your admin for the invite code"
+                      placeholder="Organization code (ORG-...) or invite code"
                       value={inviteCode}
                       onChange={(e) => setInviteCode(e.target.value)}
                       autoComplete="off"

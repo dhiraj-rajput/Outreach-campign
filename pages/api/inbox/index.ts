@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 
 export interface InboxReply {
   id: string;
@@ -37,13 +37,12 @@ export interface InboxReply {
 }
 
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).end();
   }
 
-  const db = getDb();
   const channel = req.query.channel as string | undefined; // "email" | "linkedin" | undefined
 
   // A target shows in the inbox if it has a reply stamp OR a captured email_replies row.
@@ -54,7 +53,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (channel === "email") channelFilter = "AND (t.email_replied_at IS NOT NULL OR er.id IS NOT NULL)";
   if (channel === "linkedin") channelFilter = "AND t.last_replied_at IS NOT NULL";
 
-  const rows = db.prepare(`
+  const rows = (await dbAll(`
     SELECT
       t.id,
       t.full_name,
@@ -65,29 +64,29 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       t.email_replied_at,
       t.last_replied_at,
       CASE
-        WHEN (t.email_replied_at IS NOT NULL OR er.id IS NOT NULL) AND t.last_replied_at IS NOT NULL THEN 'both'
-        WHEN t.email_replied_at IS NOT NULL OR er.id IS NOT NULL THEN 'email'
+        WHEN (t.email_replied_at IS NOT NULL OR MAX(er.id) IS NOT NULL) AND t.last_replied_at IS NOT NULL THEN 'both'
+        WHEN t.email_replied_at IS NOT NULL OR MAX(er.id) IS NOT NULL THEN 'email'
         ELSE 'linkedin'
       END AS channel,
-      MAX(
+      GREATEST(
         COALESCE(t.email_replied_at, ''),
         COALESCE(t.last_replied_at, ''),
-        COALESCE(er.received_at, '')
+        COALESCE(MAX(er.received_at), '')
       ) AS replied_at,
-      r.id AS run_id,
-      r.workflow_id,
-      w.name AS workflow_name,
-      ea.id AS email_account_id,
-      ea.name AS email_account_name,
-      ea.from_email AS email_account_from,
-      er.id AS reply_id,
-      er.classification_json AS classification_json,
-      er.body_text AS reply_body,
-      er.classified_at,
-      er.classification_error,
-      er.dispatched_at,
-      er.dispatch_result_json,
-      COALESCE(er.manually_edited, 0) AS manually_edited,
+      MAX(r.id) AS run_id,
+      MAX(r.workflow_id) AS workflow_id,
+      MAX(w.name) AS workflow_name,
+      MAX(ea.id) AS email_account_id,
+      MAX(ea.name) AS email_account_name,
+      MAX(ea.from_email) AS email_account_from,
+      MAX(er.id) AS reply_id,
+      MAX(er.classification_json) AS classification_json,
+      MAX(er.body_text) AS reply_body,
+      MAX(er.classified_at) AS classified_at,
+      MAX(er.classification_error) AS classification_error,
+      MAX(er.dispatched_at) AS dispatched_at,
+      MAX(er.dispatch_result_json) AS dispatch_result_json,
+      MAX(COALESCE(er.manually_edited, 0)) AS manually_edited,
       t.li_intent,
       t.li_intent_at,
       t.li_intent_action
@@ -106,7 +105,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     ${channelFilter}
     GROUP BY t.id
     ORDER BY replied_at DESC
-  `).all() as Array<InboxReply & { classification_json: string | null }>;
+  `)) as Array<InboxReply & { classification_json: string | null }>;
 
   const replies: InboxReply[] = rows.map((row) => {
     let reply_kind: string | null = null;

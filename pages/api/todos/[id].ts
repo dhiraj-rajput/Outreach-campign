@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { authOptions } from "@/pages/api/auth/[...nextauth]";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -10,13 +10,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const id = req.query.id;
   if (typeof id !== "string" || !id) return res.status(400).json({ error: "Invalid todo id." });
 
-  const db = getDb();
-  const existing = db.prepare(
-    "SELECT id, target_id, title, description, due_date, status, created_at FROM todos WHERE id = ?"
-  ).get(id) as {
+  const existing = await dbGet<{
     id: string; target_id: string; title: string; description: string | null;
     due_date: string | null; status: "open" | "done"; created_at: string;
-  } | undefined;
+  }>(
+    "SELECT id, target_id, title, description, due_date, status, created_at FROM todos WHERE id = ?",
+    [id]
+  );
 
   if (!existing) return res.status(404).json({ error: "Todo not found." });
 
@@ -53,16 +53,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       status = body.status;
     }
 
-    db.prepare(`UPDATE todos SET title = ?, description = ?, due_date = ?, status = ? WHERE id = ?`)
-      .run(title, description, due_date, status, id);
+    await dbRun(`UPDATE todos SET title = ?, description = ?, due_date = ?, status = ? WHERE id = ?`,
+      [title, description, due_date, status, id]);
 
     return res.status(200).json(
-      db.prepare(`SELECT id, target_id, title, description, due_date, status, created_at FROM todos WHERE id = ?`).get(id)
+      await dbGet(`SELECT id, target_id, title, description, due_date, status, created_at FROM todos WHERE id = ?`, [id])
     );
   }
 
   if (req.method === "DELETE") {
-    db.prepare("DELETE FROM todos WHERE id = ?").run(id);
+    await dbRun("DELETE FROM todos WHERE id = ?", [id]);
     return res.status(200).json({ ok: true });
   }
 

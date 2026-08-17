@@ -1,14 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { encryptSecret } from "@/lib/crypto";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const db = getDb();
   const id = req.query.id as string;
 
-  const account = db.prepare("SELECT * FROM accounts WHERE id = ?").get(id);
+  const account = await dbGet("SELECT * FROM accounts WHERE id = ?", [id]);
   if (!account) return res.status(404).json({ error: "Account not found" });
 
   const { li_at, document_cookie } = req.body as { li_at?: string; document_cookie?: string };
@@ -37,9 +36,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     origins: [],
   };
 
-  db.prepare("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?").run(
-    encryptSecret(JSON.stringify(storageState)),
-    id
+  await dbRun("UPDATE accounts SET cookies_json = ?, is_authenticated = 1 WHERE id = ?",
+    [encryptSecret(JSON.stringify(storageState)), id]
   );
 
   // Evict the cached browser context so next import uses the new cookies

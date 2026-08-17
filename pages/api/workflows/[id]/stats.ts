@@ -1,19 +1,28 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).end();
   }
 
   try {
-    const db = getDb();
     const workflowId = req.query.id as string;
 
     const RUNS = `SELECT id FROM runs WHERE workflow_id = ? AND status IN ('running','paused','completed')`;
 
-    const counts = db.prepare(`
+    const counts = await dbGet<{
+      total_prospects: number;
+      active_prospects: number;
+      completed_prospects: number;
+      failed_prospects: number;
+      connections_sent: number;
+      connections_accepted: number;
+      messages_sent: number;
+      inmails_sent: number;
+      emails_sent: number;
+    }>(`
       SELECT
         COUNT(DISTINCT rp.id) AS total_prospects,
         COUNT(DISTINCT CASE WHEN EXISTS (
@@ -46,44 +55,35 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       FROM run_profiles rp
       JOIN runs r ON r.id = rp.run_id
       WHERE r.workflow_id = ? AND r.status IN ('running','paused','completed')
-    `).get(workflowId, workflowId, workflowId, workflowId, workflowId, workflowId) as {
-      total_prospects: number;
-      active_prospects: number;
-      completed_prospects: number;
-      failed_prospects: number;
-      connections_sent: number;
-      connections_accepted: number;
-      messages_sent: number;
-      inmails_sent: number;
-      emails_sent: number;
-    };
+    `, [workflowId, workflowId, workflowId, workflowId, workflowId, workflowId]);
 
-    const connections_sent = counts.connections_sent ?? 0;
-    const connections_accepted = counts.connections_accepted ?? 0;
+    const connections_sent = counts?.connections_sent ?? 0;
+    const connections_accepted = counts?.connections_accepted ?? 0;
     const acceptance_rate = connections_sent > 0
       ? Math.round((connections_accepted / connections_sent) * 100)
       : 0;
 
-    const activeRun = db.prepare(
+    const activeRun = await dbGet<{ id: string; status: string; list_id: string; list_name: string; account_name: string }>(
       `SELECT r.id, r.status, r.list_id, l.name as list_name, a.name as account_name
        FROM runs r
        LEFT JOIN lists l ON l.id = r.list_id
        LEFT JOIN accounts a ON a.id = r.account_id
        WHERE r.workflow_id = ? AND r.status IN ('running', 'paused')
-       LIMIT 1`
-    ).get(workflowId) as { id: string; status: string; list_id: string; list_name: string; account_name: string } | undefined;
+       LIMIT 1`,
+       [workflowId]
+    );
 
     return res.json({
-      total_prospects: counts.total_prospects ?? 0,
-      active_prospects: counts.active_prospects ?? 0,
-      completed_prospects: counts.completed_prospects ?? 0,
-      failed_prospects: counts.failed_prospects ?? 0,
+      total_prospects: counts?.total_prospects ?? 0,
+      active_prospects: counts?.active_prospects ?? 0,
+      completed_prospects: counts?.completed_prospects ?? 0,
+      failed_prospects: counts?.failed_prospects ?? 0,
       connections_sent,
       connections_accepted,
       acceptance_rate,
-      messages_sent: counts.messages_sent ?? 0,
-      inmails_sent: counts.inmails_sent ?? 0,
-      emails_sent: counts.emails_sent ?? 0,
+      messages_sent: counts?.messages_sent ?? 0,
+      inmails_sent: counts?.inmails_sent ?? 0,
+      emails_sent: counts?.emails_sent ?? 0,
       active_run: activeRun ?? null,
     });
   } catch (err) {

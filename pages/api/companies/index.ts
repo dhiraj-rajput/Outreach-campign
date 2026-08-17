@@ -1,9 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
 
   if (req.method === "GET") {
     const full = req.query.full === "1" || req.query.full === "true";
@@ -29,32 +28,26 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       ? "c.*"
       : "c.id, c.name, c.domain, c.industry, c.location, c.website, c.employee_count, c.parent_company_id, c.created_at";
 
-    const total = (
-      db.prepare(`SELECT COUNT(*) as c FROM companies c ${where}`).get(...whereArgs) as {
-        c: number;
-      }
-    ).c;
+    const totalRes = await dbGet<{ c: number }>(`SELECT COUNT(*) as c FROM companies c ${where}`, whereArgs);
+    const total = totalRes?.c || 0;
 
     const pageClause = hasPaging ? " LIMIT ? OFFSET ?" : "";
     const pageArgs = hasPaging ? [limit, offset] : [];
 
-    const companies = db
-      .prepare(
+    const companies = await dbAll(
         `
       SELECT ${select},
              COUNT(DISTINCT t.id) as contact_count,
              COUNT(DISTINCT p.id) as project_count,
-             parent.name as parent_name
+             MAX(parent.name) as parent_name
       FROM companies c
       LEFT JOIN targets t ON t.company_id = c.id
       LEFT JOIN projects p ON p.company_id = c.id
       LEFT JOIN companies parent ON parent.id = c.parent_company_id
       ${where}
       GROUP BY c.id
-      ORDER BY c.name COLLATE NOCASE${pageClause}
-    `
-      )
-      .all(...whereArgs, ...pageArgs);
+      ORDER BY c.name ${pageClause}
+    `, [...whereArgs, ...pageArgs]);
 
     return res.json({ companies, total });
   }
@@ -74,17 +67,16 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (!name) return res.status(400).json({ error: "name required" });
 
     if (parent_company_id) {
-      const parent = db.prepare("SELECT id FROM companies WHERE id = ?").get(parent_company_id);
+      const parent = await dbGet("SELECT id FROM companies WHERE id = ?", [parent_company_id]);
       if (!parent) return res.status(400).json({ error: "parent company not found" });
     }
 
     const id = randomUUID();
-    db.prepare(
+    await dbRun(
       `
       INSERT INTO companies (id, name, domain, industry, location, linkedin_url, website, notes, parent_company_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    ).run(
+    `, [
       id,
       name,
       domain ?? null,
@@ -94,30 +86,28 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       website ?? null,
       notes ?? null,
       parent_company_id ?? null
-    );
+    ]);
 
     // projects: array of { name, description?, url? } or plain strings
     if (Array.isArray(projects)) {
-      const insertP = db.prepare(
-        `INSERT INTO projects (id, company_id, name, description, url, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'active', datetime('now'))`
-      );
       for (const p of projects) {
         if (typeof p === "string" && p.trim()) {
-          insertP.run(randomUUID(), id, p.trim(), null, null);
+          await dbRun(
+            `INSERT INTO projects (id, company_id, name, description, url, status, created_at)
+             VALUES (?, ?, ?, ?, ?, 'active', NOW())`,
+             [randomUUID(), id, p.trim(), null, null]
+          );
         } else if (p && typeof p === "object" && typeof p.name === "string" && p.name.trim()) {
-          insertP.run(
-            randomUUID(),
-            id,
-            p.name.trim(),
-            p.description ?? null,
-            p.url ?? null
+          await dbRun(
+            `INSERT INTO projects (id, company_id, name, description, url, status, created_at)
+             VALUES (?, ?, ?, ?, ?, 'active', NOW())`,
+             [randomUUID(), id, p.name.trim(), p.description ?? null, p.url ?? null]
           );
         }
       }
     }
 
-    return res.status(201).json(db.prepare("SELECT * FROM companies WHERE id = ?").get(id));
+    return res.status(201).json(await dbGet("SELECT * FROM companies WHERE id = ?", [id]));
   }
 
   res.setHeader("Allow", ["GET", "POST"]);

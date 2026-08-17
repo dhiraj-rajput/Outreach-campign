@@ -3,12 +3,10 @@
  * Supports parent/child companies and projects (name::description::url triples).
  */
 import Papa from "papaparse";
-import type DatabaseType from "better-sqlite3";
 import { randomUUID } from "crypto";
 import type { CsvPreviewRow, CsvPreviewResult, CsvChunkResult } from "./types";
 import { DEFAULT_CHUNK_SIZE } from "./types";
-
-type DB = DatabaseType.Database;
+import { dbGet, dbRun, dbTransaction } from "@/lib/db";
 
 export const COMPANY_COLUMNS = [
   "name",
@@ -49,92 +47,128 @@ const SAMPLE: Record<CompanyColumn, string> = {
   city: "Berlin",
   country: "Germany",
   website: "https://acme.com",
-  linkedin_url: "https://www.linkedin.com/company/acme",
-  notes: "Strategic account",
-  description: "B2B SaaS platform",
-  employee_count: "120",
+  linkedin_url: "https://linkedin.com/company/acme",
+  notes: "Key enterprise prospect",
+  description: "B2B productivity platform",
+  employee_count: "250",
   founded_year: "2018",
-  phone: "+49 30 1234567",
-  annual_revenue: "10M-50M",
+  phone: "+49 30 123456",
+  annual_revenue: "$10M - $50M",
   parent_company: "Acme Holdings",
-  projects:
-    "Product Launch::Q3 go-to-market for EU::https://acme.com/launch|EMEA Expansion::Open London office::https://acme.com/emea",
+  projects: "Project Alpha::Core redesign::https://alpha.acme.com|Beta API::V2 rollout::",
 };
 
 export function buildCompanyCsvTemplate(): string {
-  const sampleRow = COMPANY_COLUMNS.map((c) => SAMPLE[c]);
-  return Papa.unparse({ fields: [...COMPANY_COLUMNS], data: [sampleRow] });
+  const headers = [...COMPANY_COLUMNS];
+  const row = headers.map((h) => {
+    const val = SAMPLE[h] ?? "";
+    if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+      return `"${val.replace(/"/g, '""')}"`;
+    }
+    return val;
+  });
+  return `${headers.join(",")}\n${row.join(",")}\n`;
 }
 
-function get(row: Record<string, string>, key: string): string | null {
-  const v = row[key];
-  const t = typeof v === "string" ? v.trim() : "";
-  return t.length > 0 ? t : null;
+function normalizeHeader(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[\s_\-]+/g, "_");
 }
 
-/** Parse "name::desc::url|name2::desc2::url2" into ProjectInput[] */
-export function parseProjects(raw: string | null): ProjectInput[] {
-  if (!raw) return [];
-  return raw
-    .split("|")
-    .map((chunk) => chunk.trim())
-    .filter(Boolean)
-    .map((chunk) => {
-      const parts = chunk.split("::").map((s) => s.trim());
-      const name = parts[0] || "";
-      const description = parts[1] || null;
-      const url = parts[2] || null;
-      return { name, description: description || null, url: url || null };
-    })
-    .filter((p) => p.name.length > 0);
-}
+const HEADER_SYNONYMS: Record<string, CompanyColumn> = {
+  company: "name",
+  company_name: "name",
+  organisation: "name",
+  organization: "name",
+  website_domain: "domain",
+  company_domain: "domain",
+  web: "website",
+  url: "website",
+  company_url: "website",
+  linkedin: "linkedin_url",
+  company_linkedin: "linkedin_url",
+  company_linkedin_url: "linkedin_url",
+  employees: "employee_count",
+  size: "employee_count",
+  headcount: "employee_count",
+  founded: "founded_year",
+  year_founded: "founded_year",
+  revenue: "annual_revenue",
+  arr: "annual_revenue",
+  parent: "parent_company",
+  parent_org: "parent_company",
+  holding_company: "parent_company",
+};
 
-function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/\s+/g, "_");
+export function parseProjects(raw: string | null | undefined): ProjectInput[] {
+  if (!raw || !raw.trim()) return [];
+  const entries = raw.split("|").map((s) => s.trim()).filter(Boolean);
+  const out: ProjectInput[] = [];
+  for (const entry of entries) {
+    const [name, description, url] = entry.split("::").map((s) => s.trim());
+    if (name) {
+      out.push({
+        name,
+        description: description || null,
+        url: url || null,
+      });
+    }
+  }
+  return out;
 }
 
 export function previewCompanyCsv(csvText: string): CsvPreviewResult {
-  const parsed = Papa.parse<Record<string, string>>(csvText, {
+  const parsed = Papa.parse<Record<string, string>>(csvText.trim(), {
     header: true,
-    skipEmptyLines: true,
+    skipEmptyLines: "greedy",
     transformHeader: normalizeHeader,
   });
 
-  const columns = (parsed.meta.fields ?? []).map(normalizeHeader);
+  const columns: CompanyColumn[] = [];
+  const rawFields = parsed.meta.fields ?? [];
+  const headerMap: Record<string, CompanyColumn> = {};
+
+  for (const f of rawFields) {
+    const direct = (COMPANY_COLUMNS as readonly string[]).includes(f)
+      ? (f as CompanyColumn)
+      : null;
+    const syn = HEADER_SYNONYMS[f];
+    const target = direct ?? syn;
+    if (target && !columns.includes(target)) {
+      columns.push(target);
+      headerMap[f] = target;
+    }
+  }
+
   const rows: CsvPreviewRow[] = [];
   let validRows = 0;
   let invalidRows = 0;
 
-  parsed.data.forEach((raw, idx) => {
-    const rowNum = idx + 2;
-    const data: Record<string, string | null> = {};
-    for (const col of COMPANY_COLUMNS) {
-      data[col] = get(raw, col);
-    }
-    for (const k of Object.keys(raw)) {
-      if (!(k in data)) data[k] = get(raw, k);
+  parsed.data.forEach((raw, i) => {
+    const rowNum = i + 2;
+    const data: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const col = headerMap[k];
+      if (col && v !== undefined && v !== null) {
+        data[col] = String(v).trim();
+      }
     }
 
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    if (!data.name) errors.push("name is required");
-    if (data.employee_count && Number.isNaN(Number(data.employee_count))) {
-      errors.push("employee_count must be a number");
-    }
-    if (data.founded_year && Number.isNaN(Number(data.founded_year))) {
-      errors.push("founded_year must be a number");
-    }
-    if (data.parent_company) {
-      warnings.push(`parent_company "${data.parent_company}" will be linked or created if missing`);
-    }
-    const projects = parseProjects(data.projects);
-    if (projects.length) {
-      warnings.push(`${projects.length} project(s) will be created/linked`);
+    if (!data.name && !data.domain) {
+      errors.push("Row must have at least a name or domain");
     }
 
-    if (errors.length) invalidRows++;
-    else validRows++;
+    if (data.employee_count && isNaN(Number(data.employee_count))) {
+      warnings.push(`Employee count "${data.employee_count}" is not a valid number`);
+    }
+    if (data.founded_year && isNaN(Number(data.founded_year))) {
+      warnings.push(`Founded year "${data.founded_year}" is not a valid number`);
+    }
+
+    if (errors.length === 0) validRows++;
+    else invalidRows++;
 
     rows.push({
       _key: `r-${rowNum}-${randomUUID().slice(0, 8)}`,
@@ -175,77 +209,77 @@ export interface CompanyImportRow {
 }
 
 function rowToImport(r: CsvPreviewRow): CompanyImportRow | null {
-  if (r.errors.length || !r.data.name) return null;
+  const name = r.data.name?.trim() || (r.data.domain ? r.data.domain.split(".")[0] : "");
+  if (!name && !r.data.domain) return null;
+
   return {
-    name: r.data.name!,
-    domain: r.data.domain,
-    industry: r.data.industry,
-    location: r.data.location,
-    city: r.data.city,
-    country: r.data.country,
-    website: r.data.website,
-    linkedin_url: r.data.linkedin_url,
-    notes: r.data.notes,
-    description: r.data.description,
+    name: name || r.data.domain || "Unknown",
+    domain: r.data.domain ? r.data.domain.toLowerCase().trim() : null,
+    industry: r.data.industry || null,
+    location: r.data.location || null,
+    city: r.data.city || null,
+    country: r.data.country || null,
+    website: r.data.website || null,
+    linkedin_url: r.data.linkedin_url || null,
+    notes: r.data.notes || null,
+    description: r.data.description || null,
     employee_count: r.data.employee_count ? Number(r.data.employee_count) : null,
     founded_year: r.data.founded_year ? Number(r.data.founded_year) : null,
-    phone: r.data.phone,
-    annual_revenue: r.data.annual_revenue,
-    parent_company: r.data.parent_company,
+    phone: r.data.phone || null,
+    annual_revenue: r.data.annual_revenue || null,
+    parent_company: r.data.parent_company || null,
     projects: parseProjects(r.data.projects),
   };
 }
 
-function findCompany(db: DB, nameOrDomain: string): { id: string } | undefined {
-  return db
-    .prepare(
-      `SELECT id FROM companies WHERE name = ? COLLATE NOCASE OR (domain IS NOT NULL AND domain = ? COLLATE NOCASE) LIMIT 1`
-    )
-    .get(nameOrDomain, nameOrDomain) as { id: string } | undefined;
+async function findCompany(nameOrDomain: string): Promise<{ id: string } | null> {
+  return await dbGet<{ id: string }>(
+    `SELECT id FROM companies WHERE name = ? OR (domain IS NOT NULL AND domain = ?) LIMIT 1`,
+    [nameOrDomain, nameOrDomain]
+  );
 }
 
-function ensureParent(db: DB, parentRef: string): string {
-  const existing = findCompany(db, parentRef);
+async function ensureParent(parentRef: string): Promise<string> {
+  const existing = await findCompany(parentRef);
   if (existing) return existing.id;
   const id = randomUUID();
   const looksLikeDomain = parentRef.includes(".") && !parentRef.includes(" ");
-  db.prepare(`INSERT INTO companies (id, name, domain) VALUES (?, ?, ?)`).run(
+  await dbRun(`INSERT INTO companies (id, name, domain) VALUES (?, ?, ?)`, [
     id,
     looksLikeDomain ? parentRef.split(".")[0] : parentRef,
-    looksLikeDomain ? parentRef : null
-  );
+    looksLikeDomain ? parentRef : null,
+  ]);
   return id;
 }
 
-function upsertProjects(db: DB, companyId: string, projects: ProjectInput[]) {
-  const find = db.prepare(
-    `SELECT id FROM projects WHERE company_id = ? AND name = ? COLLATE NOCASE`
-  );
-  const insert = db.prepare(
-    `INSERT INTO projects (id, company_id, name, description, url, status, created_at)
-     VALUES (?, ?, ?, ?, ?, 'active', datetime('now'))`
-  );
-  const update = db.prepare(
-    `UPDATE projects SET
-       description = COALESCE(?, description),
-       url = COALESCE(?, url)
-     WHERE id = ?`
-  );
+async function upsertProjects(companyId: string, projects: ProjectInput[]) {
   for (const p of projects) {
-    const ex = find.get(companyId, p.name) as { id: string } | undefined;
+    const ex = await dbGet<{ id: string }>(
+      `SELECT id FROM projects WHERE company_id = ? AND name = ?`,
+      [companyId, p.name]
+    );
     if (ex) {
-      update.run(p.description, p.url, ex.id);
+      await dbRun(
+        `UPDATE projects SET
+           description = COALESCE(?, description),
+           url = COALESCE(?, url)
+         WHERE id = ?`,
+        [p.description, p.url, ex.id]
+      );
     } else {
-      insert.run(randomUUID(), companyId, p.name, p.description, p.url);
+      await dbRun(
+        `INSERT INTO projects (id, company_id, name, description, url, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', NOW())`,
+        [randomUUID(), companyId, p.name, p.description, p.url]
+      );
     }
   }
 }
 
-export function importCompanyChunk(
-  db: DB,
+export async function importCompanyChunk(
   previewRows: CsvPreviewRow[],
   opts: { offset: number; total: number; chunkSize?: number } = { offset: 0, total: 0 }
-): CsvChunkResult {
+): Promise<CsvChunkResult> {
   const chunkSize = opts.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const slice = previewRows.slice(opts.offset, opts.offset + chunkSize);
   const errors: string[] = [];
@@ -253,33 +287,7 @@ export function importCompanyChunk(
   let updated = 0;
   let skipped = 0;
 
-  const insert = db.prepare(`
-    INSERT INTO companies (
-      id, name, domain, industry, location, city, country, website, linkedin_url,
-      notes, description, employee_count, founded_year, phone, annual_revenue, parent_company_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const update = db.prepare(`
-    UPDATE companies SET
-      domain = COALESCE(?, domain),
-      industry = COALESCE(?, industry),
-      location = COALESCE(?, location),
-      city = COALESCE(?, city),
-      country = COALESCE(?, country),
-      website = COALESCE(?, website),
-      linkedin_url = COALESCE(?, linkedin_url),
-      notes = COALESCE(?, notes),
-      description = COALESCE(?, description),
-      employee_count = COALESCE(?, employee_count),
-      founded_year = COALESCE(?, founded_year),
-      phone = COALESCE(?, phone),
-      annual_revenue = COALESCE(?, annual_revenue),
-      parent_company_id = COALESCE(?, parent_company_id)
-    WHERE id = ?
-  `);
-
-  db.transaction(() => {
+  await dbTransaction(async () => {
     for (const pr of slice) {
       const row = rowToImport(pr);
       if (!row) {
@@ -288,26 +296,50 @@ export function importCompanyChunk(
       }
       try {
         let parentId: string | null = null;
-        if (row.parent_company) parentId = ensureParent(db, row.parent_company);
+        if (row.parent_company) parentId = await ensureParent(row.parent_company);
 
-        const existing = findCompany(db, row.domain ?? row.name);
+        const existing = await findCompany(row.domain ?? row.name);
         if (existing) {
-          update.run(
-            row.domain, row.industry, row.location, row.city, row.country,
-            row.website, row.linkedin_url, row.notes, row.description,
-            row.employee_count, row.founded_year, row.phone, row.annual_revenue,
-            parentId, existing.id
+          await dbRun(
+            `UPDATE companies SET
+              domain = COALESCE(?, domain),
+              industry = COALESCE(?, industry),
+              location = COALESCE(?, location),
+              city = COALESCE(?, city),
+              country = COALESCE(?, country),
+              website = COALESCE(?, website),
+              linkedin_url = COALESCE(?, linkedin_url),
+              notes = COALESCE(?, notes),
+              description = COALESCE(?, description),
+              employee_count = COALESCE(?, employee_count),
+              founded_year = COALESCE(?, founded_year),
+              phone = COALESCE(?, phone),
+              annual_revenue = COALESCE(?, annual_revenue),
+              parent_company_id = COALESCE(?, parent_company_id)
+            WHERE id = ?`,
+            [
+              row.domain, row.industry, row.location, row.city, row.country,
+              row.website, row.linkedin_url, row.notes, row.description,
+              row.employee_count, row.founded_year, row.phone, row.annual_revenue,
+              parentId, existing.id
+            ]
           );
-          if (row.projects.length) upsertProjects(db, existing.id, row.projects);
+          if (row.projects.length) await upsertProjects(existing.id, row.projects);
           updated++;
         } else {
           const id = randomUUID();
-          insert.run(
-            id, row.name, row.domain, row.industry, row.location, row.city, row.country,
-            row.website, row.linkedin_url, row.notes, row.description,
-            row.employee_count, row.founded_year, row.phone, row.annual_revenue, parentId
+          await dbRun(
+            `INSERT INTO companies (
+              id, name, domain, industry, location, city, country, website, linkedin_url,
+              notes, description, employee_count, founded_year, phone, annual_revenue, parent_company_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id, row.name, row.domain, row.industry, row.location, row.city, row.country,
+              row.website, row.linkedin_url, row.notes, row.description,
+              row.employee_count, row.founded_year, row.phone, row.annual_revenue, parentId
+            ]
           );
-          if (row.projects.length) upsertProjects(db, id, row.projects);
+          if (row.projects.length) await upsertProjects(id, row.projects);
           imported++;
         }
       } catch (e) {
@@ -315,7 +347,7 @@ export function importCompanyChunk(
         skipped++;
       }
     }
-  })();
+  });
 
   const processed = opts.offset + slice.length;
   return {

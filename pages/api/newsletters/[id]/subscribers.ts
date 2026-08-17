@@ -1,24 +1,20 @@
-/**
- * API route for newsletter subscribers: GET (list) and POST (add/import)
- */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun, dbTransaction } from "@/lib/db";
 import { randomUUID } from "crypto";
 import { isSuppressed } from "@/lib/email/suppression";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { id } = req.query as { id: string };
 
-  const newsletter = db.prepare("SELECT id FROM newsletters WHERE id = ?").get(id);
+  const newsletter = await dbGet("SELECT id FROM newsletters WHERE id = ?", [id]);
   if (!newsletter) return res.status(404).json({ error: "Newsletter not found" });
 
   if (req.method === "GET") {
-    const subscribers = db.prepare(`
+    const subscribers = await dbAll(`
       SELECT * FROM newsletter_subscribers
       WHERE newsletter_id = ?
       ORDER BY subscribed_at DESC
-    `).all(id);
+    `, [id]);
     return res.json({ subscribers });
   }
 
@@ -32,54 +28,47 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
     if (list_id) {
       // Import targets with emails from specified DB list
-      const targets = db.prepare(`
+      const targets = await dbAll<{ email: string; full_name: string | null }>(`
         SELECT t.email, t.full_name
         FROM list_targets lt
         JOIN targets t ON t.id = lt.target_id
         WHERE lt.list_id = ? AND t.email IS NOT NULL AND t.email LIKE '%@%'
-      `).all(list_id) as Array<{ email: string; full_name: string | null }>;
+      `, [list_id]);
 
-      const insertStmt = db.prepare(`
-        INSERT OR IGNORE INTO newsletter_subscribers (id, newsletter_id, email, full_name)
-        VALUES (?, ?, ?, ?)
-      `);
-
-      // Never (re-)add someone who's unsubscribed/suppressed anywhere — that's the whole point
-      // of a global suppression list. They're excluded here rather than inserted-then-skipped-
-      // at-send-time so they don't even show up as a pending subscriber.
       let added = 0;
       let blocked = 0;
-      const transaction = db.transaction((items: Array<{ email: string; full_name: string | null }>) => {
-        for (const item of items) {
-          if (isSuppressed(item.email)) { blocked++; continue; }
-          const res = insertStmt.run(randomUUID(), id, item.email.trim().toLowerCase(), item.full_name?.trim() ?? null);
-          if (res.changes > 0) added++;
+      
+      await dbTransaction(async (conn: any) => {
+        for (const item of targets) {
+          if (await isSuppressed(item.email)) { blocked++; continue; }
+          const [result] = await conn.execute(`
+            INSERT IGNORE INTO newsletter_subscribers (id, newsletter_id, email, full_name)
+            VALUES (?, ?, ?, ?)
+          `, [randomUUID(), id, item.email.trim().toLowerCase(), item.full_name?.trim() ?? null]);
+          if (result.affectedRows > 0) added++;
         }
       });
-
-      transaction(targets);
+      
       return res.status(201).json({ added, blocked, total: targets.length });
     }
 
     if (Array.isArray(subscribers) && subscribers.length > 0) {
       // Bulk import
-      const insertStmt = db.prepare(`
-        INSERT OR IGNORE INTO newsletter_subscribers (id, newsletter_id, email, full_name)
-        VALUES (?, ?, ?, ?)
-      `);
-
       let added = 0;
       let blocked = 0;
-      const transaction = db.transaction((items: Array<{ email: string; full_name?: string }>) => {
-        for (const item of items) {
+      
+      await dbTransaction(async (conn: any) => {
+        for (const item of subscribers) {
           if (!item.email || !item.email.includes("@")) continue;
-          if (isSuppressed(item.email)) { blocked++; continue; }
-          const res = insertStmt.run(randomUUID(), id, item.email.trim().toLowerCase(), item.full_name?.trim() ?? null);
-          if (res.changes > 0) added++;
+          if (await isSuppressed(item.email)) { blocked++; continue; }
+          const [result] = await conn.execute(`
+            INSERT IGNORE INTO newsletter_subscribers (id, newsletter_id, email, full_name)
+            VALUES (?, ?, ?, ?)
+          `, [randomUUID(), id, item.email.trim().toLowerCase(), item.full_name?.trim() ?? null]);
+          if (result.affectedRows > 0) added++;
         }
       });
-
-      transaction(subscribers);
+      
       return res.status(201).json({ added, blocked, total: subscribers.length });
     }
 
@@ -87,21 +76,21 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ error: "Valid email is required" });
     }
 
-    if (isSuppressed(email)) {
+    if (await isSuppressed(email)) {
       return res.status(400).json({ error: "This email has unsubscribed/is suppressed and can't be re-added." });
     }
 
     const subId = randomUUID();
     try {
-      db.prepare(`
+      await dbRun(`
         INSERT INTO newsletter_subscribers (id, newsletter_id, email, full_name)
         VALUES (?, ?, ?, ?)
-      `).run(subId, id, email.trim().toLowerCase(), full_name?.trim() ?? null);
+      `, [subId, id, email.trim().toLowerCase(), full_name?.trim() ?? null]);
     } catch {
       return res.status(400).json({ error: "Subscriber email already exists for this newsletter" });
     }
 
-    const created = db.prepare("SELECT * FROM newsletter_subscribers WHERE id = ?").get(subId);
+    const created = await dbGet("SELECT * FROM newsletter_subscribers WHERE id = ?", [subId]);
     return res.status(201).json({ subscriber: created });
   }
 

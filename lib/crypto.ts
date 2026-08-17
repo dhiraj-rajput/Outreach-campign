@@ -1,25 +1,29 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "crypto";
 
-// Encrypts secrets at rest (LinkedIn session cookies, email passwords, API keys) so a
-// leaked/copied linki.db doesn't hand those out in plaintext. Key is derived from
-// NEXTAUTH_SECRET (already a required, real secret) via HKDF — no new env var needed.
+// Encrypts secrets at rest (LinkedIn session cookies, email passwords, API keys).
+// Uses ENCRYPTION_KEY env var (dedicated key, separate from NEXTAUTH_SECRET).
+// Falls back to NEXTAUTH_SECRET for backward compatibility with existing encrypted data.
 //
 // Format: "v1:<iv-base64>:<authTag-base64>:<ciphertext-base64>". decryptSecret() passes
-// any value NOT in this format straight through unchanged, so pre-migration plaintext
-// rows keep working — see lib/db.ts's encryptLegacySecretsMigration.
+// any value NOT starting with "v1:" straight through unchanged (legacy plaintext rows).
 
 const VERSION = "v1";
 const ALGORITHM = "aes-256-gcm";
 
 function deriveKey(): Buffer {
-  const secret = process.env.NEXTAUTH_SECRET;
-  if (!secret) throw new Error("NEXTAUTH_SECRET must be set to encrypt/decrypt stored secrets");
+  // Prefer dedicated ENCRYPTION_KEY — keeps encryption independent of auth rotation
+  const secret = process.env.ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    throw new Error(
+      "ENCRYPTION_KEY (or NEXTAUTH_SECRET as fallback) must be set to encrypt/decrypt stored secrets"
+    );
+  }
   return Buffer.from(hkdfSync("sha256", secret, "", "linki-secret-encryption", 32));
 }
 
 export function encryptSecret(plaintext: string): string {
   const key = deriveKey();
-  const iv = randomBytes(12);
+  const iv = randomBytes(12); // 96-bit IV for AES-GCM
   const cipher = createCipheriv(ALGORITHM, key, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
@@ -28,7 +32,7 @@ export function encryptSecret(plaintext: string): string {
 
 export function decryptSecret(value: string | null): string | null {
   if (value === null) return null;
-  if (!isEncrypted(value)) return value; // not-yet-migrated plaintext — pass through
+  if (!isEncrypted(value)) return value; // not-yet-encrypted plaintext — pass through
 
   const [, ivB64, authTagB64, dataB64] = value.split(":");
   const key = deriveKey();

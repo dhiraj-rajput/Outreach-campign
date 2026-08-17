@@ -1,14 +1,6 @@
-/**
- * GET  /api/pipeline/deals   → list all deals (kanban board data), grouped by nothing —
- *                              client groups by `stage`.
- * POST /api/pipeline/deals   → create a deal
- * Body (POST): { title, target_id?, company_id?, value?, currency?, notes? }
- *
- * Paid feature: gated by requirePaidAccess.
- */
 import type { NextApiRequest, NextApiResponse } from "next";
 import { randomUUID } from "crypto";
-import { getDb } from "@/lib/db";
+import { dbAll, dbRun, dbGet } from "@/lib/db";
 import { requirePaidAccess } from "@/lib/access";
 
 export type DealRow = {
@@ -32,18 +24,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const access = await requirePaidAccess(req, res);
   if (!access) return;
 
-  const db = getDb();
-
   if (req.method === "GET") {
-    const deals = db
-      .prepare(
+    const deals = await dbAll<DealRow>(
         `SELECT d.*, t.full_name as contact_name, c.name as company_name
          FROM pipeline_deals d
          LEFT JOIN targets t ON t.id = d.target_id
          LEFT JOIN companies c ON c.id = d.company_id
          ORDER BY d.stage, d.position ASC, d.created_at DESC`
-      )
-      .all() as DealRow[];
+      );
     return res.status(200).json({ deals });
   }
 
@@ -59,30 +47,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!title || !title.trim()) return res.status(400).json({ error: "title is required" });
 
     const id = randomUUID();
-    db.prepare(
+    await dbRun(
       `INSERT INTO pipeline_deals (id, title, target_id, company_id, value, currency, notes, owner_id, org_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      title.trim(),
-      target_id || null,
-      company_id || null,
-      typeof value === "number" ? value : 0,
-      currency || "USD",
-      notes || null,
-      access.userId,
-      access.orgId
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       [
+         id,
+         title.trim(),
+         target_id || null,
+         company_id || null,
+         typeof value === "number" ? value : 0,
+         currency || "USD",
+         notes || null,
+         access.userId,
+         access.orgId
+       ]
     );
 
-    const deal = db
-      .prepare(
+    const deal = await dbGet(
         `SELECT d.*, t.full_name as contact_name, c.name as company_name
          FROM pipeline_deals d
          LEFT JOIN targets t ON t.id = d.target_id
          LEFT JOIN companies c ON c.id = d.company_id
-         WHERE d.id = ?`
-      )
-      .get(id);
+         WHERE d.id = ?`, [id]
+      );
     return res.status(201).json({ deal });
   }
 

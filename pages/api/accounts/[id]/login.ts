@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { startHeadlessLogin, submitLoginChallenge, awaitLoginApproval } from "@/lib/linkedin/session";
 
 /**
@@ -14,11 +14,8 @@ import { startHeadlessLogin, submitLoginChallenge, awaitLoginApproval } from "@/
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const db = getDb();
   const id = req.query.id as string;
-  const account = db.prepare("SELECT * FROM accounts WHERE id = ?").get(id) as
-    | { email: string }
-    | undefined;
+  const account = await dbGet<{ email: string }>("SELECT * FROM accounts WHERE id = ?", [id]);
   if (!account) return res.status(404).json({ error: "Account not found" });
 
   const { step } = req.body as { step?: string };

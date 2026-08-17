@@ -8,7 +8,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const userId = session?.user?.id;
   if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
-  const access = getAccessContextForUser(userId);
+  const access = await getAccessContextForUser(userId);
   if (!access) return res.status(404).json({ error: "User not found" });
 
   return res.status(200).json(access);

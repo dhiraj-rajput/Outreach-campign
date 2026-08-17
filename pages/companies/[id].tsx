@@ -2,7 +2,7 @@ import Head from "next/head";
 import Link from "next/link";
 import { useState } from "react";
 import { GetServerSideProps } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiArrowLeftLine,
@@ -88,47 +88,33 @@ interface Company {
 }
 
 export const getServerSideProps: GetServerSideProps = async ({ params }) => {
-  const db = getDb();
   const id = params?.id as string;
-  const company = db
-    .prepare(
+  const company = await dbGet<Company>(
       `
     SELECT id, name, domain, industry, location, city, country, linkedin_url, website,
            description, employee_count, founded_year, annual_revenue, phone,
            technology_names, keywords, notes, email_domain_invalid, parent_company_id, created_at
     FROM companies WHERE id = ?
-  `
-    )
-    .get(id) as Company | undefined;
+  `, [id]);
   if (!company) return { notFound: true };
 
-  const contacts = db
-    .prepare(
+  const contacts = await dbAll<Contact>(
       `
     SELECT id, full_name, title, email, email_status, seniority, linkedin_url, degree, connected_at
-    FROM targets WHERE company_id = ? ORDER BY full_name COLLATE NOCASE
-  `
-    )
-    .all(id) as Contact[];
+    FROM targets WHERE company_id = ? ORDER BY full_name
+  `, [id]);
 
-  const projects = db
-    .prepare(
-      `SELECT id, name, description, url, status, created_at FROM projects WHERE company_id = ? ORDER BY name COLLATE NOCASE`
-    )
-    .all(id) as Project[];
+  const projects = await dbAll<Project>(
+      `SELECT id, name, description, url, status, created_at FROM projects WHERE company_id = ? ORDER BY name`, [id]
+  );
 
-  const children = db
-    .prepare(
-      `SELECT id, name, domain, industry FROM companies WHERE parent_company_id = ? ORDER BY name COLLATE NOCASE`
-    )
-    .all(id) as ChildCompany[];
+  const children = await dbAll<ChildCompany>(
+      `SELECT id, name, domain, industry FROM companies WHERE parent_company_id = ? ORDER BY name`, [id]
+  );
 
   let parent: ParentCompany | null = null;
   if (company.parent_company_id) {
-    parent =
-      (db
-        .prepare(`SELECT id, name, domain FROM companies WHERE id = ?`)
-        .get(company.parent_company_id) as ParentCompany | undefined) ?? null;
+    parent = await dbGet<ParentCompany>(`SELECT id, name, domain FROM companies WHERE id = ?`, [company.parent_company_id]) ?? null;
   }
 
   return {
@@ -137,16 +123,6 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
     },
   };
 };
-
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
-  if (!value) return null;
-  return (
-    <div>
-      <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-0.5">{label}</p>
-      <div className="text-sm text-base-content/80">{value}</div>
-    </div>
-  );
-}
 
 export default function CompanyDetailPage({ company: initial }: { company: Company }) {
   const [company, setCompany] = useState(initial);

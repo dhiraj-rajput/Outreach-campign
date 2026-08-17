@@ -1,11 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") return res.status(405).end();
 
   try {
-    const db = getDb();
     const workflowId = req.query.id as string;
     const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 90);
 
@@ -16,7 +15,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     // contacts have no deliverable email. `eligible` = enrolled AND has a non-bounced email.
     // `verified` = the strict subset with a verified email. `email_real_replies` excludes
     // auto-responders (OOO / substitute / call_task are automated) so the reply signal is honest.
-    const audience = db.prepare(`
+    const audience = await dbGet<{
+      enrolled: number; eligible: number; verified: number;
+      email_real_replies: number; email_auto_replies: number;
+    }>(`
       WITH enrolled AS (
         SELECT DISTINCT rp.target_id
         FROM run_profiles rp JOIN runs r ON r.id = rp.run_id
@@ -33,32 +35,35 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
           WHERE t.reply_kind IN ('human_reply','not_interested')) AS email_real_replies,
         (SELECT COUNT(DISTINCT t.id) FROM enrolled e JOIN targets t ON t.id = e.target_id
           WHERE t.reply_kind IN ('ooo_followup','substitute','call_task')) AS email_auto_replies
-    `).get(workflowId) as {
-      enrolled: number; eligible: number; verified: number;
-      email_real_replies: number; email_auto_replies: number;
-    };
+    `, [workflowId]);
+
+    if (!audience) return res.status(404).json({ error: "Workflow not found" });
 
     // Eligible contacts we've actually emailed at least once (Email sent log).
-    const contactedRow = db.prepare(`
+    const contactedRow = await dbGet<{ contacted: number }>(`
       SELECT COUNT(DISTINCT l.target_id) AS contacted
       FROM logs l JOIN targets t ON t.id = l.target_id
       WHERE l.run_id IN (${RUNS}) AND l.message LIKE 'Email sent%'
         AND t.email IS NOT NULL AND t.email != ''
         AND (t.email_status IS NULL OR t.email_status NOT IN ('invalid','unavailable'))
-    `).get(workflowId) as { contacted: number };
+    `, [workflowId]);
 
     const audienceOut = {
       enrolled: audience.enrolled,
       eligible: audience.eligible,        // has a deliverable email — the real addressable count
       verified: audience.verified,        // strict subset with a verified email
-      contacted: contactedRow.contacted,  // eligible contacts emailed at least once
+      contacted: contactedRow?.contacted ?? 0,  // eligible contacts emailed at least once
       replied: audience.email_real_replies,       // genuine human replies (auto-responders excluded)
       auto_replied: audience.email_auto_replies,  // OOO / substitute / call_task (informational)
-      remaining: Math.max(audience.eligible - contactedRow.contacted, 0), // eligible not yet emailed
+      remaining: Math.max(audience.eligible - (contactedRow?.contacted ?? 0), 0), // eligible not yet emailed
     };
 
     // ── Funnel ────────────────────────────────────────────────────────────────
-    const funnel = db.prepare(`
+    const funnel = await dbGet<{
+      total: number; connections_sent: number; connected: number;
+      messages_sent: number; inmails_sent: number; li_replies: number;
+      emails_sent: number; email_replies: number; completed: number;
+    }>(`
       SELECT
         (SELECT COUNT(DISTINCT rp.target_id)
           FROM run_profiles rp JOIN runs r ON r.id = rp.run_id
@@ -105,19 +110,15 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
               SELECT 1 FROM run_profile_tracks rt
               WHERE rt.run_profile_id = rp.id AND rt.state = 'completed'
             )) AS completed
-    `).get(
+    `, [
       workflowId, workflowId, workflowId, workflowId,
       workflowId, workflowId, workflowId, workflowId, workflowId,
-    ) as {
-      total: number; connections_sent: number; connected: number;
-      messages_sent: number; inmails_sent: number; li_replies: number;
-      emails_sent: number; email_replies: number; completed: number;
-    };
+    ]);
 
     // ── Daily activity ────────────────────────────────────────────────────────
-    const activity = db.prepare(`
+    const activity = await dbAll<{ day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }>(`
       SELECT
-        date(l.created_at) AS day,
+        DATE(l.created_at) AS day,
         COUNT(CASE WHEN l.message LIKE 'Visited%' THEN 1 END) AS visits,
         COUNT(CASE WHEN l.message LIKE 'Connection request sent%' THEN 1 END) AS connections,
         COUNT(CASE WHEN l.message LIKE 'Message sent%' THEN 1 END) AS messages,
@@ -125,10 +126,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         COUNT(CASE WHEN l.message LIKE 'Email sent%' THEN 1 END) AS emails
       FROM logs l
       WHERE l.run_id IN (${RUNS})
-        AND l.created_at >= datetime('now', '-${days} days')
-      GROUP BY date(l.created_at)
+        AND l.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+      GROUP BY DATE(l.created_at)
       ORDER BY day ASC
-    `).all(workflowId) as { day: string; visits: number; connections: number; messages: number; inmails: number; emails: number }[];
+    `, [workflowId, days]);
 
     const filled: typeof activity = [];
     for (let i = days - 1; i >= 0; i--) {
@@ -140,18 +141,18 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     }
 
     // ── AI cost — daily time-series scoped to this workflow's runs ────────────
-    const aiDaily = db.prepare(`
+    const aiDaily = await dbAll<{ day: string; cost_usd: number; input_tokens: number; output_tokens: number }>(`
       SELECT
-        date(a.created_at) AS day,
+        DATE(a.created_at) AS day,
         SUM(a.cost_usd) AS cost_usd,
         SUM(a.input_tokens) AS input_tokens,
         SUM(a.output_tokens) AS output_tokens
       FROM agent_sessions a
       WHERE a.run_id IN (${RUNS})
-        AND a.created_at >= datetime('now', '-${days} days')
-      GROUP BY date(a.created_at)
+        AND a.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+      GROUP BY DATE(a.created_at)
       ORDER BY day ASC
-    `).all(workflowId) as { day: string; cost_usd: number; input_tokens: number; output_tokens: number }[];
+    `, [workflowId, days]);
 
     const aiDailyFilled: typeof aiDaily = [];
     for (let i = days - 1; i >= 0; i--) {
@@ -163,7 +164,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     }
 
     // ── AI cost — breakdown per step (step_type + step_order from workflow_steps) ─
-    const aiByStep = db.prepare(`
+    const aiByStep = await dbAll<{
+      step_order: number; step_type: string; call_count: number;
+      input_tokens: number; output_tokens: number; cost_usd: number; models: string;
+    }>(`
       SELECT
         ws.step_order,
         ws.step_type,
@@ -177,10 +181,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       WHERE a.run_id IN (${RUNS})
       GROUP BY a.step_id
       ORDER BY ws.step_order
-    `).all(workflowId) as {
-      step_order: number; step_type: string; call_count: number;
-      input_tokens: number; output_tokens: number; cost_usd: number; models: string;
-    }[];
+    `, [workflowId]);
 
     res.json({ funnel, audience: audienceOut, activity: filled, aiDaily: aiDailyFilled, aiByStep });
   } catch (err) {

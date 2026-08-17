@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbTransaction } from "@/lib/db";
 
 // POST /api/lists/[id]/sync-status  body: { account_id: number }
 // Re-fetches the Sales Nav list and updates degree for non-connected targets.
@@ -9,21 +9,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end();
   }
 
-  const db = getDb();
   const listId = req.query.id as string;
 
-  const list = db.prepare("SELECT * FROM lists WHERE id = ?").get(listId) as
-    | { sales_nav_url?: string }
-    | undefined;
+  const list = await dbGet<{ sales_nav_url?: string }>("SELECT * FROM lists WHERE id = ?", [listId]);
   if (!list) return res.status(404).json({ error: "List not found" });
   if (!list.sales_nav_url) return res.status(400).json({ error: "No Sales Navigator URL saved for this list — run an import first" });
 
   const { account_id } = req.body as { account_id: string };
   if (!account_id) return res.status(400).json({ error: "account_id required" });
 
-  const account = db.prepare("SELECT * FROM accounts WHERE id = ?").get(account_id) as
-    | { cookies_json: string | null; is_authenticated: number }
-    | undefined;
+  const account = await dbGet<{ cookies_json: string | null; is_authenticated: number }>(
+    "SELECT * FROM accounts WHERE id = ?",
+    [account_id]
+  );
   if (!account?.is_authenticated) return res.status(400).json({ error: "Account not authenticated" });
 
   const { getSessionContext } = await import("@/lib/linkedin/session");
@@ -33,26 +31,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const ctx = await getSessionContext(account_id);
     const { profiles } = await scrapeNavigatorList(ctx, list.sales_nav_url, { maxPages: 300 });
 
-    const updateDegree = db.prepare("UPDATE targets SET degree = ? WHERE linkedin_url = ?");
-    const markConnected = db.prepare(
-      `UPDATE targets SET degree = ?, connected_at = CASE
-         WHEN (degree IS NULL OR degree != 1) AND connected_at IS NULL THEN datetime('now')
-         ELSE connected_at
-       END
-       WHERE linkedin_url = ?`
-    );
-
     let updated = 0;
-    db.transaction(() => {
+    await dbTransaction(async (conn) => {
       for (const p of profiles) {
         if (p.degree === 1) {
-          markConnected.run(p.degree, p.salesNavUrl);
+          await conn.execute(`
+            UPDATE targets SET degree = ?, connected_at = CASE
+              WHEN (degree IS NULL OR degree != 1) AND connected_at IS NULL THEN NOW()
+              ELSE connected_at
+            END
+            WHERE linkedin_url = ?
+          `, [p.degree, p.salesNavUrl]);
         } else {
-          updateDegree.run(p.degree, p.salesNavUrl);
+          await conn.execute("UPDATE targets SET degree = ? WHERE linkedin_url = ?", [p.degree, p.salesNavUrl]);
         }
         updated++;
       }
-    })();
+    });
 
     return res.json({ updated, total: profiles.length });
   } catch (err: unknown) {

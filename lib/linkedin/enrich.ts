@@ -10,7 +10,7 @@
  * after import — do not await in API routes.
  */
 import type { BrowserContext } from "playwright";
-import { getDb } from "@/lib/db";
+import { dbAll, dbRun } from "@/lib/db";
 
 interface EnrichedPosition {
   title: string;
@@ -45,7 +45,6 @@ export async function enrichProfile(
   ctx: BrowserContext,
   target: { id: string; sales_nav_url: string; full_name: string }
 ): Promise<boolean> {
-  const db = getDb();
   const page = await ctx.newPage();
 
   try {
@@ -94,22 +93,22 @@ export async function enrichProfile(
       .map((s) => s.name)
       .filter((n): n is string => !!n);
 
-    db.prepare(`
+    await dbRun(`
       UPDATE targets SET
         headline            = COALESCE(?, headline),
         summary             = COALESCE(?, summary),
         positions_json      = ?,
         skills_json         = CASE WHEN ? IS NOT NULL THEN ? ELSE skills_json END,
-        enriched_profile_at = datetime('now')
+        enriched_profile_at = NOW()
       WHERE id = ?
-    `).run(
+    `, [
       intercepted.headline ?? null,
       intercepted.summary ?? null,
       positions.length > 0 ? JSON.stringify(positions) : null,
       skills.length > 0 ? "1" : null,
       skills.length > 0 ? JSON.stringify(skills) : null,
       target.id
-    );
+    ]);
 
     console.log(`[enrich] ${target.full_name} — ${positions.length} positions, ${skills.length} skills, headline: ${!!intercepted.headline}`);
     return true;
@@ -127,10 +126,8 @@ export async function enrichList(
   delayMs = 2000,
   onProgress?: (count: number, total: number) => void
 ): Promise<{ enriched: number; failed: number }> {
-  const db = getDb();
-
   // Only targets with a sales_nav_url that haven't been enriched yet
-  const targets = db.prepare(`
+  const targets = await dbAll<{ id: string; sales_nav_url: string; full_name: string }>(`
     SELECT t.id, t.sales_nav_url, t.full_name
     FROM targets t
     JOIN list_targets lt ON lt.target_id = t.id
@@ -138,7 +135,7 @@ export async function enrichList(
       AND t.sales_nav_url IS NOT NULL
       AND t.enriched_profile_at IS NULL
     ORDER BY t.created_at ASC
-  `).all(listId) as Array<{ id: string; sales_nav_url: string; full_name: string }>;
+  `, [listId]);
 
   const total = targets.length;
   console.log(`[enrich] Starting enrichment for ${total} profiles in list ${listId}`);

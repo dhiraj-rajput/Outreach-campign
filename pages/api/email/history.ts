@@ -3,7 +3,7 @@
  * PLACE AT: pages/api/email/history.ts
  */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet } from "@/lib/db";
 import { listSuppressions } from "@/lib/email/suppression";
 
 function fillDays(
@@ -27,13 +27,12 @@ function fillDays(
   return filled;
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") return res.status(405).end();
   try {
-    const db = getDb();
     const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 90);
 
-    const totals = db.prepare(`
+    const totals = (await dbGet(`
       SELECT
         (SELECT COUNT(*) FROM logs WHERE message LIKE 'Email sent%') AS campaign_emails_sent,
         (SELECT COUNT(*) FROM targets WHERE email_opened_at IS NOT NULL) AS campaign_opens,
@@ -43,7 +42,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         (SELECT COUNT(*) FROM newsletter_sends WHERE opened_at IS NOT NULL) AS newsletter_opens,
         (SELECT COUNT(*) FROM newsletter_sends WHERE clicked_at IS NOT NULL) AS newsletter_clicks,
         (SELECT COUNT(*) FROM suppressions) AS unsubscribed_count
-    `).get() as Record<string, number>;
+    `)) as Record<string, number>;
 
     const rates = {
       campaign_open_rate: totals.campaign_emails_sent > 0 ? Math.round((totals.campaign_opens / totals.campaign_emails_sent) * 1000) / 10 : 0,
@@ -55,9 +54,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         ? Math.round(((totals.campaign_opens + totals.newsletter_opens) / (totals.campaign_emails_sent + totals.newsletter_emails_sent)) * 1000) / 10 : 0,
     };
 
-    const campaigns = db.prepare(`
+    const campaigns = await dbAll(`
       SELECT w.id AS workflow_id, w.name AS workflow_name, COUNT(DISTINCT r.id) AS run_count,
-        COUNT(DISTINCT CASE WHEN l.message LIKE 'Email sent%' THEN l.target_id || '|' || l.created_at END) AS emails_sent,
+        COUNT(DISTINCT CASE WHEN l.message LIKE 'Email sent%' THEN CONCAT(l.target_id, '|', l.created_at) END) AS emails_sent,
         COUNT(DISTINCT CASE WHEN l.message LIKE 'Email sent%' AND t.email_opened_at IS NOT NULL THEN l.target_id END) AS opened,
         COUNT(DISTINCT CASE WHEN l.message LIKE 'Email sent%' AND t.email_clicked_at IS NOT NULL THEN l.target_id END) AS clicked,
         COUNT(DISTINCT CASE WHEN l.message LIKE 'Email sent%' AND t.email_replied_at IS NOT NULL THEN l.target_id END) AS replied,
@@ -69,9 +68,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       WHERE w.id IN (SELECT DISTINCT workflow_id FROM workflow_steps WHERE track = 'email')
       GROUP BY w.id HAVING emails_sent > 0
       ORDER BY last_activity_at DESC LIMIT 25
-    `).all();
+    `);
 
-    const newsletterEditions = db.prepare(`
+    const newsletterEditions = await dbAll(`
       SELECT ne.id, ne.title, ne.subject, ne.status, ne.sent_at, ne.created_at, n.name AS newsletter_name,
         COUNT(ns.id) AS total_recipients,
         COUNT(CASE WHEN ns.status = 'sent' THEN 1 END) AS sent_count,
@@ -83,46 +82,46 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       LEFT JOIN newsletter_sends ns ON ns.edition_id = ne.id
       WHERE ne.status IN ('sent', 'sending')
       GROUP BY ne.id ORDER BY ne.sent_at DESC LIMIT 25
-    `).all();
+    `);
 
-    const campaignDaily = db.prepare(`
-      SELECT date(created_at) AS day, COUNT(*) AS campaign_sent FROM logs
-      WHERE message LIKE 'Email sent%' AND created_at >= datetime('now', '-${days} days')
-      GROUP BY date(created_at)
-    `).all() as { day: string; campaign_sent: number }[];
+    const campaignDaily = (await dbAll(`
+      SELECT DATE(created_at) AS day, COUNT(*) AS campaign_sent FROM logs
+      WHERE message LIKE 'Email sent%' AND created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+      GROUP BY DATE(created_at)
+    `)) as { day: string; campaign_sent: number }[];
 
-    const opensDaily = db.prepare(`
-      SELECT date(email_opened_at) AS day, COUNT(*) AS campaign_opens FROM targets
-      WHERE email_opened_at IS NOT NULL AND email_opened_at >= datetime('now', '-${days} days')
-      GROUP BY date(email_opened_at)
-    `).all() as { day: string; campaign_opens: number }[];
+    const opensDaily = (await dbAll(`
+      SELECT DATE(email_opened_at) AS day, COUNT(*) AS campaign_opens FROM targets
+      WHERE email_opened_at IS NOT NULL AND email_opened_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+      GROUP BY DATE(email_opened_at)
+    `)) as { day: string; campaign_opens: number }[];
 
-    const clicksDaily = db.prepare(`
-      SELECT date(email_clicked_at) AS day, COUNT(*) AS campaign_clicks FROM targets
-      WHERE email_clicked_at IS NOT NULL AND email_clicked_at >= datetime('now', '-${days} days')
-      GROUP BY date(email_clicked_at)
-    `).all() as { day: string; campaign_clicks: number }[];
+    const clicksDaily = (await dbAll(`
+      SELECT DATE(email_clicked_at) AS day, COUNT(*) AS campaign_clicks FROM targets
+      WHERE email_clicked_at IS NOT NULL AND email_clicked_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+      GROUP BY DATE(email_clicked_at)
+    `)) as { day: string; campaign_clicks: number }[];
 
-    const repliesDaily = db.prepare(`
-      SELECT date(email_replied_at) AS day, COUNT(*) AS campaign_replies FROM targets
-      WHERE email_replied_at IS NOT NULL AND email_replied_at >= datetime('now', '-${days} days')
-      GROUP BY date(email_replied_at)
-    `).all() as { day: string; campaign_replies: number }[];
+    const repliesDaily = (await dbAll(`
+      SELECT DATE(email_replied_at) AS day, COUNT(*) AS campaign_replies FROM targets
+      WHERE email_replied_at IS NOT NULL AND email_replied_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+      GROUP BY DATE(email_replied_at)
+    `)) as { day: string; campaign_replies: number }[];
 
-    const nlSentDaily = db.prepare(`
-      SELECT date(sent_at) AS day, COUNT(*) AS newsletter_sent FROM newsletter_sends
-      WHERE status = 'sent' AND sent_at >= datetime('now', '-${days} days') GROUP BY date(sent_at)
-    `).all() as { day: string; newsletter_sent: number }[];
+    const nlSentDaily = (await dbAll(`
+      SELECT DATE(sent_at) AS day, COUNT(*) AS newsletter_sent FROM newsletter_sends
+      WHERE status = 'sent' AND sent_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY) GROUP BY DATE(sent_at)
+    `)) as { day: string; newsletter_sent: number }[];
 
-    const nlOpensDaily = db.prepare(`
-      SELECT date(opened_at) AS day, COUNT(*) AS newsletter_opens FROM newsletter_sends
-      WHERE opened_at IS NOT NULL AND opened_at >= datetime('now', '-${days} days') GROUP BY date(opened_at)
-    `).all() as { day: string; newsletter_opens: number }[];
+    const nlOpensDaily = (await dbAll(`
+      SELECT DATE(opened_at) AS day, COUNT(*) AS newsletter_opens FROM newsletter_sends
+      WHERE opened_at IS NOT NULL AND opened_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY) GROUP BY DATE(opened_at)
+    `)) as { day: string; newsletter_opens: number }[];
 
-    const nlClicksDaily = db.prepare(`
-      SELECT date(clicked_at) AS day, COUNT(*) AS newsletter_clicks FROM newsletter_sends
-      WHERE clicked_at IS NOT NULL AND clicked_at >= datetime('now', '-${days} days') GROUP BY date(clicked_at)
-    `).all() as { day: string; newsletter_clicks: number }[];
+    const nlClicksDaily = (await dbAll(`
+      SELECT DATE(clicked_at) AS day, COUNT(*) AS newsletter_clicks FROM newsletter_sends
+      WHERE clicked_at IS NOT NULL AND clicked_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY) GROUP BY DATE(clicked_at)
+    `)) as { day: string; newsletter_clicks: number }[];
 
     const map = (arr: { day: string; [k: string]: unknown }[], key: string) =>
       Object.fromEntries(arr.map((r) => [r.day, r[key] as number]));
@@ -165,7 +164,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       };
     });
 
-    const campaignActivity = db.prepare(`
+    const campaignActivity = await dbAll(`
       SELECT l.id, l.message, l.created_at, t.id AS target_id, t.full_name, t.company,
              w.name AS workflow_name, 'campaign' AS source
       FROM logs l
@@ -173,9 +172,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       LEFT JOIN runs r ON r.id = l.run_id
       LEFT JOIN workflows w ON w.id = r.workflow_id
       WHERE l.message LIKE 'Email sent%' ORDER BY l.created_at DESC LIMIT 30
-    `).all();
+    `);
 
-    const newsletterActivity = db.prepare(`
+    const newsletterActivity = await dbAll(`
       SELECT ns.id, ns.sent_at AS created_at, ns.status, sub.email, sub.full_name,
              ne.title AS edition_title, n.name AS newsletter_name, 'newsletter' AS source
       FROM newsletter_sends ns
@@ -183,12 +182,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       JOIN newsletter_editions ne ON ne.id = ns.edition_id
       JOIN newsletters n ON n.id = ne.newsletter_id
       ORDER BY ns.sent_at DESC LIMIT 30
-    `).all();
+    `);
 
-    const byHour = db.prepare(`
-      SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour, COUNT(*) AS count FROM logs
+    const byHour = (await dbAll(`
+      SELECT CAST(DATE_FORMAT(created_at, '%H') AS UNSIGNED) AS hour, COUNT(*) AS count FROM logs
       WHERE message LIKE 'Email sent%' GROUP BY hour ORDER BY hour
-    `).all() as { hour: number; count: number }[];
+    `)) as { hour: number; count: number }[];
 
     const hourSeries = Array.from({ length: 24 }, (_, h) => ({
       hour: h, label: `${String(h).padStart(2, "0")}:00`,
@@ -197,13 +196,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
     let replyKinds: { kind: string; count: number }[] = [];
     try {
-      replyKinds = db.prepare(`
-        SELECT COALESCE(json_extract(classification_json, '$.kind'), reply_kind, 'unknown') AS kind, COUNT(*) AS count
+      replyKinds = (await dbAll(`
+        SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(classification_json, '$.kind')), reply_kind, 'unknown') AS kind, COUNT(*) AS count
         FROM email_replies GROUP BY kind ORDER BY count DESC
-      `).all() as { kind: string; count: number }[];
+      `)) as { kind: string; count: number }[];
     } catch { replyKinds = []; }
 
-    const pipeline = db.prepare(`
+    const pipeline = (await dbGet(`
       SELECT
         SUM(CASE WHEN email IS NOT NULL AND email != '' THEN 1 ELSE 0 END) AS with_email,
         SUM(CASE WHEN email_opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened,
@@ -211,12 +210,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         SUM(CASE WHEN email_replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied,
         (SELECT COUNT(*) FROM suppressions) AS suppressed
       FROM targets
-    `).get() as Record<string, number>;
+    `)) as Record<string, number>;
 
     return res.json({
       totals, rates, funnel, campaigns, campaignBars, newsletterEditions,
       daily, hourSeries, campaignActivity, newsletterActivity,
-      unsubscribed: listSuppressions(), days,
+      unsubscribed: await listSuppressions(), days,
       replyKinds, pipeline,
     });
   } catch (err) {

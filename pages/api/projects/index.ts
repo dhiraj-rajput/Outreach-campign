@@ -1,23 +1,18 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
-
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
     const companyId = req.query.company_id as string | undefined;
     if (companyId) {
-      const projects = db
-        .prepare(
-          `SELECT * FROM projects WHERE company_id = ? ORDER BY name COLLATE NOCASE`
-        )
-        .all(companyId);
+      const projects = await dbAll(
+          `SELECT * FROM projects WHERE company_id = ? ORDER BY name`,
+          [companyId]
+        );
       return res.json({ projects });
     }
-    const projects = db
-      .prepare(`SELECT * FROM projects ORDER BY created_at DESC LIMIT 200`)
-      .all();
+    const projects = await dbAll(`SELECT * FROM projects ORDER BY created_at DESC LIMIT 200`);
     return res.json({ projects });
   }
 
@@ -26,23 +21,24 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (!company_id || !name) {
       return res.status(400).json({ error: "company_id and name required" });
     }
-    const company = db.prepare("SELECT id FROM companies WHERE id = ?").get(company_id);
+    const company = await dbGet("SELECT id FROM companies WHERE id = ?", [company_id]);
     if (!company) return res.status(404).json({ error: "company not found" });
 
     const id = randomUUID();
-    db.prepare(
+    await dbRun(
       `INSERT INTO projects (id, company_id, name, description, url, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).run(
-      id,
-      company_id,
-      name,
-      description ?? null,
-      url ?? null,
-      status ?? "active"
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+       [
+         id,
+         company_id,
+         name,
+         description ?? null,
+         url ?? null,
+         status ?? "active"
+       ]
     );
 
-    return res.status(201).json(db.prepare("SELECT * FROM projects WHERE id = ?").get(id));
+    return res.status(201).json(await dbGet("SELECT * FROM projects WHERE id = ?", [id]));
   }
 
   res.setHeader("Allow", ["GET", "POST"]);

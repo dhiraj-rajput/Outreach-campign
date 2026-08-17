@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { runAICompletion } from "@/lib/ai/client";
 import { requirePaidAccess } from "@/lib/access";
 
@@ -29,20 +29,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     campaign_prompt,
   } = req.body;
 
-  const db = getDb();
-
   // Resolve sample target: explicit target_id OR first member of list_id
   let targetId = target_id as string | undefined;
   if (!targetId && list_id) {
     // list_targets is (list_id, target_id) only — no created_at column
-    const row = db
-      .prepare(
+    const row = await dbGet<{ id: string }>(
         `SELECT t.id FROM targets t
          JOIN list_targets lt ON lt.target_id = t.id
          WHERE lt.list_id = ?
-         LIMIT 1`
-      )
-      .get(list_id) as { id: string } | undefined;
+         LIMIT 1`, [list_id]
+      );
     targetId = row?.id;
   }
 
@@ -52,20 +48,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 
-  const target = db
-    .prepare("SELECT * FROM targets WHERE id = ?")
-    .get(targetId) as Record<string, unknown> | undefined;
+  const target = await dbGet<Record<string, unknown>>("SELECT * FROM targets WHERE id = ?", [targetId]);
 
   if (!target) {
     return res.status(404).json({ error: "Sample contact not found" });
   }
 
   // Join company row when available for richer context
-  let companyRow: Record<string, unknown> | undefined;
+  let companyRow: Record<string, unknown> | undefined = undefined;
   if (target.company_id) {
-    companyRow = db
-      .prepare("SELECT * FROM companies WHERE id = ?")
-      .get(target.company_id as string) as Record<string, unknown> | undefined;
+    const c = await dbGet<Record<string, unknown>>("SELECT * FROM companies WHERE id = ?", [target.company_id as string]);
+    if (c) companyRow = c;
   }
 
   const leadName =
@@ -91,17 +84,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     "";
 
   // Sender identity — never invent "[Your Company]"
-  const agent = db
-    .prepare("SELECT * FROM agent_config WHERE id = 1")
-    .get() as Record<string, unknown> | undefined;
+  const agent = await dbGet<Record<string, unknown>>("SELECT * FROM agent_config WHERE id = 1");
   // No settings table in this schema — use the first configured email account.
-  const emailAcct = db
-    .prepare(
+  const emailAcct = await dbGet<{ from_name: string | null; from_email: string; signature: string | null }>(
       "SELECT from_name, from_email, signature FROM email_accounts LIMIT 1"
-    )
-    .get() as
-    | { from_name: string | null; from_email: string; signature: string | null }
-    | undefined;
+    );
 
   const senderName =
     (emailAcct?.from_name as string)?.trim() ||

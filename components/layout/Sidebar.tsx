@@ -33,7 +33,7 @@ const premiumNav = [
 
 const pipelineNav = { href: "/pipeline", label: "Pipeline", icon: RiKanbanView, tour: "nav-pipeline" };
 const pricingNav = { href: "/pricing", label: "Pricing", icon: RiVipCrownLine, tour: "nav-pricing" };
-const adminNav = { href: "/admin", label: "Admin", icon: RiShieldStarLine };
+const orgNav = { href: "/organization", label: "Organization", icon: RiBuildingLine, tour: "nav-organization" };
 
 type Props = {
   mobileOpen?: boolean;
@@ -47,6 +47,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const [hasPremium, setHasPremium] = useState(true);
   const [isPaid, setIsPaid] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasOrgAccess, setHasOrgAccess] = useState(false);
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgRole, setOrgRole] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/premium-status")
@@ -61,6 +64,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
         if (d) {
           setIsPaid(!!d.isPaid);
           setIsSuperAdmin(!!d.isSuperAdmin);
+          setHasOrgAccess(Boolean(d.hasOrgAccess));
+          setOrgId(d.orgId ?? null);
+          setOrgRole(d.orgRole ?? null);
         }
       })
       .catch(() => {});
@@ -68,6 +74,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
 
   function isActive(href: string) {
     if (href === "/") return router.pathname === "/";
+    if (href === "/organization") return router.pathname.startsWith("/organization");
     if (href === "/settings") return ["/settings", "/accounts"].some((p) => router.pathname.startsWith(p));
     if (href === "/email") return router.pathname === "/email";
     return router.pathname.startsWith(href);
@@ -195,11 +202,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             {renderNavLink(pricingNav, labels, false, isPaid ? "Paid" : "Free")}
           </div>
 
-          {isSuperAdmin && (
+          {hasOrgAccess && Boolean(orgId) && (isSuperAdmin || orgRole === "owner" || orgRole === "admin") && (
             <>
-              {labels && <div className="nav-group-label">Admin</div>}
+              {labels && <div className="nav-group-label">Workspace</div>}
               <div className="flex flex-col gap-0.5 px-1.5 mt-1">
-                {renderNavLink(adminNav, labels)}
+                {renderNavLink(orgNav, labels, false, orgRole ? (orgRole === "owner" ? "Owner" : "Admin") : undefined)}
               </div>
             </>
           )}

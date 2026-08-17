@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Imap from "imap";
 import { simpleParser } from "mailparser";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 
 export interface EmailMessage {
@@ -24,18 +24,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { targetId, emailAccountId } = req.query as { targetId?: string; emailAccountId?: string };
   if (!targetId || !emailAccountId) return res.status(400).json({ error: "targetId and emailAccountId required" });
 
-  const db = getDb();
-
-  const target = db.prepare("SELECT email FROM targets WHERE id = ?").get(targetId) as { email: string | null } | undefined;
+  const target = await dbGet<{ email: string | null }>("SELECT email FROM targets WHERE id = ?", [targetId]);
   if (!target?.email) return res.status(404).json({ error: "Target has no email" });
 
-  const account = db.prepare(
-    "SELECT imap_host, imap_port, username, password, imap_username, imap_password FROM email_accounts WHERE id = ?"
-  ).get(emailAccountId) as {
+  const account = await dbGet<{
     imap_host: string | null; imap_port: number | null;
     username: string; password: string;
     imap_username: string | null; imap_password: string | null;
-  } | undefined;
+  }>(
+    "SELECT imap_host, imap_port, username, password, imap_username, imap_password FROM email_accounts WHERE id = ?",
+    [emailAccountId]
+  );
 
   if (!account?.imap_host) return res.status(404).json({ error: "Email account not found or missing IMAP config" });
 

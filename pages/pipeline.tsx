@@ -47,7 +47,7 @@ export default function PipelinePage() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, [isPaid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [isPaid]);
 
   const byStage = useMemo(() => {
     const map: Record<string, Deal[]> = {};

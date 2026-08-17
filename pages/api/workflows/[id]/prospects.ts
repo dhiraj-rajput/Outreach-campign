@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import type { ActiveFilter, FilterOp } from "@/components/ui/FilterBar";
 
 function parseFilters(query: NextApiRequest["query"]): ActiveFilter[] {
@@ -69,14 +69,13 @@ function buildFilterClause(filters: ActiveFilter[]): { sql: string; params: unkn
   return { sql: parts.length > 0 ? " AND " + parts.join(" AND ") : "", params };
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).end();
   }
 
   try {
-    const db = getDb();
     const workflowId = req.query.id as string;
     const stepFilter = req.query.step !== undefined ? Number(req.query.step) : null;
     const trackFilter = (req.query.track as string | undefined) ?? "linkedin";
@@ -140,19 +139,21 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
     const where = conditions.join(" AND ");
 
-    const total = (db.prepare(
+    const totalRow = await dbGet<{ c: number }>(
       `SELECT COUNT(*) as c
        FROM run_profiles rp
        JOIN runs r ON r.id = rp.run_id
        JOIN targets t ON t.id = rp.target_id
        LEFT JOIN run_profile_tracks rt_li ON rt_li.run_profile_id = rp.id AND rt_li.track = 'linkedin'
        LEFT JOIN run_profile_tracks rt_em ON rt_em.run_profile_id = rp.id AND rt_em.track = 'email'
-       WHERE ${where}`
-    ).get(...params) as { c: number }).c;
+       WHERE ${where}`,
+       params
+    );
+    const total = totalRow?.c || 0;
 
     params.push(limit, offset);
 
-    const prospects = db.prepare(
+    const prospects = await dbAll(
       `SELECT rp.id, rp.run_id, rp.target_id,
               CASE
                 WHEN EXISTS (SELECT 1 FROM run_profile_tracks rt_a WHERE rt_a.run_profile_id = rp.id AND rt_a.state = 'in_progress') THEN 'in_progress'
@@ -193,8 +194,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
            ELSE 4
          END,
          t.full_name
-       LIMIT ? OFFSET ?`
-    ).all(...params);
+       LIMIT ? OFFSET ?`,
+       params
+    );
 
     return res.json({ prospects, total });
   } catch (err) {

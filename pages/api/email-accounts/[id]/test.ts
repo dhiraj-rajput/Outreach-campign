@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { testSmtpConnection, testImapConnection } from "@/lib/email/sender";
 import { decryptSecret } from "@/lib/crypto";
 
@@ -23,12 +23,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end();
   }
 
-  const db = getDb();
   const id = req.query.id as string;
 
-  const row = db
-    .prepare("SELECT * FROM email_accounts WHERE id = ?")
-    .get(id) as AccountRow | undefined;
+  const row = await dbGet<AccountRow>(
+    "SELECT * FROM email_accounts WHERE id = ?",
+    [id]
+  );
 
   if (!row) return res.status(404).json({ error: "not found" });
 
@@ -55,7 +55,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const ok = !smtpError && !imapError;
 
   if (ok) {
-    db.prepare("UPDATE email_accounts SET is_verified = 1 WHERE id = ?").run(id);
+    await dbRun("UPDATE email_accounts SET is_verified = 1 WHERE id = ?", [id]);
   }
 
   return res.status(ok ? 200 : 400).json({

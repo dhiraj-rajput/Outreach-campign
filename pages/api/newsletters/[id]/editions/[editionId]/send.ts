@@ -1,11 +1,5 @@
-/**
- * POST /api/newsletters/[id]/editions/[editionId]/send
- *
- * Dispatches a newsletter issue edition to all active subscribers of the newsletter.
- * Uses the connected email account (from_email) specified on the newsletter.
- */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { sendEmail } from "@/lib/email/sender";
 import { decryptSecret } from "@/lib/crypto";
 import { unsubscribeUrl, isSuppressed } from "@/lib/email/suppression";
@@ -17,32 +11,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const { id: newsletterId, editionId } = req.query as { id: string; editionId: string };
-  const db = getDb();
 
   // 1. Fetch Newsletter & Edition
-  const newsletter = db.prepare("SELECT * FROM newsletters WHERE id = ?").get(newsletterId) as {
+  const newsletter = await dbGet<{
     id: string;
     name: string;
     sender_name: string | null;
     sender_email: string;
-  } | undefined;
+  }>("SELECT * FROM newsletters WHERE id = ?", [newsletterId]);
 
   if (!newsletter) return res.status(404).json({ error: "Newsletter not found" });
 
-  const edition = db.prepare("SELECT * FROM newsletter_editions WHERE id = ? AND newsletter_id = ?").get(editionId, newsletterId) as {
+  const edition = await dbGet<{
     id: string;
     title: string;
     subject: string;
     content_html: string;
     status: string;
-  } | undefined;
+  }>("SELECT * FROM newsletter_editions WHERE id = ? AND newsletter_id = ?", [editionId, newsletterId]);
 
   if (!edition) return res.status(404).json({ error: "Edition issue not found" });
 
   // 2. Fetch connected email account settings for sender_email
-  const emailAccount = db.prepare(`
-    SELECT * FROM email_accounts WHERE from_email = ? LIMIT 1
-  `).get(newsletter.sender_email) as {
+  const emailAccount = await dbGet<{
     id: string;
     from_email: string;
     from_name: string | null;
@@ -51,7 +42,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     smtp_secure: number;
     username: string;
     password: string;
-  } | undefined;
+  }>(`
+    SELECT * FROM email_accounts WHERE from_email = ? LIMIT 1
+  `, [newsletter.sender_email]);
 
   if (!emailAccount) {
     return res.status(400).json({
@@ -64,18 +57,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // never be emailed again" across every channel, so double-check it here too (belt-and-braces,
   // same pattern the cold-email/LinkedIn runner uses). Anyone found suppressed gets their local
   // status synced to 'unsubscribed' and is skipped rather than sent to.
-  const candidateSubscribers = db.prepare(`
+  const candidateSubscribers = await dbAll<{ id: string; email: string; full_name: string | null }>(`
     SELECT * FROM newsletter_subscribers
     WHERE newsletter_id = ? AND status = 'subscribed'
-  `).all(newsletterId) as Array<{ id: string; email: string; full_name: string | null }>;
+  `, [newsletterId]);
 
   const subscribers: typeof candidateSubscribers = [];
   let suppressedCount = 0;
   for (const sub of candidateSubscribers) {
-    if (isSuppressed(sub.email)) {
-      db.prepare(
-        "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE id = ?"
-      ).run(sub.id);
+    if (await isSuppressed(sub.email)) {
+      await dbRun(
+        "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, NOW()) WHERE id = ?",
+        [sub.id]
+      );
       suppressedCount++;
       continue;
     }
@@ -91,7 +85,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   // Update edition status to sending
-  db.prepare("UPDATE newsletter_editions SET status = 'sending' WHERE id = ?").run(editionId);
+  await dbRun("UPDATE newsletter_editions SET status = 'sending' WHERE id = ?", [editionId]);
 
   const password = decryptSecret(emailAccount.password) ?? emailAccount.password;
   let sentCount = 0;
@@ -129,25 +123,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       );
 
       // Record send log
-      db.prepare(`
-        INSERT OR REPLACE INTO newsletter_sends (id, edition_id, subscriber_id, status, sent_at)
-        VALUES (?, ?, ?, 'sent', datetime('now'))
-      `).run(`${editionId}_${sub.id}`, editionId, sub.id);
+      await dbRun(`
+        REPLACE INTO newsletter_sends (id, edition_id, subscriber_id, status, sent_at)
+        VALUES (?, ?, ?, 'sent', NOW())
+      `, [`${editionId}_${sub.id}`, editionId, sub.id]);
 
       sentCount++;
     } catch (err) {
       console.error(`[newsletter send] Failed to send to ${sub.email}:`, err);
-      db.prepare(`
-        INSERT OR REPLACE INTO newsletter_sends (id, edition_id, subscriber_id, status)
+      await dbRun(`
+        REPLACE INTO newsletter_sends (id, edition_id, subscriber_id, status)
         VALUES (?, ?, ?, 'failed')
-      `).run(`${editionId}_${sub.id}`, editionId, sub.id);
+      `, [`${editionId}_${sub.id}`, editionId, sub.id]);
 
       failedCount++;
     }
   }
 
   // Mark edition as sent
-  db.prepare("UPDATE newsletter_editions SET status = 'sent', sent_at = datetime('now') WHERE id = ?").run(editionId);
+  await dbRun("UPDATE newsletter_editions SET status = 'sent', sent_at = NOW() WHERE id = ?", [editionId]);
 
   return res.json({
     message: "Newsletter edition dispatched successfully",

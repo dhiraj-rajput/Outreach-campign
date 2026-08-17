@@ -1,17 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbRun } from "@/lib/db";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
-
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
-    const rows = db.prepare("SELECT key, api_key, model, updated_at FROM integrations").all() as {
+    const rows = await dbAll<{
       key: string;
       api_key: string | null;
       model: string | null;
       updated_at: string;
-    }[];
+    }>("SELECT `key`, api_key, model, updated_at FROM integrations");
     const masked = rows.map((r) => {
       const plain = decryptSecret(r.api_key);
       return {
@@ -29,21 +27,21 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const { key, api_key, model } = req.body;
     if (!key) return res.status(400).json({ error: "key required" });
     if (!api_key) return res.status(400).json({ error: "api_key required" });
-    db.prepare(`
-      INSERT INTO integrations (key, api_key, model, updated_at)
-      VALUES (?, ?, ?, datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET
-        api_key = excluded.api_key,
-        model = COALESCE(excluded.model, integrations.model),
-        updated_at = excluded.updated_at
-    `).run(key, encryptSecret(api_key), model ?? null);
+    await dbRun(`
+      INSERT INTO integrations (\`key\`, api_key, model, updated_at)
+      VALUES (?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        api_key = VALUES(api_key),
+        model = COALESCE(VALUES(model), integrations.model),
+        updated_at = VALUES(updated_at)
+    `, [key, encryptSecret(api_key), model ?? null]);
     return res.json({ ok: true });
   }
 
   if (req.method === "DELETE") {
     const { key } = req.query;
     if (!key) return res.status(400).json({ error: "key required" });
-    db.prepare("DELETE FROM integrations WHERE key = ?").run(key);
+    await dbRun("DELETE FROM integrations WHERE \`key\` = ?", [key]);
     return res.json({ ok: true });
   }
 

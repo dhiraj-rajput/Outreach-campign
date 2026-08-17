@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, createHmac } from "crypto";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { scoreEmailOpened, scoreLinkClicked } from "@/lib/scoring/lead-score";
 
 // Ported from PPT-Agent's backend/app/routes/tracking.py (open pixel / click redirect) and
@@ -32,13 +32,13 @@ export function hashIp(ip: string): string {
  * Register a fresh open-tracking pixel for this send and return the <img> tag to embed.
  * Call once per outbound email, right before send.
  */
-export function openPixelTag(targetId: string, runId: string | null): string {
-  const db = getDb();
+export async function openPixelTag(targetId: string, runId: string | null): Promise<string> {
   const trackingId = newTrackingId();
-  db.prepare(
+  await dbRun(
     `INSERT INTO tracking_events (id, tracking_id, event_type, target_id, run_id)
-     VALUES (?, ?, 'open', ?, ?)`
-  ).run(randomUUID(), trackingId, targetId, runId);
+     VALUES (?, ?, 'open', ?, ?)`,
+    [randomUUID(), trackingId, targetId, runId]
+  );
   const url = `${baseUrl()}/api/track/open/${trackingId}.png`;
   return `<img src="${url}" width="1" height="1" alt="" style="display:none" />`;
 }
@@ -48,18 +48,24 @@ export function openPixelTag(targetId: string, runId: string | null): string {
  * tracker, registering one tracking_events row per link. Relative links, anchors, and
  * mailto: are left untouched.
  */
-export function rewriteLinksForTracking(html: string, targetId: string, runId: string | null): string {
-  const db = getDb();
-  const insert = db.prepare(
-    `INSERT INTO tracking_events (id, tracking_id, event_type, target_id, run_id, destination_url)
-     VALUES (?, ?, 'click', ?, ?, ?)`
-  );
-  return html.replace(/href=["']([^"']+)["']/gi, (match, url: string) => {
-    if (!/^https?:\/\//i.test(url)) return match;
+export async function rewriteLinksForTracking(html: string, targetId: string, runId: string | null): Promise<string> {
+  // We need to gather all replacements first because string.replace with async replacer is tricky.
+  const regex = /href=["']([^"']+)["']/gi;
+  let result = html;
+  const matches = [...html.matchAll(regex)];
+  
+  for (const match of matches) {
+    const url = match[1];
+    if (!/^https?:\/\//i.test(url)) continue;
     const trackingId = newTrackingId();
-    insert.run(randomUUID(), trackingId, targetId, runId, url);
-    return `href="${baseUrl()}/api/track/click/${trackingId}"`;
-  });
+    await dbRun(
+      `INSERT INTO tracking_events (id, tracking_id, event_type, target_id, run_id, destination_url)
+       VALUES (?, ?, 'click', ?, ?, ?)`,
+      [randomUUID(), trackingId, targetId, runId, url]
+    );
+    result = result.replace(match[0], `href="${baseUrl()}/api/track/click/${trackingId}"`);
+  }
+  return result;
 }
 
 interface TrackingEventRow {
@@ -76,26 +82,28 @@ interface TrackingEventRow {
  * Record a pixel load. Idempotent-ish: first open sets opened_at + scores the lead once;
  * repeat opens just bump open_count. Must never throw — the pixel response always succeeds.
  */
-export function recordOpen(trackingId: string, userAgent: string, ip: string): void {
+export async function recordOpen(trackingId: string, userAgent: string, ip: string): Promise<void> {
   try {
-    const db = getDb();
-    const row = db.prepare(
-      "SELECT * FROM tracking_events WHERE tracking_id = ? AND event_type = 'open'"
-    ).get(trackingId) as TrackingEventRow | undefined;
+    const row = await dbGet<TrackingEventRow>(
+      "SELECT * FROM tracking_events WHERE tracking_id = ? AND event_type = 'open'",
+      [trackingId]
+    );
     if (!row) return;
 
     const ipHash = hashIp(ip);
     const isFirstOpen = !row.opened_at;
 
-    db.prepare(
-      "UPDATE tracking_events SET open_count = open_count + 1, user_agent = ?, ip_hash = ?, opened_at = COALESCE(opened_at, datetime('now')) WHERE id = ?"
-    ).run(userAgent ?? "", ipHash, row.id);
+    await dbRun(
+      "UPDATE tracking_events SET open_count = open_count + 1, user_agent = ?, ip_hash = ?, opened_at = COALESCE(opened_at, NOW()) WHERE id = ?",
+      [userAgent ?? "", ipHash, row.id]
+    );
 
     if (isFirstOpen && row.target_id) {
-      db.prepare(
-        "UPDATE targets SET email_opened_at = COALESCE(email_opened_at, datetime('now')) WHERE id = ?"
-      ).run(row.target_id);
-      scoreEmailOpened(row.target_id);
+      await dbRun(
+        "UPDATE targets SET email_opened_at = COALESCE(email_opened_at, NOW()) WHERE id = ?",
+        [row.target_id]
+      );
+      await scoreEmailOpened(row.target_id);
     }
   } catch (err) {
     console.error("[tracking] open recording error:", err);
@@ -106,26 +114,28 @@ export function recordOpen(trackingId: string, userAgent: string, ip: string): v
  * Record a link click and return the destination URL to redirect to (or null if the tracking
  * id is unknown, in which case the caller should fall back to "/").
  */
-export function recordClick(trackingId: string, userAgent: string, ip: string): string | null {
+export async function recordClick(trackingId: string, userAgent: string, ip: string): Promise<string | null> {
   try {
-    const db = getDb();
-    const row = db.prepare(
-      "SELECT * FROM tracking_events WHERE tracking_id = ? AND event_type = 'click'"
-    ).get(trackingId) as TrackingEventRow | undefined;
+    const row = await dbGet<TrackingEventRow>(
+      "SELECT * FROM tracking_events WHERE tracking_id = ? AND event_type = 'click'",
+      [trackingId]
+    );
     if (!row || !row.destination_url) return null;
 
     const ipHash = hashIp(ip);
     const isFirstClick = !row.clicked_at;
 
-    db.prepare(
-      "UPDATE tracking_events SET click_count = click_count + 1, user_agent = ?, ip_hash = ?, clicked_at = COALESCE(clicked_at, datetime('now')) WHERE id = ?"
-    ).run(userAgent ?? "", ipHash, row.id);
+    await dbRun(
+      "UPDATE tracking_events SET click_count = click_count + 1, user_agent = ?, ip_hash = ?, clicked_at = COALESCE(clicked_at, NOW()) WHERE id = ?",
+      [userAgent ?? "", ipHash, row.id]
+    );
 
     if (isFirstClick && row.target_id) {
-      db.prepare(
-        "UPDATE targets SET email_clicked_at = COALESCE(email_clicked_at, datetime('now')) WHERE id = ?"
-      ).run(row.target_id);
-      scoreLinkClicked(row.target_id);
+      await dbRun(
+        "UPDATE targets SET email_clicked_at = COALESCE(email_clicked_at, NOW()) WHERE id = ?",
+        [row.target_id]
+      );
+      await scoreLinkClicked(row.target_id);
     }
 
     return row.destination_url;

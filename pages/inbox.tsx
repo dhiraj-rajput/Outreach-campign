@@ -96,10 +96,10 @@ interface ReplyModalProps {
   reply: InboxReply;
   onClose: () => void;
   onActionDone: () => void;
-  hasPremium: boolean;
+  hasPremium?: boolean;
 }
 
-function ReplyModal({ reply, onClose, onActionDone, hasPremium }: ReplyModalProps) {
+function ReplyModal({ reply, onClose, onActionDone, hasPremium: _hasPremium }: ReplyModalProps) {
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [loadingThread, setLoadingThread] = useState(true);
   const [replyText, setReplyText] = useState("");
@@ -529,11 +529,13 @@ export default function InboxPage() {
               </button>
             </>
           ) : (
-            <a href="/pricing"
+            <Link
+              href="/pricing"
               title="AI reply classification + auto-followup is a paid feature"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-lg text-xs font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors">
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-lg text-xs font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
+            >
               Auto-classify replies · Upgrade →
-            </a>
+            </Link>
           )}
         </div>
       </div>

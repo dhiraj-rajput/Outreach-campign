@@ -1,5 +1,4 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
 import {
   previewCompanyCsv,
   importCompanyChunk,
@@ -15,7 +14,7 @@ export const config = {
   },
 };
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     return res.status(405).end();
@@ -29,7 +28,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ error: "csv text required" });
     }
     try {
-      const result = previewCompanyCsv(csv);
+      const result = await previewCompanyCsv(csv);
       return res.json(result);
     } catch (e) {
       return res.status(400).json({
@@ -51,8 +50,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     );
 
     try {
-      const db = getDb();
-      const result = importCompanyChunk(db, rows, { offset, total, chunkSize });
+      const result = await importCompanyChunk(rows, { offset, total, chunkSize });
       return res.json(result);
     } catch (e) {
       return res.status(500).json({

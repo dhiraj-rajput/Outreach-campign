@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { searchPeople } from "@/lib/linkedin/people-search";
 import { isRateLimited } from "@/lib/rate-limit";
 
@@ -34,17 +34,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "keywords is required (min 2 characters)." });
   }
 
-  const db = getDb();
-
   let accountId = account_id;
   if (!accountId) {
-    const row = db
-      .prepare(
-        `SELECT id FROM accounts
-         WHERE is_authenticated = 1 AND cookies_json IS NOT NULL
-         ORDER BY created_at ASC LIMIT 1`
-      )
-      .get() as { id: string } | undefined;
+    const row = await dbGet<{ id: string }>(
+      `SELECT id FROM accounts
+       WHERE is_authenticated = 1 AND cookies_json IS NOT NULL
+       ORDER BY created_at ASC LIMIT 1`
+    );
     if (!row) {
       return res.status(400).json({
         error: "No authenticated LinkedIn account. Connect one under Settings → Accounts.",
@@ -53,13 +49,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     accountId = row.id;
   }
 
-  const account = db
-    .prepare(
-      `SELECT id, name, email, is_authenticated, cookies_json FROM accounts WHERE id = ?`
-    )
-    .get(accountId) as
-    | { id: string; name: string; email: string; is_authenticated: number; cookies_json: string | null }
-    | undefined;
+  const account = await dbGet<{ id: string; name: string; email: string; is_authenticated: number; cookies_json: string | null }>(
+    `SELECT id, name, email, is_authenticated, cookies_json FROM accounts WHERE id = ?`,
+    [accountId]
+  );
 
   if (!account) return res.status(404).json({ error: "Account not found." });
   if (!account.is_authenticated || !account.cookies_json) {

@@ -6,7 +6,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import type { GetServerSidePropsContext } from "next";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/pages/api/auth/[...nextauth]";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 
 export type PlanTier = "free" | "paid";
 export type UserRole = "user" | "super_admin";
@@ -23,6 +23,8 @@ export interface AccessContext {
   orgRole: "owner" | "admin" | "member" | null;
   /** True if the user can use paid/AI features right now, for any reason. */
   isPaid: boolean;
+  /** True if the organization feature is unlocked (organization plan is paid or super admin). */
+  hasOrgAccess: boolean;
 }
 
 type UserRow = {
@@ -36,49 +38,33 @@ type UserRow = {
 type OrgRow = { id: string; name: string; plan: PlanTier };
 type MemberRow = { role: "owner" | "admin" | "member" };
 
-/** Comma-separated allowlist, e.g. "founder@linki.dev,ops@linki.dev". Optional bootstrap
- *  mechanism so the very first super admin doesn't need another super admin to promote them.
- *  Re-applied on every login — safe to add/remove emails at any time. */
-function envSuperAdmins(): Set<string> {
-  const raw = process.env.SUPER_ADMIN_EMAILS ?? "";
-  return new Set(
-    raw.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
-  );
-}
-
-/** Promotes the user to super_admin if their email is in SUPER_ADMIN_EMAILS and they
- *  aren't already. Called from the NextAuth jwt callback on every sign-in. Cheap no-op
- *  once the role has stuck. */
-export function syncEnvSuperAdmin(userId: string, email: string): void {
-  if (!envSuperAdmins().has(email.toLowerCase())) return;
-  const db = getDb();
-  db.prepare("UPDATE users SET role = 'super_admin' WHERE id = ? AND role != 'super_admin'").run(userId);
-}
-
 /** Builds the full access context for a user id. Always reads fresh from the DB (SQLite
  *  reads are cheap) so admin plan/role changes take effect immediately, without the user
  *  needing to sign out and back in. */
-export function getAccessContextForUser(userId: string): AccessContext | null {
-  const db = getDb();
-  const user = db
-    .prepare("SELECT id, email, role, plan, org_id FROM users WHERE id = ?")
-    .get(userId) as UserRow | undefined;
+export async function getAccessContextForUser(userId: string): Promise<AccessContext | null> {
+  const user = await dbGet<UserRow>(
+    "SELECT id, email, role, plan, org_id FROM users WHERE id = ?",
+    [userId]
+  );
   if (!user) return null;
 
   let org: OrgRow | null = null;
   let orgRole: MemberRow["role"] | null = null;
   if (user.org_id) {
-    org = (db.prepare("SELECT id, name, plan FROM organizations WHERE id = ?").get(user.org_id) as OrgRow | undefined) ?? null;
+    const orgResult = await dbGet<OrgRow>("SELECT id, name, plan FROM organizations WHERE id = ?", [user.org_id]);
+    org = orgResult ?? null;
     if (org) {
-      const member = db
-        .prepare("SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?")
-        .get(org.id, userId) as MemberRow | undefined;
+      const member = await dbGet<MemberRow>(
+        "SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?",
+        [org.id, userId]
+      );
       orgRole = member?.role ?? null;
     }
   }
 
   const isSuperAdmin = user.role === "super_admin";
   const isPaid = isSuperAdmin || user.plan === "paid" || org?.plan === "paid";
+  const hasOrgAccess = isSuperAdmin || (Boolean(org) && org?.plan === "paid");
 
   return {
     userId: user.id,
@@ -91,6 +77,7 @@ export function getAccessContextForUser(userId: string): AccessContext | null {
     orgPlan: org?.plan ?? null,
     orgRole,
     isPaid,
+    hasOrgAccess,
   };
 }
 
@@ -101,7 +88,7 @@ export async function getAccessContext(
   const session = await getServerSession(ctx.req, ctx.res, authOptions);
   const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) return null;
-  return getAccessContextForUser(userId);
+  return await getAccessContextForUser(userId);
 }
 
 /**
@@ -124,7 +111,7 @@ export async function requirePaidAccess(
     return null;
   }
 
-  const access = getAccessContextForUser(userId);
+  const access = await getAccessContextForUser(userId);
   if (!access) {
     res.status(401).json({ error: "Not authenticated" });
     return null;
@@ -154,7 +141,7 @@ export async function requireSuperAdmin(
     return null;
   }
 
-  const access = getAccessContextForUser(userId);
+  const access = await getAccessContextForUser(userId);
   if (!access || !access.isSuperAdmin) {
     res.status(403).json({ error: "Super admin access required" });
     return null;
@@ -186,7 +173,7 @@ export async function coerceAiEnabled(
   const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) return false;
 
-  const access = getAccessContextForUser(userId);
+  const access = await getAccessContextForUser(userId);
   return Boolean(access?.isPaid);
 }
 
@@ -198,10 +185,9 @@ export async function coerceAiEnabled(
  * existed, or written directly against the DB, from ever running AI generation once
  * nobody paid anymore.
  */
-export function hasAnyPaidAccess(): boolean {
-  const db = getDb();
-  const paidUser = db.prepare("SELECT 1 FROM users WHERE plan = 'paid' OR role = 'super_admin' LIMIT 1").get();
+export async function hasAnyPaidAccess(): Promise<boolean> {
+  const paidUser = await dbGet("SELECT 1 FROM users WHERE plan = 'paid' OR role = 'super_admin' LIMIT 1");
   if (paidUser) return true;
-  const paidOrg = db.prepare("SELECT 1 FROM organizations WHERE plan = 'paid' LIMIT 1").get();
+  const paidOrg = await dbGet("SELECT 1 FROM organizations WHERE plan = 'paid' LIMIT 1");
   return Boolean(paidOrg);
 }

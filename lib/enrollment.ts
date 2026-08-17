@@ -1,7 +1,3 @@
-import type { getDb } from "@/lib/db";
-
-type DB = ReturnType<typeof getDb>;
-
 /**
  * Per-channel enrollment rules:
  *  - LinkedIn: a contact can only be actively enrolled on the LinkedIn track of ONE
@@ -17,6 +13,8 @@ type DB = ReturnType<typeof getDb>;
  *    newsletter) and are not affected by any of this — a contact can be subscribed
  *    to any number of newsletters independently.
  */
+import { dbAll } from "@/lib/db";
+
 export interface EnrollmentEligibility {
   /** Targets already enrolled anywhere in THIS workflow — never re-add, regardless of track. */
   alreadyInWorkflow: Set<string>;
@@ -26,43 +24,42 @@ export interface EnrollmentEligibility {
   emailUnsubscribed: Set<string>;
 }
 
-export function resolveEnrollmentEligibility(
-  db: DB,
+export async function resolveEnrollmentEligibility(
   workflowId: string,
   workflowTracks: string[],
   candidateTargetIds: string[]
-): EnrollmentEligibility {
-  const alreadyInWorkflow = new Set(
-    (db.prepare(
-      `SELECT DISTINCT rp.target_id FROM run_profiles rp
-       JOIN runs r ON r.id = rp.run_id
-       WHERE r.workflow_id = ?`
-    ).all(workflowId) as { target_id: string }[]).map((r) => r.target_id)
+): Promise<EnrollmentEligibility> {
+  const alreadyInWorkflowRows = await dbAll<{ target_id: string }>(
+    `SELECT DISTINCT rp.target_id FROM run_profiles rp
+     JOIN runs r ON r.id = rp.run_id
+     WHERE r.workflow_id = ?`,
+    [workflowId]
   );
+  const alreadyInWorkflow = new Set(alreadyInWorkflowRows.map((r) => r.target_id));
 
   let linkedinBlockedElsewhere = new Set<string>();
   if (workflowTracks.includes("linkedin")) {
-    linkedinBlockedElsewhere = new Set(
-      (db.prepare(
-        `SELECT DISTINCT rp.target_id FROM run_profiles rp
-         JOIN runs r ON r.id = rp.run_id
-         JOIN run_profile_tracks rt ON rt.run_profile_id = rp.id
-         WHERE r.workflow_id != ?
-           AND r.status IN ('running', 'paused')
-           AND rt.track = 'linkedin'
-           AND rt.state NOT IN ('completed', 'failed', 'skipped')`
-      ).all(workflowId) as { target_id: string }[]).map((r) => r.target_id)
+    const blockedRows = await dbAll<{ target_id: string }>(
+      `SELECT DISTINCT rp.target_id FROM run_profiles rp
+       JOIN runs r ON r.id = rp.run_id
+       JOIN run_profile_tracks rt ON rt.run_profile_id = rp.id
+       WHERE r.workflow_id != ?
+         AND r.status IN ('running', 'paused')
+         AND rt.track = 'linkedin'
+         AND rt.state NOT IN ('completed', 'failed', 'skipped')`,
+      [workflowId]
     );
+    linkedinBlockedElsewhere = new Set(blockedRows.map((r) => r.target_id));
   }
 
   let emailUnsubscribed = new Set<string>();
   if (workflowTracks.includes("email") && candidateTargetIds.length > 0) {
     const placeholders = candidateTargetIds.map(() => "?").join(",");
-    emailUnsubscribed = new Set(
-      (db.prepare(
-        `SELECT id FROM targets WHERE id IN (${placeholders}) AND unsubscribed_at IS NOT NULL`
-      ).all(...candidateTargetIds) as { id: string }[]).map((r) => r.id)
+    const unsubRows = await dbAll<{ id: string }>(
+      `SELECT id FROM targets WHERE id IN (${placeholders}) AND unsubscribed_at IS NOT NULL`,
+      candidateTargetIds
     );
+    emailUnsubscribed = new Set(unsubRows.map((r) => r.id));
   }
 
   return { alreadyInWorkflow, linkedinBlockedElsewhere, emailUnsubscribed };

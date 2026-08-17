@@ -1,18 +1,17 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 
 // GET /api/workflows/[id]/enrollments
 // Returns current enrollment list + step groups for live polling
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).end();
   }
 
-  const db = getDb();
   const workflowId = req.query.id as string;
 
-  const enrollments = db.prepare(
+  const enrollments = await dbAll(
     `SELECT r.id, r.list_id, r.status, r.created_at,
             l.name as list_name, a.name as account_name,
             COUNT(DISTINCT rp.id) as total_profiles,
@@ -44,20 +43,22 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
      LEFT JOIN lists l ON l.id = r.list_id
      LEFT JOIN accounts a ON a.id = r.account_id
      LEFT JOIN run_profiles rp ON rp.run_id = r.id
-     WHERE r.workflow_id = ? GROUP BY r.id ORDER BY r.created_at DESC`
-  ).all(workflowId);
+     WHERE r.workflow_id = ? GROUP BY r.id ORDER BY r.created_at DESC`,
+     [workflowId]
+  );
 
   // Step groups: use the linkedin track-run current_step for display (most representative)
-  const stepGroups = db.prepare(
-    `SELECT rt.current_step as step_order, ws.step_type, t.name as template_name, COUNT(*) as count
+  const stepGroups = await dbAll(
+    `SELECT rt.current_step as step_order, MAX(ws.step_type) as step_type, MAX(t.name) as template_name, COUNT(*) as count
      FROM run_profile_tracks rt
      JOIN run_profiles rp ON rp.id = rt.run_profile_id
      JOIN runs r ON r.id = rp.run_id
      JOIN workflow_steps ws ON ws.workflow_id = r.workflow_id AND ws.track = rt.track AND ws.step_order = rt.current_step + 1
      LEFT JOIN templates t ON t.id = ws.template_id
      WHERE r.workflow_id = ? AND rt.state NOT IN ('completed', 'failed', 'skipped')
-     GROUP BY rt.current_step, rt.track ORDER BY rt.current_step`
-  ).all(workflowId);
+     GROUP BY rt.current_step, rt.track ORDER BY rt.current_step`,
+     [workflowId]
+  );
 
   return res.json({ enrollments, stepGroups });
 }

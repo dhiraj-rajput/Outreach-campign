@@ -7,7 +7,7 @@
  * PLACE AT: pages/api/linkedin/history.ts
  */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet } from "@/lib/db";
 
 function fillDays(
   rows: { day: string; visits: number; connections: number; messages: number; inmails: number; accepts: number }[],
@@ -24,14 +24,13 @@ function fillDays(
   return filled;
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") return res.status(405).end();
 
   try {
-    const db = getDb();
     const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 90);
 
-    const totals = db.prepare(`
+    const totalsRow = await dbGet<Record<string, number>>(`
       SELECT
         (SELECT COUNT(*) FROM logs WHERE message LIKE 'Connection request sent%') AS connections_sent,
         (SELECT COUNT(*) FROM targets WHERE connected_at IS NOT NULL) AS connections_accepted,
@@ -41,7 +40,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         (SELECT COUNT(*) FROM targets WHERE li_intent = 'not_interested') AS opted_out,
         (SELECT COUNT(*) FROM logs WHERE message LIKE 'Visited%') AS visits,
         (SELECT COUNT(*) FROM targets WHERE connection_requested_at IS NOT NULL) AS unique_connects_requested
-    `).get() as Record<string, number>;
+    `);
+    const totals = totalsRow || { connections_sent: 0, connections_accepted: 0, messages_sent: 0, inmails_sent: 0, replies_received: 0, opted_out: 0, visits: 0, unique_connects_requested: 0 };
 
     const rates = {
       acceptance_rate: totals.connections_sent > 0
@@ -52,7 +52,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         ? Math.round(((totals.messages_sent + totals.inmails_sent) / totals.connections_accepted) * 1000) / 10 : 0,
     };
 
-    const campaigns = db.prepare(`
+    const campaigns = await dbAll<Record<string, unknown>>(`
       SELECT
         w.id AS workflow_id, w.name AS workflow_name, w.is_archived,
         COUNT(DISTINCT r.id) AS run_count,
@@ -71,30 +71,30 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       HAVING connections_sent > 0 OR messages_sent > 0 OR inmails_sent > 0
       ORDER BY last_activity_at DESC
       LIMIT 25
-    `).all() as Array<Record<string, unknown>>;
+    `);
 
-    const activityDaily = db.prepare(`
+    const activityDaily = await dbAll<{ day: string; visits: number; connections: number; messages: number; inmails: number; accepts: number }>(`
       SELECT
-        date(created_at) AS day,
+        DATE(created_at) AS day,
         COUNT(CASE WHEN message LIKE 'Visited%' THEN 1 END) AS visits,
         COUNT(CASE WHEN message LIKE 'Connection request sent%' THEN 1 END) AS connections,
         COUNT(CASE WHEN message LIKE 'Message sent%' THEN 1 END) AS messages,
         COUNT(CASE WHEN message LIKE 'InMail sent%' THEN 1 END) AS inmails,
         0 AS accepts
       FROM logs
-      WHERE created_at >= datetime('now', '-${days} days')
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
         AND (message LIKE 'Visited%' OR message LIKE 'Connection request sent%'
              OR message LIKE 'Message sent%' OR message LIKE 'InMail sent%')
-      GROUP BY date(created_at)
+      GROUP BY DATE(created_at)
       ORDER BY day ASC
-    `).all() as { day: string; visits: number; connections: number; messages: number; inmails: number; accepts: number }[];
+    `);
 
-    const acceptsByDay = db.prepare(`
-      SELECT date(connected_at) AS day, COUNT(*) AS accepts
+    const acceptsByDay = await dbAll<{ day: string; accepts: number }>(`
+      SELECT DATE(connected_at) AS day, COUNT(*) AS accepts
       FROM targets
-      WHERE connected_at IS NOT NULL AND connected_at >= datetime('now', '-${days} days')
-      GROUP BY date(connected_at)
-    `).all() as { day: string; accepts: number }[];
+      WHERE connected_at IS NOT NULL AND connected_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)
+      GROUP BY DATE(connected_at)
+    `);
 
     const acceptMap = Object.fromEntries(acceptsByDay.map((r) => [r.day, r.accepts]));
     const daily = fillDays(
@@ -113,12 +113,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       replies: totals.replies_received,
     };
 
-    const byHour = db.prepare(`
-      SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour, COUNT(*) AS count
+    const byHour = await dbAll<{ hour: number; count: number }>(`
+      SELECT CAST(DATE_FORMAT(created_at, '%H') AS UNSIGNED) AS hour, COUNT(*) AS count
       FROM logs
       WHERE message LIKE 'Connection request sent%' OR message LIKE 'Message sent%' OR message LIKE 'InMail sent%'
       GROUP BY hour ORDER BY hour
-    `).all() as { hour: number; count: number }[];
+    `);
 
     const hourSeries = Array.from({ length: 24 }, (_, h) => ({
       hour: h,
@@ -126,7 +126,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       count: byHour.find((r) => r.hour === h)?.count ?? 0,
     }));
 
-    const activity = db.prepare(`
+    const activity = await dbAll(`
       SELECT l.id, l.message, l.level, l.created_at,
              t.id AS target_id, t.full_name, t.company, w.name AS workflow_name
       FROM logs l
@@ -136,13 +136,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       WHERE l.message LIKE 'Visited%' OR l.message LIKE 'Connection request sent%'
          OR l.message LIKE 'Message sent%' OR l.message LIKE 'InMail sent%'
       ORDER BY l.created_at DESC LIMIT 50
-    `).all();
+    `);
 
-    const optedOut = db.prepare(`
+    const optedOut = await dbAll(`
       SELECT id, full_name, company, email, li_intent, li_intent_at
       FROM targets WHERE li_intent = 'not_interested'
       ORDER BY li_intent_at DESC LIMIT 200
-    `).all();
+    `);
 
     const campaignBars = campaigns.map((c) => ({
       name: String(c.workflow_name).slice(0, 24),
@@ -155,13 +155,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         ? Math.round((Number(c.connections_accepted) / Number(c.connections_sent)) * 1000) / 10 : 0,
     }));
 
-    const intentRows = db.prepare(`
+    const intentRows = await dbAll<{ intent: string; count: number }>(`
       SELECT li_intent AS intent, COUNT(*) AS count
       FROM targets WHERE li_intent IS NOT NULL AND li_intent != ''
       GROUP BY li_intent ORDER BY count DESC
-    `).all() as { intent: string; count: number }[];
+    `);
 
-    const pipeline = db.prepare(`
+    const pipelineRow = await dbGet<Record<string, number>>(`
       SELECT
         SUM(CASE WHEN connection_requested_at IS NULL AND message_sent_at IS NULL THEN 1 ELSE 0 END) AS not_contacted,
         SUM(CASE WHEN connection_requested_at IS NOT NULL AND (degree IS NULL OR degree != 1) AND message_sent_at IS NULL THEN 1 ELSE 0 END) AS pending,
@@ -171,14 +171,15 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         SUM(CASE WHEN inmail_sent_at IS NOT NULL THEN 1 ELSE 0 END) AS inmailed
       FROM targets
       WHERE id IN (SELECT DISTINCT target_id FROM list_targets)
-    `).get() as Record<string, number>;
+    `);
+    const pipeline = pipelineRow || { not_contacted: 0, pending: 0, connected_unmessaged: 0, messaged_no_reply: 0, replied: 0, inmailed: 0 };
 
-    const topCompanies = db.prepare(`
+    const topCompanies = await dbAll<{ company: string; accepted: number }>(`
       SELECT COALESCE(company, 'Unknown') AS company, COUNT(*) AS accepted
       FROM targets
       WHERE connected_at IS NOT NULL AND company IS NOT NULL AND company != ''
       GROUP BY company ORDER BY accepted DESC LIMIT 10
-    `).all() as { company: string; accepted: number }[];
+    `);
 
     return res.json({
       totals, rates, funnel, campaigns, campaignBars, daily, hourSeries, activity, optedOut, days,

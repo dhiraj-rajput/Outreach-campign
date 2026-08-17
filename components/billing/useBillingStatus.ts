@@ -11,6 +11,7 @@ export interface BillingStatus {
   orgPlan: "free" | "paid" | null;
   orgRole: "owner" | "admin" | "member" | null;
   isPaid: boolean;
+  hasOrgAccess: boolean;
 }
 
 /** Client-side hook mirroring lib/access.ts's AccessContext. Used by paywall UI

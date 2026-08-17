@@ -1,39 +1,31 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun } from "@/lib/db";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const id = req.query.id as string;
 
   if (req.method === "GET") {
-    const company = db.prepare("SELECT * FROM companies WHERE id = ?").get(id) as
-      | Record<string, unknown>
-      | undefined;
+    const company = await dbGet<Record<string, unknown>>("SELECT * FROM companies WHERE id = ?", [id]);
     if (!company) return res.status(404).json({ error: "not found" });
 
-    const contacts = db
-      .prepare(
-        "SELECT id, full_name, title, email, linkedin_url FROM targets WHERE company_id = ? ORDER BY full_name"
-      )
-      .all(id);
+    const contacts = await dbAll(
+        "SELECT id, full_name, title, email, linkedin_url FROM targets WHERE company_id = ? ORDER BY full_name",
+        [id]
+      );
 
-    const projects = db
-      .prepare(
-        `SELECT * FROM projects WHERE company_id = ? ORDER BY name COLLATE NOCASE`
-      )
-      .all(id);
+    const projects = await dbAll(
+        `SELECT * FROM projects WHERE company_id = ? ORDER BY name`,
+        [id]
+      );
 
-    const children = db
-      .prepare(
-        `SELECT id, name, domain, industry FROM companies WHERE parent_company_id = ? ORDER BY name COLLATE NOCASE`
-      )
-      .all(id);
+    const children = await dbAll(
+        `SELECT id, name, domain, industry FROM companies WHERE parent_company_id = ? ORDER BY name`,
+        [id]
+      );
 
     let parent = null;
     if (company.parent_company_id) {
-      parent = db
-        .prepare(`SELECT id, name, domain FROM companies WHERE id = ?`)
-        .get(company.parent_company_id as string);
+      parent = await dbGet(`SELECT id, name, domain FROM companies WHERE id = ?`, [company.parent_company_id as string]);
     }
 
     return res.json({ ...company, contacts, projects, children, parent });
@@ -56,18 +48,16 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       return res.status(400).json({ error: "company cannot be its own parent" });
     }
     if (parent_company_id) {
-      const parent = db.prepare("SELECT id FROM companies WHERE id = ?").get(parent_company_id);
+      const parent = await dbGet("SELECT id FROM companies WHERE id = ?", [parent_company_id]);
       if (!parent) return res.status(400).json({ error: "parent company not found" });
       // Shallow cycle check: parent should not already list this as parent
-      const parentRow = db
-        .prepare("SELECT parent_company_id FROM companies WHERE id = ?")
-        .get(parent_company_id) as { parent_company_id: string | null } | undefined;
+      const parentRow = await dbGet<{ parent_company_id: string | null }>("SELECT parent_company_id FROM companies WHERE id = ?", [parent_company_id]);
       if (parentRow?.parent_company_id === id) {
         return res.status(400).json({ error: "circular parent/child relationship" });
       }
     }
 
-    db.prepare(
+    await dbRun(
       `
       UPDATE companies SET
         name = COALESCE(?, name),
@@ -79,8 +69,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         notes = ?,
         parent_company_id = ?
       WHERE id = ?
-    `
-    ).run(
+    `, [
       name ?? null,
       domain ?? null,
       industry ?? null,
@@ -90,16 +79,16 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       notes ?? null,
       parent_company_id ?? null,
       id
-    );
-    return res.json(db.prepare("SELECT * FROM companies WHERE id = ?").get(id));
+    ]);
+    return res.json(await dbGet("SELECT * FROM companies WHERE id = ?", [id]));
   }
 
   if (req.method === "DELETE") {
     // Re-parent children to null, unlink contacts, cascade projects via FK
-    db.prepare("UPDATE companies SET parent_company_id = NULL WHERE parent_company_id = ?").run(id);
-    db.prepare("UPDATE targets SET company_id = NULL WHERE company_id = ?").run(id);
-    db.prepare("DELETE FROM projects WHERE company_id = ?").run(id);
-    db.prepare("DELETE FROM companies WHERE id = ?").run(id);
+    await dbRun("UPDATE companies SET parent_company_id = NULL WHERE parent_company_id = ?", [id]);
+    await dbRun("UPDATE targets SET company_id = NULL WHERE company_id = ?", [id]);
+    await dbRun("DELETE FROM projects WHERE company_id = ?", [id]);
+    await dbRun("DELETE FROM companies WHERE id = ?", [id]);
     return res.json({ ok: true });
   }
 

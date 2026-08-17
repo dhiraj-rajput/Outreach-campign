@@ -141,6 +141,7 @@ export default function NewslettersPage() {
   useEffect(() => {
     loadNewsletters();
     loadConnectedData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -827,6 +828,7 @@ export default function NewslettersPage() {
                 </div>
                 {bannerUrl && (
                   <div className="mt-2 text-center border border-base-300/40 rounded-lg p-2 bg-base-200/40">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={bannerUrl} alt="Banner Preview" className="max-h-24 mx-auto rounded border" />
                   </div>
                 )}

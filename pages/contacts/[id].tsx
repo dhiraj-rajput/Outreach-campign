@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { useState, useRef, useEffect } from "react";
 import { GetServerSideProps } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiArrowLeftLine, RiExternalLinkLine, RiMailLine, RiBuilding2Line,
@@ -99,22 +99,23 @@ interface Target {
 }
 
 export const getServerSideProps: GetServerSideProps = async ({ params }) => {
-  const db = getDb();
   const id = params?.id as string;
-  const target = db.prepare("SELECT * FROM targets WHERE id = ?").get(id) as Target | undefined;
+  const target = await dbGet<Target>("SELECT * FROM targets WHERE id = ?", [id]);
   if (!target) return { notFound: true };
+
   const companyObj = target.company_id
-    ? db.prepare("SELECT * FROM companies WHERE id = ?").get(target.company_id) ?? null
+    ? await dbGet<Company>("SELECT * FROM companies WHERE id = ?", [target.company_id]) ?? null
     : null;
-  const lists = db.prepare(`
+
+  const lists = await dbAll<ListRef>(`
     SELECT l.id, l.name FROM lists l
     INNER JOIN list_targets lt ON lt.list_id = l.id
-    WHERE lt.target_id = ? ORDER BY l.name COLLATE NOCASE
-  `).all(id) as ListRef[];
+    WHERE lt.target_id = ? ORDER BY l.name
+  `, [id]);
 
-  const allLists = db.prepare(`SELECT id, name FROM lists ORDER BY name COLLATE NOCASE`).all() as ListRef[];
+  const allLists = await dbAll<ListRef>(`SELECT id, name FROM lists ORDER BY name`);
 
-  const runRows = db.prepare(`
+  const runRows = await dbAll<Omit<CampaignRun, "logs">>(`
     SELECT rp.run_id, r.workflow_id, w.name as workflow_name,
            COALESCE(rt_li.state, 'pending') as state,
            COALESCE(rt_li.current_step, 0) as current_step,
@@ -126,14 +127,14 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
     LEFT JOIN run_profile_tracks rt_li ON rt_li.run_profile_id = rp.id AND rt_li.track = 'linkedin'
     WHERE rp.target_id = ?
     ORDER BY rp.created_at DESC
-  `).all(id) as Omit<CampaignRun, "logs">[];
+  `, [id]);
 
-  const logRows = db.prepare(`
+  const logRows = await dbAll<{ id: string; run_id: string; level: string; message: string; created_at: string }>(`
     SELECT id, run_id, level, message, created_at
     FROM logs
     WHERE target_id = ?
     ORDER BY created_at ASC
-  `).all(id) as { id: string; run_id: string; level: string; message: string; created_at: string }[];
+  `, [id]);
 
   const logsByRun: Record<string, typeof logRows> = {};
   for (const log of logRows) {
@@ -143,16 +144,18 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
 
   const campaignHistory: CampaignRun[] = runRows.map((r) => ({
     ...r,
-    logs: (logsByRun[r.run_id] ?? []).map(({ run_id: _rid, ...l }) => l),
+    logs: logsByRun[r.run_id] ?? [],
   }));
 
-  const todos = db.prepare(
-    "SELECT * FROM todos WHERE target_id = ? ORDER BY status ASC, due_date ASC, created_at DESC"
-  ).all(id) as Todo[];
+  const todos = await dbAll<Todo>(
+    "SELECT * FROM todos WHERE target_id = ? ORDER BY status ASC, due_date ASC, created_at DESC",
+    [id]
+  );
 
-  const activityLogs = db.prepare(
-    "SELECT * FROM activity_logs WHERE target_id = ? ORDER BY logged_at DESC"
-  ).all(id) as ActivityLog[];
+  const activityLogs = await dbAll<ActivityLog>(
+    "SELECT * FROM activity_logs WHERE target_id = ? ORDER BY logged_at DESC",
+    [id]
+  );
 
   // rename DB 'company' text field to avoid TS collision with Company object
   const rawTarget = target as unknown as Record<string, unknown>;
@@ -799,576 +802,485 @@ export default function ContactDetailPage({
                   </span>
                 )}
               </div>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {target.linkedin_url && (
-                <a href={target.linkedin_url} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors">
-                  <RiLinkedinBoxLine size={14} /> LinkedIn
-                </a>
-              )}
-              {target.sales_nav_url && (
-                <a href={target.sales_nav_url} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-base-content/40 hover:text-base-content/70 transition-colors">
-                  <RiExternalLinkLine size={13} /> Sales Nav
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Two-column layout */}
-        <div className="flex gap-4 items-start">
-
-          {/* Left col — 2/3 */}
-          <div className="flex-1 min-w-0">
-
-        {/* Contact info */}
-        <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-          <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Contact info</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Email</p>
-                <button
-                  onClick={() => { setEmailDraft(email); setEditingEmail(true); setTimeout(() => emailInputRef.current?.focus(), 50); }}
-                  className="text-base-content/30 hover:text-base-content/60 transition-colors"
-                  title="Edit email"
-                >
-                  <RiEditLine size={11} />
-                </button>
-              </div>
-              {editingEmail ? (
-                <div className="flex items-center gap-1.5">
-                  <input
-                    ref={emailInputRef}
-                    type="email"
-                    value={emailDraft}
-                    onChange={(e) => setEmailDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveEmail(); if (e.key === "Escape") setEditingEmail(false); }}
-                    className="flex-1 px-2 py-0.5 rounded bg-base-300 border border-primary/40 text-sm focus:outline-none focus:border-primary"
-                    placeholder="email@example.com"
-                  />
-                  <button onClick={saveEmail} className="text-success hover:text-success/80"><RiCheckLine size={14} /></button>
-                  <button onClick={() => setEditingEmail(false)} className="text-base-content/40 hover:text-base-content/70"><RiCloseLine size={14} /></button>
-                </div>
-              ) : email ? (
-                <div className="flex items-center gap-1.5 text-sm text-base-content/80">
-                  <RiMailLine size={13} className="text-base-content/40 shrink-0" />
-                  <a href={`mailto:${email}`} className="hover:text-primary transition-colors">{email}</a>
-                  {target.email_status && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      target.email_status === "verified" ? "bg-success/15 text-success" :
-                      target.email_status === "invalid" ? "bg-error/15 text-error" :
-                      "bg-base-300 text-base-content/40"
-                    }`}>
-                      {target.email_status}
-                    </span>
-                  )}
-                  {unsubscribedAt ? (
-                    <span
-                      title={`Unsubscribed ${new Date(unsubscribedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
-                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-error/15 text-error"
-                    >
-                      <RiForbid2Line size={10} /> Unsubscribed
-                    </span>
-                  ) : (
-                    <button
-                      onClick={unsubscribeContact}
-                      disabled={unsubscribing}
-                      title="Stop sending this contact any emails/newsletters and block them from future campaigns"
-                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-base-300 text-base-content/40 hover:bg-error/15 hover:text-error transition-colors disabled:opacity-50"
-                    >
-                      <RiForbid2Line size={10} /> {unsubscribing ? "Unsubscribing…" : "Unsubscribe"}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setEmailDraft(""); setEditingEmail(true); setTimeout(() => emailInputRef.current?.focus(), 50); }}
-                  className="text-sm text-base-content/30 hover:text-base-content/60 transition-colors"
-                >
-                  + Add email
-                </button>
-              )}
-            </div>
-            <Field label="Location" value={
-              target.location ? (
-                <span className="flex items-center gap-1.5">
-                  <RiMapPinLine size={13} className="text-base-content/40 shrink-0" />
-                  {target.location}
-                </span>
-              ) : null
-            } />
-            <div>
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Phone</p>
-                <button
-                  onClick={() => { setPhoneDraft(phone); setEditingPhone(true); setTimeout(() => phoneInputRef.current?.focus(), 50); }}
-                  className="text-base-content/30 hover:text-base-content/60 transition-colors"
-                  title="Edit phone"
-                >
-                  <RiEditLine size={11} />
-                </button>
-              </div>
-              {editingPhone ? (
-                <div className="flex items-center gap-1.5">
-                  <input
-                    ref={phoneInputRef}
-                    type="tel"
-                    value={phoneDraft}
-                    onChange={(e) => setPhoneDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") savePhone(); if (e.key === "Escape") setEditingPhone(false); }}
-                    className="flex-1 px-2 py-0.5 rounded bg-base-300 border border-primary/40 text-sm focus:outline-none focus:border-primary"
-                    placeholder="+49 30 1234567"
-                  />
-                  <button onClick={savePhone} className="text-success hover:text-success/80"><RiCheckLine size={14} /></button>
-                  <button onClick={() => setEditingPhone(false)} className="text-base-content/40 hover:text-base-content/70"><RiCloseLine size={14} /></button>
-                </div>
-              ) : phone ? (
-                <div className="flex items-center gap-1.5 text-sm text-base-content/80">
-                  <RiPhoneLine size={13} className="text-base-content/40 shrink-0" />
-                  <a href={`tel:${phone}`} className="hover:text-primary transition-colors">{phone}</a>
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setPhoneDraft(""); setEditingPhone(true); setTimeout(() => phoneInputRef.current?.focus(), 50); }}
-                  className="text-sm text-base-content/30 hover:text-base-content/60 transition-colors"
-                >
-                  + Add phone
-                </button>
-              )}
-            </div>
-            {functions.length > 0 && (
-              <div className="col-span-2">
-                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-1">Functions</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {functions.map((f) => (
-                    <span key={f} className="inline-flex px-2 py-0.5 rounded-md text-xs bg-base-300 text-base-content/60 capitalize">{f}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {target.tenure_months != null && (
-              <Field label="Tenure at current role" value={
-                <span className="flex items-center gap-1.5">
-                  <RiTimeLine size={13} className="text-base-content/40 shrink-0" />
-                  {formatTenure(target.tenure_months)}
-                </span>
-              } />
-            )}
-          </div>
-        </div>
-
-        {/* Summary */}
-        {target.summary && (
-          <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-            <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-2">About</p>
-            <p className="text-sm text-base-content/70 leading-relaxed whitespace-pre-line">{target.summary}</p>
-          </div>
-        )}
-
-        {/* Notes */}
-        <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-          <div className="flex items-center gap-1.5 mb-2">
-            <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Notes</p>
-            {!editingNotes && (
-              <button
-                onClick={() => { setNotesDraft(notes); setEditingNotes(true); }}
-                className="text-base-content/30 hover:text-base-content/60 transition-colors"
-                title="Edit notes"
-              >
-                <RiEditLine size={11} />
-              </button>
-            )}
-          </div>
-          {editingNotes ? (
-            <div className="flex flex-col gap-2">
-              <textarea
-                autoFocus
-                value={notesDraft}
-                onChange={(e) => setNotesDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Escape") setEditingNotes(false); }}
-                rows={5}
-                className="w-full px-3 py-2 rounded-lg bg-base-300 border border-primary/40 text-sm text-base-content/80 leading-relaxed focus:outline-none focus:border-primary resize-none"
-                placeholder="Add any context about this person — talking points, mutual connections, research notes..."
-              />
-              <div className="flex items-center gap-2 justify-end">
-                <button onClick={() => setEditingNotes(false)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-base-content/50 hover:text-base-content transition-colors">
-                  <RiCloseLine size={12} /> Cancel
-                </button>
-                <button onClick={saveNotes} className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-                  <RiCheckLine size={12} /> Save
-                </button>
-              </div>
-            </div>
-          ) : notes ? (
-            <p
-              onClick={() => { setNotesDraft(notes); setEditingNotes(true); }}
-              className="text-sm text-base-content/70 leading-relaxed whitespace-pre-line cursor-text"
-            >
-              {notes}
-            </p>
-          ) : (
-            <button
-              onClick={() => { setNotesDraft(""); setEditingNotes(true); }}
-              className="text-sm text-base-content/30 hover:text-base-content/60 transition-colors"
-            >
-              + Add notes
-            </button>
-          )}
-        </div>
-
-        {/* Activity Log — premium (ee/); hidden in the public build */}
-        {hasPremium && (
-        <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Activity log</p>
-            <button
-              onClick={() => setShowLogModal(true)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-base-content/50 hover:text-base-content hover:bg-base-300/60 transition-colors"
-            >
-              <RiAddLine size={13} /> Log activity
-            </button>
-          </div>
-
-          {activityLogs.length === 0 ? (
-            <button
-              onClick={() => setShowLogModal(true)}
-              className="w-full py-6 rounded-xl border border-dashed border-base-300/50 text-xs text-base-content/25 hover:text-base-content/40 hover:border-base-300/70 transition-colors"
-            >
-              Log the first activity
-            </button>
-          ) : (
-            <div className="flex flex-col gap-0 divide-y divide-base-300/30">
-              {activityLogs.map((log) => (
-                <div key={log.id} className="group flex gap-3 py-3 first:pt-0 last:pb-0">
-                  <div className={`mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center shrink-0 text-xs ${LOG_TYPE_COLORS[log.type]}`}>
-                    {LOG_TYPE_ICONS[log.type]}
-                  </div>
-                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedLog(log)}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded capitalize ${LOG_TYPE_COLORS[log.type]}`}>
-                        {log.type}
-                      </span>
-                      <span className="text-[10px] text-base-content/25">
-                        {new Date(log.logged_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                      </span>
-                    </div>
-                    <p className="text-sm text-base-content/70 leading-relaxed line-clamp-3">{log.body}</p>
-                  </div>
-                  <button
-                    onClick={() => deleteLog(log.id)}
-                    className="shrink-0 opacity-0 group-hover:opacity-100 text-base-content/20 hover:text-error/60 transition-all mt-0.5"
-                  >
-                    <RiDeleteBinLine size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        )}
-
-        {/* Career history */}
-        {positions.length > 0 && (
-          <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-            <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Career history</p>
-            <div className="flex flex-col gap-3">
-              {positions.map((pos, i) => (
-                <div key={i} className="flex gap-3">
-                  <div className="mt-1 w-5 h-5 rounded-md bg-base-300 flex items-center justify-center shrink-0">
-                    <RiBriefcaseLine size={11} className="text-base-content/40" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-tight">{pos.title}</p>
-                    <p className="text-xs text-base-content/50 mt-0.5">{pos.companyName}</p>
-                    {(pos.startDate || pos.endDate) && (
-                      <p className="text-xs text-base-content/30 mt-0.5">
-                        {pos.startDate ?? ""}{pos.endDate ? ` — ${pos.endDate}` : pos.current ? " — Present" : ""}
-                      </p>
-                    )}
-                    {pos.description && (
-                      <p className="text-xs text-base-content/50 mt-1 leading-relaxed line-clamp-3">{pos.description}</p>
-                    )}
-                  </div>
-                  {pos.current && (
-                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary self-start mt-0.5">Current</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Company */}
-        {target.companyObj && (
-          <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-            <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Company</p>
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-lg bg-base-300 flex items-center justify-center shrink-0">
-                <RiBuilding2Line size={14} className="text-base-content/40" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <Link href={`/companies/${target.companyObj.id}`} className="text-sm font-medium hover:text-primary transition-colors">
-                    {target.companyObj.name}
+              <div className="flex flex-wrap items-center gap-4 mt-3">
+                {target.linkedin_url && (
+                  <a href={target.linkedin_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-medium text-base-content/60 hover:text-primary transition-colors">
+                    <RiLinkedinBoxLine size={14} /> LinkedIn
+                  </a>
+                )}
+                {target.sales_nav_url && (
+                  <a href={target.sales_nav_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-medium text-base-content/60 hover:text-primary transition-colors">
+                    <RiExternalLinkLine size={14} /> Sales Navigator
+                  </a>
+                )}
+                {target.companyObj && (
+                  <Link href={`/companies/${target.companyObj.id}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-base-content/60 hover:text-primary transition-colors">
+                    <RiBuilding2Line size={14} /> {target.companyObj.name}
                   </Link>
-                  {target.companyObj.linkedin_url && (
-                    <a href={target.companyObj.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-base-content/30 hover:text-base-content/60 transition-colors">
-                      <RiExternalLinkLine size={12} />
-                    </a>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                  {target.companyObj.industry && <span className="text-xs text-base-content/40">{target.companyObj.industry}</span>}
-                  {target.companyObj.location && (
-                    <span className="text-xs text-base-content/40 flex items-center gap-1">
-                      <RiMapPinLine size={10} /> {target.companyObj.location}
-                    </span>
-                  )}
-                  {target.company_size && (
-                    <span className="text-xs text-base-content/40">{target.company_size} employees</span>
-                  )}
-                  {target.companyObj.domain && (
-                    <a href={`https://${target.companyObj.domain}`} target="_blank" rel="noopener noreferrer"
-                      className="text-xs text-base-content/40 hover:text-primary flex items-center gap-1 transition-colors">
-                      <RiGlobalLine size={10} /> {target.companyObj.domain}
-                    </a>
-                  )}
-                </div>
-                {target.company_description && (
-                  <p className="text-xs text-base-content/50 mt-2 leading-relaxed line-clamp-4">{target.company_description}</p>
+                )}
+                {unsubscribedAt && (
+                  <div className="inline-flex items-center gap-1.5 text-xs font-medium text-error/80 px-2 py-0.5 rounded-md bg-error/10">
+                    <RiForbid2Line size={13} />
+                    Unsubscribed on {formatDate(unsubscribedAt)}
+                  </div>
                 )}
               </div>
             </div>
-          </div>
-        )}
-
-          </div>{/* end left col */}
-
-          {/* Right col — 1/3 */}
-          <div className="w-72 shrink-0">
-
-        {/* Outreach timeline */}
-        <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-          <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Outreach timeline</p>
-          <div className="flex flex-col gap-3">
-            <Field label="Added" value={formatDate(target.created_at)} />
-            <Field label="Connection requested" value={formatDate(target.connection_requested_at)} />
-            <Field label="Connected" value={formatDate(target.connected_at)} />
-            <Field label="Message sent" value={formatDate(target.message_sent_at)} />
-            <Field label="Last reply" value={formatDate(target.last_replied_at)} />
-            <Field label="Apollo enriched" value={formatDate(target.apollo_enriched_at)} />
-          </div>
-        </div>
-
-        {/* Lists */}
-        <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[11px] text-base-content/40 uppercase tracking-wide">In lists</p>
-            <button
-              onClick={() => setShowAddList(true)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-base-content/50 hover:text-base-content hover:bg-base-300/60 transition-colors"
-            >
-              <RiAddLine size={13} /> Add
-            </button>
-          </div>
-          {memberLists.length === 0 ? (
-            <p className="text-xs text-base-content/25">Not in any list yet.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {memberLists.map((l) => (
-                <span key={l.id} className="group inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-md text-xs bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors">
-                  <Link href={`/lists/${l.id}`}>{l.name}</Link>
-                  <button
-                    onClick={() => removeFromList(l.id)}
-                    disabled={removingListId === l.id}
-                    title="Remove from this list"
-                    className="text-base-content/30 hover:text-error transition-colors disabled:opacity-40"
-                  >
-                    <RiCloseCircleLine size={12} />
-                  </button>
-                </span>
-              ))}
+            {/* Quick Actions (only Email) */}
+            <div className="flex items-center gap-2">
+              <a
+                href={`mailto:${email}`}
+                onClick={(e) => {
+                  if (!email) { e.preventDefault(); toast.error("No email address"); }
+                  else if (unsubscribedAt) {
+                    if (!confirm("This contact is unsubscribed. Are you sure you want to email them directly?")) e.preventDefault();
+                  }
+                }}
+                className={`inline-flex items-center justify-center w-8 h-8 rounded-lg bg-base-300/50 hover:bg-base-300 transition-colors ${!email ? "opacity-50 cursor-not-allowed" : ""}`}
+                title={email ? "Send email" : "No email address"}
+              >
+                <RiMailLine size={15} />
+              </a>
             </div>
-          )}
+          </div>
         </div>
 
-        {showAddList && (
-          <div className="modal modal-open">
-            <div className="modal-box bg-base-200 border border-base-300/50 max-w-sm">
-              <h3 className="font-semibold text-base mb-4">Add to list</h3>
-              {addableLists.length === 0 ? (
-                <p className="text-sm text-base-content/40">Already in every list.</p>
-              ) : (
-                <select
-                  className="w-full px-3 py-2 rounded-lg text-sm bg-base-300 border border-base-300/80 text-base-content focus:outline-none focus:border-primary/50 cursor-pointer"
-                  value={addListId}
-                  onChange={(e) => setAddListId(e.target.value)}
-                >
-                  <option value="">Select a list…</option>
-                  {addableLists.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name}</option>
-                  ))}
-                </select>
-              )}
-              <div className="modal-action mt-4">
-                <button type="button" className="btn btn-ghost btn-sm text-base-content/60" onClick={() => { setShowAddList(false); setAddListId(""); }}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-content hover:bg-primary/90 transition-colors disabled:opacity-50"
-                  disabled={!addListId || addListLoading}
-                  onClick={addToList}
-                >
-                  {addListLoading ? <span className="loading loading-spinner loading-xs" /> : "Add"}
-                </button>
+        {/* 2-column layout */}
+        <div className="flex flex-col lg:flex-row gap-4 items-start">
+          {/* Left Column */}
+          <div className="w-full lg:w-[360px] flex-shrink-0 flex flex-col gap-4">
+
+            {/* Contact Details inline edit block */}
+            <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Contact details</p>
+              <div className="space-y-4">
+                {/* Email */}
+                <div>
+                  <div className="flex items-center justify-between group">
+                    <span className="text-xs text-base-content/50 flex items-center gap-1.5">
+                      <RiMailLine size={13} /> Email address
+                    </span>
+                    {!editingEmail && (
+                      <button onClick={() => { setEditingEmail(true); setTimeout(() => emailInputRef.current?.focus(), 0); }} className="opacity-0 group-hover:opacity-100 transition-opacity text-base-content/40 hover:text-primary p-0.5">
+                        <RiEditLine size={12} />
+                      </button>
+                    )}
+                  </div>
+                  {editingEmail ? (
+                    <div className="flex items-center gap-1 mt-1">
+                      <input
+                        ref={emailInputRef}
+                        type="email"
+                        value={emailDraft}
+                        onChange={(e) => setEmailDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") saveEmail(); if (e.key === "Escape") setEditingEmail(false); }}
+                        className="input input-bordered input-xs flex-1 bg-base-300/50 text-sm"
+                        placeholder="john@example.com"
+                      />
+                      <button onClick={saveEmail} className="btn btn-ghost btn-xs text-success px-1"><RiCheckLine size={14} /></button>
+                      <button onClick={() => setEditingEmail(false)} className="btn btn-ghost btn-xs text-base-content/40 px-1"><RiCloseLine size={14} /></button>
+                    </div>
+                  ) : (
+                    <div className="text-sm mt-0.5 flex flex-wrap items-center gap-2">
+                      {email ? (
+                        <>
+                          <span className={target.email_status === "invalid" ? "text-error line-through" : ""}>{email}</span>
+                          {!unsubscribedAt && (
+                            <button
+                              type="button"
+                              onClick={unsubscribeContact}
+                              disabled={unsubscribing}
+                              className="text-[10px] text-base-content/30 hover:text-error transition-colors uppercase tracking-wider font-medium ml-1"
+                              title="Manually unsubscribe this contact"
+                            >
+                              Unsubscribe
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-base-content/30 italic">Unknown</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {/* Phone */}
+                <div>
+                  <div className="flex items-center justify-between group">
+                    <span className="text-xs text-base-content/50 flex items-center gap-1.5">
+                      <RiPhoneLine size={13} /> Phone
+                    </span>
+                    {!editingPhone && (
+                      <button onClick={() => { setEditingPhone(true); setTimeout(() => phoneInputRef.current?.focus(), 0); }} className="opacity-0 group-hover:opacity-100 transition-opacity text-base-content/40 hover:text-primary p-0.5">
+                        <RiEditLine size={12} />
+                      </button>
+                    )}
+                  </div>
+                  {editingPhone ? (
+                    <div className="flex items-center gap-1 mt-1">
+                      <input
+                        ref={phoneInputRef}
+                        type="tel"
+                        value={phoneDraft}
+                        onChange={(e) => setPhoneDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") savePhone(); if (e.key === "Escape") setEditingPhone(false); }}
+                        className="input input-bordered input-xs flex-1 bg-base-300/50 text-sm"
+                        placeholder="+1 555 123 4567"
+                      />
+                      <button onClick={savePhone} className="btn btn-ghost btn-xs text-success px-1"><RiCheckLine size={14} /></button>
+                      <button onClick={() => setEditingPhone(false)} className="btn btn-ghost btn-xs text-base-content/40 px-1"><RiCloseLine size={14} /></button>
+                    </div>
+                  ) : (
+                    <div className="text-sm mt-0.5 text-base-content/80">
+                      {phone || <span className="text-base-content/30 italic">Unknown</span>}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-            <div className="modal-backdrop" onClick={() => { setShowAddList(false); setAddListId(""); }} />
-          </div>
-        )}
 
-        {/* Todos — premium (ee/); hidden in the public build */}
-        {hasPremium && (
-        <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 mb-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Todos</p>
-              {todos.filter((t) => t.status === "open").length > 0 && (
-                <span className="px-1.5 py-0.5 rounded-md bg-primary/15 text-primary text-[10px] font-medium">
-                  {todos.filter((t) => t.status === "open").length}
-                </span>
+            {/* Profile Info block */}
+            <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Profile Info</p>
+              <div className="space-y-4">
+                <Field label="Location" value={target.location && <span className="flex items-center gap-1.5"><RiMapPinLine size={13} className="text-base-content/40 shrink-0" /> {target.location}</span>} />
+                <Field label="Time in role" value={formatTenure(target.tenure_months)} />
+                <Field label="Summary" value={target.summary && <div className="text-xs text-base-content/60 leading-relaxed max-h-32 overflow-y-auto pr-2 custom-scrollbar whitespace-pre-line">{target.summary}</div>} />
+              </div>
+            </div>
+
+            {/* Company Info block */}
+            <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Company</p>
+              {target.companyObj ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-8 h-8 rounded bg-base-300 flex items-center justify-center shrink-0">
+                      <RiBuilding2Line size={14} className="text-base-content/40" />
+                    </span>
+                    <div>
+                      <div className="font-medium text-sm">{target.companyObj.name}</div>
+                      {target.companyObj.domain && (
+                        <a href={`https://${target.companyObj.domain}`} target="_blank" rel="noopener noreferrer" className="text-xs text-base-content/50 hover:text-primary transition-colors flex items-center gap-1 mt-0.5">
+                          <RiGlobalLine size={10} /> {target.companyObj.domain}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-xs text-base-content/60 space-y-1.5 pt-2 border-t border-base-300/50">
+                    {target.companyObj.industry && <div className="flex items-center gap-1.5"><RiBriefcaseLine size={12} className="text-base-content/40 shrink-0" /> {target.companyObj.industry}</div>}
+                    {target.companyObj.location && <div className="flex items-center gap-1.5"><RiMapPinLine size={12} className="text-base-content/40 shrink-0" /> {target.companyObj.location}</div>}
+                    {target.company_size && <div className="flex items-center gap-1.5"><RiBriefcaseLine size={12} className="text-base-content/40 shrink-0" /> ~{target.company_size.toLocaleString()} employees</div>}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="font-medium text-sm flex items-center gap-2">
+                    <RiBuilding2Line size={14} className="text-base-content/40" />
+                    {target.company_name ?? <span className="text-base-content/30 italic">Unknown</span>}
+                  </div>
+                  {target.company_industry && <Field label="Industry" value={target.company_industry} />}
+                  {target.company_size && <Field label="Size" value={`~${target.company_size.toLocaleString()} employees`} />}
+                  <Field label="Description" value={target.company_description && <div className="text-xs text-base-content/60 leading-relaxed max-h-32 overflow-y-auto pr-2 custom-scrollbar">{target.company_description}</div>} />
+                </div>
               )}
             </div>
-            <button
-              onClick={() => setShowTodoModal(true)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-base-content/50 hover:text-base-content hover:bg-base-300/60 transition-colors"
-            >
-              <RiAddLine size={13} /> Add
-            </button>
+
+            {/* Lists block */}
+            <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[11px] text-base-content/40 uppercase tracking-wide">Lists</p>
+                <button
+                  onClick={() => setShowAddList(!showAddList)}
+                  className="text-[10px] font-medium text-primary hover:bg-primary/10 px-1.5 py-0.5 rounded transition-colors"
+                >
+                  + Add
+                </button>
+              </div>
+
+              {showAddList && (
+                <div className="mb-3 flex items-center gap-2">
+                  <select
+                    className="select select-bordered select-xs flex-1 bg-base-300/50"
+                    value={addListId}
+                    onChange={(e) => setAddListId(e.target.value)}
+                    disabled={addableLists.length === 0}
+                  >
+                    <option value="" disabled>
+                      {addableLists.length === 0 ? "No other lists" : "Select list..."}
+                    </option>
+                    {addableLists.map((l) => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={addToList}
+                    disabled={!addListId || addListLoading}
+                    className="btn btn-primary btn-xs"
+                  >
+                    {addListLoading ? <span className="loading loading-spinner loading-xs" /> : "Save"}
+                  </button>
+                </div>
+              )}
+
+              {memberLists.length === 0 ? (
+                <p className="text-xs text-base-content/40 italic">Not in any lists.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {memberLists.map((l) => (
+                    <span key={l.id} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-md text-xs bg-base-300/50 text-base-content/70 border border-base-300 group">
+                      <Link href={`/lists/${l.id}`} className="hover:text-primary transition-colors max-w-[150px] truncate">
+                        {l.name}
+                      </Link>
+                      <button
+                        onClick={() => removeFromList(l.id)}
+                        disabled={removingListId === l.id}
+                        className="text-base-content/30 hover:text-error hover:bg-error/10 p-0.5 rounded transition-colors"
+                        title="Remove from list"
+                      >
+                        {removingListId === l.id ? <span className="loading loading-spinner loading-xs w-3 h-3" /> : <RiCloseLine size={12} />}
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {todos.length === 0 ? (
-            <button
-              onClick={() => setShowTodoModal(true)}
-              className="w-full py-6 rounded-xl border border-dashed border-base-300/50 text-xs text-base-content/25 hover:text-base-content/40 hover:border-base-300/70 transition-colors"
-            >
-              Add the first todo
-            </button>
-          ) : (
-            <div className="flex flex-col divide-y divide-base-300/30">
-              {todos.map((todo) => {
-                const overdue = todo.status !== "done" && todo.due_date && new Date(todo.due_date) < new Date(new Date().toDateString());
-                return (
-                  <div key={todo.id} className={`group flex items-start gap-2.5 py-2.5 first:pt-0 last:pb-0 ${todo.status === "done" ? "opacity-40" : ""}`}>
-                    <button
-                      onClick={() => toggleTodo(todo)}
-                      className={`mt-0.5 shrink-0 transition-colors ${todo.status === "done" ? "text-success" : "text-base-content/20 hover:text-base-content/60"}`}
-                    >
-                      {todo.status === "done"
-                        ? <RiCheckboxCircleLine size={15} />
-                        : <RiCheckboxBlankCircleLine size={15} />
-                      }
-                    </button>
-                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedTodo(todo)}>
-                      <p className={`text-xs leading-snug ${todo.status === "done" ? "line-through text-base-content/30" : "text-base-content/80"}`}>
-                        {todo.title}
-                      </p>
-                      {todo.description && (
-                        <p className="text-[11px] text-base-content/35 mt-0.5 line-clamp-1">{todo.description}</p>
-                      )}
-                      {todo.due_date && (
-                        <span className={`inline-flex items-center gap-1 text-[10px] mt-1 px-1.5 py-0.5 rounded ${
-                          overdue ? "bg-error/10 text-error" : "text-base-content/30"
-                        }`}>
-                          <RiCalendarLine size={9} />
-                          {new Date(todo.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => deleteTodo(todo.id)}
-                      className="shrink-0 opacity-0 group-hover:opacity-100 text-base-content/20 hover:text-error/60 transition-all"
-                    >
-                      <RiDeleteBinLine size={12} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        )}
-
-        {/* Campaign history */}
-        {campaignHistory.length > 0 && (
-          <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
-            <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Campaign history</p>
-            <div className="flex flex-col gap-3">
-              {campaignHistory.map((run) => {
-                const stateStyle: Record<string, string> = {
-                  completed: "bg-success/15 text-success",
-                  failed: "bg-error/15 text-error",
-                  skipped: "bg-base-300 text-base-content/40",
-                  in_progress: "bg-info/15 text-info",
-                  pending: "bg-base-300 text-base-content/40",
-                };
-                const logLevelColor: Record<string, string> = {
-                  info: "text-base-content/50",
-                  warn: "text-warning",
-                  error: "text-error",
-                };
-                return (
-                  <div key={run.run_id} className="border border-base-300/40 rounded-lg overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 py-2 bg-base-300/30">
-                      <RiFlowChart size={12} className="text-base-content/30 shrink-0" />
-                      <Link
-                        href={`/workflows/${run.workflow_id}`}
-                        className="text-xs font-medium hover:text-primary transition-colors flex-1 truncate"
-                      >
-                        {run.workflow_name}
-                      </Link>
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${stateStyle[run.state] ?? "bg-base-300 text-base-content/40"}`}>
-                        {run.state.replace("_", " ")}
-                      </span>
-                    </div>
-                    <div className="px-3 py-1.5 border-t border-base-300/20">
-                      <span className="text-[10px] text-base-content/30">
-                        {new Date(run.enrolled_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                      </span>
-                    </div>
-                    {run.error_message && (
-                      <div className="px-3 py-1.5 bg-error/5 border-t border-error/10 text-[10px] text-error/70">
-                        {run.error_message}
-                      </div>
+          {/* Right Column */}
+          <div className="flex-1 flex flex-col gap-4 min-w-0">
+            {hasPremium && (
+              <>
+                {/* Notes Block */}
+                <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 flex flex-col group">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] text-base-content/40 uppercase tracking-wide flex items-center gap-1.5">
+                      <RiEditLine size={13} /> Notes
+                    </p>
+                    {!editingNotes && (
+                      <button onClick={() => setEditingNotes(true)} className="opacity-0 group-hover:opacity-100 transition-opacity text-base-content/40 hover:text-primary p-0.5">
+                        <RiEditLine size={12} />
+                      </button>
                     )}
-                    {run.logs.length > 0 && (
-                      <div className="divide-y divide-base-300/20 border-t border-base-300/20">
-                        {run.logs.map((log) => (
-                          <div key={log.id} className="flex items-start gap-2 px-3 py-1.5">
-                            <span className="text-[10px] text-base-content/25 shrink-0 pt-0.5 tabular-nums">
-                              {new Date(log.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                            <span className={`text-[10px] leading-relaxed ${logLevelColor[log.level] ?? "text-base-content/50"}`}>
-                              {log.message}
-                            </span>
+                  </div>
+                  {editingNotes ? (
+                    <div className="flex flex-col gap-2">
+                      <textarea
+                        value={notesDraft}
+                        onChange={(e) => setNotesDraft(e.target.value)}
+                        className="textarea textarea-bordered w-full bg-base-300/50 text-sm min-h-[100px] resize-y"
+                        placeholder="Add notes..."
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => { setNotesDraft(notes); setEditingNotes(false); }} className="btn btn-ghost btn-xs text-base-content/50">Cancel</button>
+                        <button onClick={saveNotes} className="btn btn-primary btn-xs">Save</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className={`text-sm leading-relaxed whitespace-pre-line ${notes ? "text-base-content/80" : "text-base-content/30 italic"} min-h-[60px] cursor-text`}
+                      onClick={() => setEditingNotes(true)}
+                    >
+                      {notes || "Click to add notes..."}
+                    </div>
+                  )}
+                </div>
+
+                {/* CRM: Todos & Activity Tabs */}
+                <div className="bg-base-200 border border-base-300/50 rounded-xl flex flex-col">
+                  {/* Fake tabs layout since we show both side by side or stacked */}
+                  <div className="grid grid-cols-1 xl:grid-cols-2 divide-y xl:divide-y-0 xl:divide-x divide-base-300/50">
+                    {/* Todos Section */}
+                    <div className="p-5 flex flex-col h-[400px]">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-medium flex items-center gap-2">
+                          <RiCheckboxCircleLine size={16} className="text-base-content/40" />
+                          Todos
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-base-300 text-base-content/50 font-semibold">{todos.length}</span>
+                        </h3>
+                        <button onClick={() => setShowTodoModal(true)} className="w-6 h-6 flex items-center justify-center rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+                          <RiAddLine size={14} />
+                        </button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-2">
+                        {todos.length === 0 ? (
+                          <div className="h-full flex items-center justify-center text-sm text-base-content/30 italic">No todos yet.</div>
+                        ) : (
+                          todos.map((todo) => (
+                            <div key={todo.id} className={`group relative p-3 rounded-xl border transition-colors ${todo.status === "done" ? "bg-base-300/30 border-base-300/50 opacity-60" : "bg-base-100 border-base-300/60 hover:border-base-300"}`}>
+                              <div className="flex items-start gap-3">
+                                <button
+                                  onClick={() => toggleTodo(todo)}
+                                  className={`mt-0.5 w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-colors ${todo.status === "done" ? "bg-success/20 border-success/30 text-success" : "border-base-content/30 hover:border-primary text-transparent"}`}
+                                >
+                                  {todo.status === "done" && <RiCheckLine size={10} />}
+                                </button>
+                                <div className="flex-1 min-w-0" onClick={() => setSelectedTodo(todo)}>
+                                  <div className="text-sm font-medium text-base-content truncate cursor-pointer hover:text-primary transition-colors">{todo.title}</div>
+                                  {todo.due_date && (
+                                    <div className={`text-[10px] mt-1 flex items-center gap-1 ${todo.status === "open" && new Date(todo.due_date) < new Date() ? "text-error" : "text-base-content/40"}`}>
+                                      <RiCalendarLine size={11} /> {formatDate(todo.due_date)}
+                                    </div>
+                                  )}
+                                </div>
+                                <button onClick={() => deleteTodo(todo.id)} className="opacity-0 group-hover:opacity-100 p-1 text-base-content/30 hover:text-error transition-all">
+                                  <RiDeleteBinLine size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Activity Feed Section */}
+                    <div className="p-5 flex flex-col h-[400px]">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-medium flex items-center gap-2">
+                          <RiTimeLine size={16} className="text-base-content/40" />
+                          Activity
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-base-300 text-base-content/50 font-semibold">{activityLogs.length}</span>
+                        </h3>
+                        <button onClick={() => setShowLogModal(true)} className="w-6 h-6 flex items-center justify-center rounded-md bg-base-300 text-base-content/60 hover:text-base-content hover:bg-base-300/80 transition-colors">
+                          <RiAddLine size={14} />
+                        </button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                        {activityLogs.length === 0 ? (
+                          <div className="h-full flex items-center justify-center text-sm text-base-content/30 italic">No activity logged.</div>
+                        ) : (
+                          <div className="relative pl-3 space-y-6 before:absolute before:inset-y-2 before:left-3 before:w-px before:bg-base-300/50">
+                            {activityLogs.map((log) => (
+                              <div key={log.id} className="relative pl-6 group">
+                                <div className={`absolute left-0 top-1 -translate-x-1/2 w-6 h-6 rounded-full flex items-center justify-center text-[10px] ring-4 ring-base-200 ${LOG_TYPE_COLORS[log.type]}`}>
+                                  {LOG_TYPE_ICONS[log.type]}
+                                </div>
+                                <div className="bg-base-100 border border-base-300/60 rounded-xl p-3 hover:border-base-300 transition-colors cursor-pointer" onClick={() => setSelectedLog(log)}>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-base-content/40">{log.type}</span>
+                                    <span className="text-[10px] text-base-content/30">{formatDate(log.logged_at)}</span>
+                                  </div>
+                                  <p className="text-sm text-base-content/80 whitespace-pre-wrap">{log.body}</p>
+                                </div>
+                                <button onClick={() => deleteLog(log.id)} className="absolute -right-2 -top-2 w-6 h-6 rounded-full bg-base-200 border border-base-300 text-base-content/40 opacity-0 group-hover:opacity-100 hover:text-error hover:border-error/30 transition-all flex items-center justify-center">
+                                  <RiCloseLine size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Campaign History */}
+            <div className="bg-base-200 border border-base-300/50 rounded-xl p-5 flex-1 min-h-[300px]">
+              <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-4">Campaign History</p>
+              {campaignHistory.length === 0 ? (
+                <div className="h-40 flex flex-col items-center justify-center text-center px-4">
+                  <div className="w-12 h-12 rounded-full bg-base-300/50 flex items-center justify-center mb-3">
+                    <RiFlowChart size={20} className="text-base-content/20" />
+                  </div>
+                  <p className="text-sm text-base-content/50">Not enrolled in any campaigns.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {campaignHistory.map((run) => (
+                    <div key={run.run_id} className="bg-base-100 border border-base-300/50 rounded-xl overflow-hidden">
+                      {/* Run header */}
+                      <div className="px-4 py-3 border-b border-base-300/50 bg-base-300/20 flex items-center justify-between gap-4">
+                        <div className="flex flex-col">
+                          <Link href={`/workflows/${run.workflow_id}`} className="text-sm font-medium hover:text-primary transition-colors flex items-center gap-1.5">
+                            <RiFlowChart size={14} className="text-base-content/40" /> {run.workflow_name}
+                          </Link>
+                          <span className="text-[10px] text-base-content/40 mt-0.5">Enrolled {formatDate(run.enrolled_at)}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {run.state === "completed" && <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-success/10 text-success px-2 py-1 rounded border border-success/20"><RiCheckLine size={12} /> Completed</span>}
+                          {run.state === "failed" && <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-error/10 text-error px-2 py-1 rounded border border-error/20"><RiCloseCircleLine size={12} /> Failed</span>}
+                          {run.state === "in_progress" && <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-info/10 text-info px-2 py-1 rounded border border-info/20"><RiCheckboxBlankCircleLine size={10} className="animate-pulse" /> Step {run.current_step}</span>}
+                          {run.state === "pending" && <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-base-300 text-base-content/50 px-2 py-1 rounded">Pending</span>}
+                        </div>
+                      </div>
+
+                      {/* Error banner if failed */}
+                      {run.error_message && (
+                        <div className="px-4 py-2 bg-error/5 border-b border-error/10 text-xs text-error/80">
+                          {run.error_message}
+                        </div>
+                      )}
+
+                      {/* Execution Logs */}
+                      <div className="p-4 bg-base-100 max-h-64 overflow-y-auto custom-scrollbar">
+                        {run.logs.length === 0 ? (
+                          <p className="text-xs text-base-content/30 italic">No execution logs yet.</p>
+                        ) : (
+                          <div className="space-y-3 relative before:absolute before:inset-y-1 before:left-[7px] before:w-px before:bg-base-300/50 ml-1">
+                            {run.logs.map((log) => {
+                              const isError = log.level === "error";
+                              return (
+                                <div key={log.id} className="relative pl-6">
+                                  <div className={`absolute left-0 top-1 -translate-x-1/2 w-[9px] h-[9px] rounded-full ring-4 ring-base-100 ${isError ? "bg-error" : "bg-base-300"}`} />
+                                  <div className="flex flex-col">
+                                    <span className="text-[10px] text-base-content/30 font-mono mb-0.5">{new Date(log.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                                    <span className={`text-xs ${isError ? "text-error" : "text-base-content/70"}`}>{log.message}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Extended Data block (Apollo, raw positions) */}
+            {(functions.length > 0 || positions.length > 0) && (
+              <div className="bg-base-200 border border-base-300/50 rounded-xl p-5">
+                <p className="text-[11px] text-base-content/40 uppercase tracking-wide mb-3">Enrichment Data</p>
+                <div className="space-y-4">
+                  {functions.length > 0 && (
+                    <div>
+                      <p className="text-[10px] uppercase text-base-content/40 font-medium mb-2">Functions</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {functions.map((f, i) => (
+                          <span key={i} className="px-2 py-0.5 rounded text-xs bg-base-300 text-base-content/60">{f}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {positions.length > 0 && (
+                    <div>
+                      <p className="text-[10px] uppercase text-base-content/40 font-medium mb-2">Experience History</p>
+                      <div className="space-y-3">
+                        {positions.map((p, i) => (
+                          <div key={i} className="flex gap-3">
+                            <div className="mt-0.5 shrink-0 w-6 h-6 rounded bg-base-300 flex items-center justify-center">
+                              <RiBriefcaseLine size={12} className="text-base-content/40" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium">{p.title}</div>
+                              <div className="text-xs text-base-content/60">{p.companyName}</div>
+                              <div className="text-[10px] text-base-content/40 mt-0.5">
+                                {p.startDate ? p.startDate.split("-").slice(0, 2).join("/") : "?"} — {p.current ? "Present" : p.endDate ? p.endDate.split("-").slice(0, 2).join("/") : "?"}
+                              </div>
+                              {p.description && <div className="text-xs text-base-content/50 mt-1 line-clamp-2">{p.description}</div>}
+                            </div>
                           </div>
                         ))}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-
-          </div>{/* end right col */}
-
-        </div>{/* end two-col */}
+        </div>
       </div>
     </>
   );

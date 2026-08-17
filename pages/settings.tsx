@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { GetServerSideProps } from "next";
 import { useSession } from "next-auth/react";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiAddLine, RiDeleteBinLine, RiEditLine, RiMailLine,
@@ -11,12 +11,14 @@ import {
   RiLockPasswordLine, RiPlugLine,
   RiLinkedinBoxLine, RiMessage2Line, RiSettings3Line, RiFileCopyLine,
   RiLockLine, RiLockUnlockLine, RiFlashlightLine, RiArrowDownSLine, RiCompassLine,
+  RiBuildingLine, RiUserAddLine, RiKeyLine, RiRefreshLine, RiVipCrownLine, RiShieldStarLine, RiUserLine, RiDoorOpenLine, RiArrowRightLine,
 } from "react-icons/ri";
 import { ALL_TOUR_PAGES, TOUR_PAGE_LABELS, replayPageTour, type TourPage } from "@/lib/tour";
+import { useBillingStatus } from "@/components/billing/useBillingStatus";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Tab = "linkedin" | "email" | "templates" | "integrations" | "general";
+type Tab = "linkedin" | "email" | "templates" | "integrations" | "organization" | "general";
 
 interface LiAccount {
   id: string; name: string; email: string;
@@ -47,20 +49,15 @@ interface Template {
 // ─── Server-side data ─────────────────────────────────────────────────────────
 
 export const getServerSideProps: GetServerSideProps = async ({ query }) => {
-  const db = getDb();
-  const liAccounts = db
-    .prepare(
+  const liAccounts = await dbAll<LiAccount>(
       `SELECT a.id, a.name, a.email, a.is_authenticated, a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
               a.active_hours_start, a.active_hours_end, a.timezone, a.working_days, a.created_at,
               (SELECT COUNT(*) FROM runs r WHERE r.account_id = a.id AND r.status IN ('running', 'paused')) AS active_run_count
        FROM accounts a ORDER BY a.created_at DESC`
-    )
-    .all();
-  const emailAccounts = db
-    .prepare("SELECT id, name, from_email, from_name, reply_to, smtp_host, smtp_port, smtp_secure, imap_host, imap_port, username, daily_email_limit, active_hours_start, active_hours_end, timezone, working_days, is_verified, signature, ramp_up_enabled, ramp_start_date, created_at FROM email_accounts ORDER BY created_at DESC")
-    .all();
-  const templates = db.prepare("SELECT * FROM templates ORDER BY created_at DESC").all();
-  const validTabs: Tab[] = ["linkedin", "email", "templates", "integrations", "general"];
+  );
+  const emailAccounts = await dbAll<EmailAccount>("SELECT id, name, from_email, from_name, reply_to, smtp_host, smtp_port, smtp_secure, imap_host, imap_port, username, daily_email_limit, active_hours_start, active_hours_end, timezone, working_days, is_verified, signature, ramp_up_enabled, ramp_start_date, created_at FROM email_accounts ORDER BY created_at DESC");
+  const templates = await dbAll<Template>("SELECT * FROM templates ORDER BY created_at DESC");
+  const validTabs: Tab[] = ["linkedin", "email", "templates", "integrations", "organization", "general"];
   const tab: Tab = validTabs.includes(query.tab as Tab) ? (query.tab as Tab) : "linkedin";
   return { props: { liAccounts, emailAccounts, templates, initialTab: tab } };
 };
@@ -72,6 +69,7 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: "email", label: "Email", icon: RiMailLine },
   { key: "templates", label: "Templates", icon: RiMessage2Line },
   { key: "integrations", label: "Integrations", icon: RiPlugLine },
+  { key: "organization", label: "Organization", icon: RiBuildingLine },
   { key: "general", label: "General", icon: RiSettings3Line },
 ];
 
@@ -165,7 +163,10 @@ export default function SettingsPage({
     fetch("/api/premium-status").then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setHasPremium(!!d.hasPremium); }).catch(() => {});
   }, []);
-  const visibleTabs = TABS;
+
+  const { status: billingStatus } = useBillingStatus();
+  const hasOrgAccess = Boolean(billingStatus?.hasOrgAccess);
+  const visibleTabs = TABS.filter((t) => t.key !== "organization" || hasOrgAccess);
 
   function switchTab(t: Tab) {
     setTab(t);
@@ -206,6 +207,26 @@ export default function SettingsPage({
         {tab === "email" && <EmailTab initialAccounts={initialEmail} />}
         {tab === "templates" && <TemplatesTab initialTemplates={initialTemplates} />}
         {tab === "integrations" && <IntegrationsTab hasPremium={hasPremium} />}
+        {tab === "organization" && (
+          hasOrgAccess ? (
+            <OrganizationTab />
+          ) : (
+            <div className="surface rounded-xl p-8 border border-base-300 text-center space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto">
+                <RiBuildingLine size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold">Team Workspace Required</h3>
+                <p className="text-xs text-base-content/60 max-w-sm mx-auto mt-1">
+                  Organization management, team roles, and shared workspaces require an active Team or Organization plan.
+                </p>
+              </div>
+              <a href="/pricing" className="btn btn-sm btn-primary">
+                View Organization Plans
+              </a>
+            </div>
+          )
+        )}
         {tab === "general" && <GeneralTab hasPremium={hasPremium} />}
       </div>
     </>
@@ -1839,6 +1860,286 @@ function GeneralTab({ hasPremium }: { hasPremium: boolean }) {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ─── Organization Tab ──────────────────────────────────────────────────────────
+
+type OrgMember = { user_id: string; email: string; name: string | null; role: string };
+type OrgDetails = { id: string; name: string; invite_code?: string; plan: "free" | "paid"; owner_id: string; created_at: string };
+
+function OrganizationTab() {
+  const [org, setOrg] = useState<OrgDetails | null>(null);
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+
+  // Creation form
+  const [newOrgName, setNewOrgName] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  // Edit org name
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  // Member invite
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviting, setInviting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+
+  function load() {
+    setLoading(true);
+    fetch("/api/organizations")
+      .then((r) => r.json())
+      .then((d) => {
+        setOrg(d.organization ?? null);
+        setMembers(d.members ?? []);
+        if (d.organization) {
+          setEditName(d.organization.name);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+
+    fetch("/api/billing/status")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d) {
+          setCurrentUserId(d.userId ?? "");
+          setIsSuperAdmin(Boolean(d.isSuperAdmin));
+          setCurrentUserRole(d.orgRole ?? null);
+        }
+      })
+      .catch(() => {});
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const canManage = isSuperAdmin || currentUserRole === "owner" || currentUserRole === "admin";
+  const isOwner = isSuperAdmin || currentUserRole === "owner";
+
+  // CRUD: Create Org
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newOrgName.trim()) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/organizations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newOrgName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to create organization");
+      toast.success("Organization created!");
+      setNewOrgName("");
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create organization");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // CRUD: Update Org Name
+  async function handleUpdateName(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editName.trim()) return;
+    setSavingName(true);
+    try {
+      const res = await fetch("/api/organizations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update organization");
+      toast.success("Organization updated");
+      setIsEditingName(false);
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update organization");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
+  // CRUD: Regenerate Invite Code
+  async function handleRegenerateCode() {
+    if (!confirm("Regenerate invite code? The previous code will no longer work for new signups.")) return;
+    setRegenerating(true);
+    try {
+      const res = await fetch("/api/organizations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerateInviteCode: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to regenerate invite code");
+      toast.success("New invite code generated!");
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to regenerate invite code");
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
+  // CRUD: Add Member
+  async function handleAddMember(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setInviting(true);
+    try {
+      const res = await fetch("/api/organizations/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: inviteEmail.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to add member");
+      toast.success("Member added successfully!");
+      setInviteEmail("");
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add member");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  // CRUD: Change Member Role
+  async function handleChangeRole(userId: string, targetRole: "admin" | "member") {
+    try {
+      const res = await fetch("/api/organizations/members", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, role: targetRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update member role");
+      toast.success(`Role updated to ${targetRole}`);
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update member role");
+    }
+  }
+
+  // CRUD: Remove Member
+  async function handleRemoveMember(userId: string) {
+    if (!confirm("Remove this member from the organization?")) return;
+    try {
+      const res = await fetch("/api/organizations/members", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to remove member");
+      toast.success("Member removed");
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove member");
+    }
+  }
+
+  // CRUD: Delete or Leave Org
+  async function handleDeleteOrLeave() {
+    const actionLabel = isOwner ? "Delete Organization" : "Leave Organization";
+    const confirmMsg = isOwner
+      ? "Are you sure you want to permanently delete this organization? All members will be unlinked."
+      : "Are you sure you want to leave this organization?";
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const res = await fetch("/api/organizations", { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${actionLabel} failed`);
+      toast.success(isOwner ? "Organization deleted" : "You have left the organization");
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Action failed");
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="surface rounded-xl p-8 flex items-center justify-center">
+        <span className="loading loading-spinner loading-sm" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {!org ? (
+        /* Initialization form */
+        <div className="surface rounded-2xl p-6 border border-base-300 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+              <RiBuildingLine size={24} />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-base-content">Initialize Organization Workspace</h2>
+              <p className="text-xs text-base-content/60">
+                Setup your company workspace. Once initialized, your Organization page will appear on the sidebar for team registration and member management.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-2 max-w-md pt-2">
+            <input
+              type="text"
+              placeholder="e.g. Acme Sales Team"
+              className="input input-sm flex-1"
+              value={newOrgName}
+              onChange={(e) => setNewOrgName(e.target.value)}
+              required
+            />
+            <button type="submit" disabled={creating} className="btn btn-sm btn-primary">
+              {creating ? "Initializing…" : "Initialize Workspace"}
+            </button>
+          </form>
+        </div>
+      ) : (
+        /* Initialized overview linking to dedicated /organization page */
+        <div className="surface rounded-2xl p-6 border border-base-300 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <RiBuildingLine size={24} />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-base-content flex items-center gap-2">
+                  {org.name}
+                  <span className={`badge badge-sm ${org.plan === "paid" ? "badge-primary" : "badge-ghost"}`}>
+                    {org.plan === "paid" ? "Paid Team Plan" : "Free Plan"}
+                  </span>
+                </h2>
+                <p className="text-xs text-base-content/60 mt-0.5">
+                  Workspace Active · {members.length} Member{members.length === 1 ? "" : "s"} · Created {new Date(org.created_at).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+
+            <a href="/organization" className="btn btn-sm btn-primary gap-1.5 inline-flex items-center">
+              Open Organization Workspace <RiArrowRightLine size={15} />
+            </a>
+          </div>
+
+          <div className="p-4 rounded-xl bg-base-200/50 border border-base-300/40 text-xs text-base-content/70 flex items-center justify-between gap-3">
+            <span>
+              All team invite codes, member roles (`Owner`, `Admin`, `Member`), and user registrations are managed on your dedicated <strong>Organization</strong> page in the sidebar.
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,13 +3,11 @@
  * Reuses the same column set as list CSV import; optional listId linking.
  */
 import Papa from "papaparse";
-import type DatabaseType from "better-sqlite3";
 import { randomUUID } from "crypto";
 import type { CsvPreviewRow, CsvPreviewResult, CsvChunkResult } from "./types";
 import { DEFAULT_CHUNK_SIZE } from "./types";
 import { buildCsvTemplate } from "@/lib/csv-import";
-
-type DB = DatabaseType.Database;
+import { dbGet, dbRun, dbTransaction } from "@/lib/db";
 
 const EDITABLE_FIELDS = [
   "first_name", "last_name", "title", "company", "location",
@@ -109,27 +107,29 @@ export function previewContactCsv(csvText: string): CsvPreviewResult {
   };
 }
 
-function resolveCompanyId(db: DB, name: string | null, domain: string | null): string | null {
+async function resolveCompanyId(name: string | null, domain: string | null): Promise<string | null> {
   if (domain) {
-    const byDomain = db
-      .prepare(`SELECT id FROM companies WHERE domain = ? COLLATE NOCASE LIMIT 1`)
-      .get(domain) as { id: string } | undefined;
+    const byDomain = await dbGet<{ id: string }>(
+      `SELECT id FROM companies WHERE domain = ? LIMIT 1`,
+      [domain]
+    );
     if (byDomain) return byDomain.id;
   }
   if (name) {
-    const byName = db
-      .prepare(`SELECT id FROM companies WHERE name = ? COLLATE NOCASE LIMIT 1`)
-      .get(name) as { id: string } | undefined;
+    const byName = await dbGet<{ id: string }>(
+      `SELECT id FROM companies WHERE name = ? LIMIT 1`,
+      [name]
+    );
     if (byName) return byName.id;
     // Create stub company
     const id = randomUUID();
-    db.prepare(`INSERT INTO companies (id, name, domain) VALUES (?, ?, ?)`).run(id, name, domain);
+    await dbRun(`INSERT INTO companies (id, name, domain) VALUES (?, ?, ?)`, [id, name, domain]);
     return id;
   }
   if (domain) {
     const id = randomUUID();
     const stubName = domain.split(".")[0];
-    db.prepare(`INSERT INTO companies (id, name, domain) VALUES (?, ?, ?)`).run(id, stubName, domain);
+    await dbRun(`INSERT INTO companies (id, name, domain) VALUES (?, ?, ?)`, [id, stubName, domain]);
     return id;
   }
   return null;
@@ -138,8 +138,7 @@ function resolveCompanyId(db: DB, name: string | null, domain: string | null): s
 /**
  * Chunked contact import. listId is optional — when set, contacts are also linked to the list.
  */
-export function importContactChunk(
-  db: DB,
+export async function importContactChunk(
   previewRows: CsvPreviewRow[],
   opts: {
     offset: number;
@@ -147,7 +146,7 @@ export function importContactChunk(
     chunkSize?: number;
     listId?: string | null;
   }
-): CsvChunkResult {
+): Promise<CsvChunkResult> {
   const chunkSize = opts.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const slice = previewRows.slice(opts.offset, opts.offset + chunkSize);
   const errors: string[] = [];
@@ -155,40 +154,7 @@ export function importContactChunk(
   let updated = 0;
   let skipped = 0;
 
-  const findByLinkedin = db.prepare("SELECT id FROM targets WHERE linkedin_url = ?");
-  const findByEmail = db.prepare("SELECT id FROM targets WHERE email = ? LIMIT 1");
-  const linkToList = opts.listId
-    ? db.prepare("INSERT OR IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)")
-    : null;
-
-  const insertFull = db.prepare(`
-    INSERT INTO targets (
-      id, linkedin_url, sales_nav_url, email, full_name,
-      first_name, last_name, title, company, location, city, country, phone, headline, summary, notes, company_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const updateById = db.prepare(`
-    UPDATE targets SET
-      sales_nav_url = COALESCE(?, sales_nav_url),
-      email = COALESCE(?, email),
-      full_name = COALESCE(?, full_name),
-      first_name = COALESCE(?, first_name),
-      last_name = COALESCE(?, last_name),
-      title = COALESCE(?, title),
-      company = COALESCE(?, company),
-      location = COALESCE(?, location),
-      city = COALESCE(?, city),
-      country = COALESCE(?, country),
-      phone = COALESCE(?, phone),
-      headline = COALESCE(?, headline),
-      summary = COALESCE(?, summary),
-      notes = COALESCE(?, notes),
-      company_id = COALESCE(?, company_id)
-    WHERE id = ?
-  `);
-
-  db.transaction(() => {
+  await dbTransaction(async () => {
     for (const pr of slice) {
       if (pr.errors.length) {
         skipped++;
@@ -202,45 +168,95 @@ export function importContactChunk(
         const last = d.last_name;
         const full_name =
           [first, last].filter(Boolean).join(" ") || null;
-        const companyId = resolveCompanyId(db, d.company, d.company_domain);
+        const companyId = await resolveCompanyId(d.company, d.company_domain);
 
         let targetId: string;
         let isNew = false;
 
         if (linkedin) {
-          const existing = findByLinkedin.get(linkedin) as { id: string } | undefined;
+          const existing = await dbGet<{ id: string }>("SELECT id FROM targets WHERE linkedin_url = ?", [linkedin]);
           if (existing) {
             targetId = existing.id;
-            updateById.run(
-              d.sales_nav_url, email, full_name,
-              first, last, d.title, d.company, d.location, d.city, d.country,
-              d.phone, d.headline, d.summary, d.notes, companyId, targetId
+            await dbRun(
+              `UPDATE targets SET
+                sales_nav_url = COALESCE(?, sales_nav_url),
+                email = COALESCE(?, email),
+                full_name = COALESCE(?, full_name),
+                first_name = COALESCE(?, first_name),
+                last_name = COALESCE(?, last_name),
+                title = COALESCE(?, title),
+                company = COALESCE(?, company),
+                location = COALESCE(?, location),
+                city = COALESCE(?, city),
+                country = COALESCE(?, country),
+                phone = COALESCE(?, phone),
+                headline = COALESCE(?, headline),
+                summary = COALESCE(?, summary),
+                notes = COALESCE(?, notes),
+                company_id = COALESCE(?, company_id)
+              WHERE id = ?`,
+              [
+                d.sales_nav_url, email, full_name,
+                first, last, d.title, d.company, d.location, d.city, d.country,
+                d.phone, d.headline, d.summary, d.notes, companyId, targetId
+              ]
             );
           } else {
             targetId = randomUUID();
             isNew = true;
-            insertFull.run(
-              targetId, linkedin, d.sales_nav_url, email, full_name,
-              first, last, d.title, d.company, d.location, d.city, d.country,
-              d.phone, d.headline, d.summary, d.notes, companyId
+            await dbRun(
+              `INSERT INTO targets (
+                id, linkedin_url, sales_nav_url, email, full_name,
+                first_name, last_name, title, company, location, city, country, phone, headline, summary, notes, company_id
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                targetId, linkedin, d.sales_nav_url, email, full_name,
+                first, last, d.title, d.company, d.location, d.city, d.country,
+                d.phone, d.headline, d.summary, d.notes, companyId
+              ]
             );
           }
         } else if (email) {
-          const existing = findByEmail.get(email) as { id: string } | undefined;
+          const existing = await dbGet<{ id: string }>("SELECT id FROM targets WHERE email = ? LIMIT 1", [email]);
           if (existing) {
             targetId = existing.id;
-            updateById.run(
-              d.sales_nav_url, email, full_name,
-              first, last, d.title, d.company, d.location, d.city, d.country,
-              d.phone, d.headline, d.summary, d.notes, companyId, targetId
+            await dbRun(
+              `UPDATE targets SET
+                sales_nav_url = COALESCE(?, sales_nav_url),
+                email = COALESCE(?, email),
+                full_name = COALESCE(?, full_name),
+                first_name = COALESCE(?, first_name),
+                last_name = COALESCE(?, last_name),
+                title = COALESCE(?, title),
+                company = COALESCE(?, company),
+                location = COALESCE(?, location),
+                city = COALESCE(?, city),
+                country = COALESCE(?, country),
+                phone = COALESCE(?, phone),
+                headline = COALESCE(?, headline),
+                summary = COALESCE(?, summary),
+                notes = COALESCE(?, notes),
+                company_id = COALESCE(?, company_id)
+              WHERE id = ?`,
+              [
+                d.sales_nav_url, email, full_name,
+                first, last, d.title, d.company, d.location, d.city, d.country,
+                d.phone, d.headline, d.summary, d.notes, companyId, targetId
+              ]
             );
           } else {
             targetId = randomUUID();
             isNew = true;
-            insertFull.run(
-              targetId, null, d.sales_nav_url, email, full_name,
-              first, last, d.title, d.company, d.location, d.city, d.country,
-              d.phone, d.headline, d.summary, d.notes, companyId
+            await dbRun(
+              `INSERT INTO targets (
+                id, linkedin_url, sales_nav_url, email, full_name,
+                first_name, last_name, title, company, location, city, country, phone, headline, summary, notes, company_id
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                targetId, null, d.sales_nav_url, email, full_name,
+                first, last, d.title, d.company, d.location, d.city, d.country,
+                d.phone, d.headline, d.summary, d.notes, companyId
+              ]
             );
           }
         } else {
@@ -248,8 +264,8 @@ export function importContactChunk(
           continue;
         }
 
-        if (linkToList && opts.listId) {
-          linkToList.run(opts.listId, targetId);
+        if (opts.listId) {
+          await dbRun("INSERT IGNORE INTO list_targets (list_id, target_id) VALUES (?, ?)", [opts.listId, targetId]);
         }
 
         if (isNew) imported++;
@@ -259,7 +275,7 @@ export function importContactChunk(
         skipped++;
       }
     }
-  })();
+  });
 
   const processed = opts.offset + slice.length;
   return {

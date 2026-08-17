@@ -135,6 +135,7 @@ export default function LinkedInHistoryPage() {
   };
 
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadPosts(); }, [postFilter]);
 
   useEffect(() => {
@@ -444,7 +445,7 @@ export default function LinkedInHistoryPage() {
                 Search LinkedIn people results with your connected account (same session as campaigns). Keep volume low.
               </p>
             </div>
-            {accounts.length > 0 && (
+            {accounts.length > 0 ? (
               <select
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
@@ -456,6 +457,10 @@ export default function LinkedInHistoryPage() {
                   </option>
                 ))}
               </select>
+            ) : (
+              <Link href="/accounts" className="text-xs font-medium text-warning hover:underline flex items-center gap-1 bg-warning/10 px-2.5 py-1 rounded-md border border-warning/20">
+                <span>⚠️ Connect LinkedIn account to search</span> →
+              </Link>
             )}
           </div>
 
@@ -464,12 +469,12 @@ export default function LinkedInHistoryPage() {
             className="flex flex-col sm:flex-row gap-2"
           >
             <div className="relative flex-1">
-              <RiSearchLine size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/30" />
+              <RiSearchLine size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50" />
               <input
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
                 placeholder='Try "ceo in dubai" or "head of sales fintech"'
-                className="input input-sm w-full pl-9 bg-base-300 border-base-300/50 focus:outline-none focus:border-primary/40"
+                className="input input-sm w-full pl-9 bg-base-100 text-base-content placeholder:text-base-content/50 border-base-300 focus:outline-none focus:border-primary"
                 disabled={searching}
               />
             </div>

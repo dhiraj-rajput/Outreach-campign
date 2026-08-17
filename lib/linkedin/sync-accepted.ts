@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { getDb } from "@/lib/db";
+import { dbGet, dbAll, dbRun, dbTransaction } from "@/lib/db";
 import { getSessionPage, saveSessionState, markNeedsReauth } from "@/lib/linkedin/session";
 
 /**
@@ -42,11 +42,8 @@ const MAX_PAGES = 60; // safety cap (60 * 100 = 6000)
 const OVERLAP_MARGIN_MS = 24 * 60 * 60 * 1000; // re-check a day of overlap (idempotent)
 const DECORATION = "com.linkedin.voyager.dash.deco.web.mynetwork.ConnectionListWithProfile-16";
 
-export function shouldSyncAccepted(accountId: string): boolean {
-  const db = getDb();
-  const row = db.prepare("SELECT accepted_sync_at FROM accounts WHERE id = ?").get(accountId) as
-    | { accepted_sync_at: string | null }
-    | undefined;
+export async function shouldSyncAccepted(accountId: string): Promise<boolean> {
+  const row = await dbGet<{ accepted_sync_at: string | null }>("SELECT accepted_sync_at FROM accounts WHERE id = ?", [accountId]);
   if (!row?.accepted_sync_at) return true;
   return Date.now() - new Date(row.accepted_sync_at).getTime() >= ACCEPTED_SYNC_INTERVAL_MS;
 }
@@ -57,14 +54,11 @@ interface ApiConnection {
 }
 
 export async function syncAcceptedConnections(accountId: string): Promise<number> {
-  const db = getDb();
   const page = await getSessionPage(accountId);
   let stamped = 0;
 
   try {
-    const boundaryRow = db.prepare("SELECT connections_synced_through_ms FROM accounts WHERE id = ?").get(accountId) as
-      | { connections_synced_through_ms: number | null }
-      | undefined;
+    const boundaryRow = await dbGet<{ connections_synced_through_ms: number | null }>("SELECT connections_synced_through_ms FROM accounts WHERE id = ?", [accountId]);
     const boundary = boundaryRow?.connections_synced_through_ms ?? null;
     const isFullPass = boundary === null;
     const stopBefore = boundary === null ? null : boundary - OVERLAP_MARGIN_MS;
@@ -84,14 +78,6 @@ export async function syncAcceptedConnections(accountId: string): Promise<number
       const m = document.body.innerText.match(/([\d.,]+)\s+connections?/i);
       return m ? parseInt(m[1].replace(/[.,]/g, ""), 10) : null;
     });
-
-    const findByVanity = db.prepare(
-      `SELECT id, full_name, connected_at, degree FROM targets
-       WHERE linkedin_url LIKE ? AND connection_requested_at IS NOT NULL`
-    );
-    const stampAccepted = db.prepare(
-      "UPDATE targets SET degree = 1, connected_at = COALESCE(connected_at, ?) WHERE id = ?"
-    );
 
     const seenVanities = new Set<string>(); // full-pass phantom check
     let uniquePulled = 0;
@@ -118,11 +104,13 @@ export async function syncAcceptedConnections(accountId: string): Promise<number
         }
         if (!c.vanity) continue;
 
-        for (const m of findByVanity.all(`%/in/${c.vanity}/%`) as Array<{
-          id: string; full_name: string | null; connected_at: string | null; degree: number | null;
-        }>) {
+        const matches = await dbAll<{ id: string; full_name: string | null; connected_at: string | null; degree: number | null }>(
+          `SELECT id, full_name, connected_at, degree FROM targets
+           WHERE linkedin_url LIKE ? AND connection_requested_at IS NOT NULL`, [`%/in/${c.vanity}/%`]
+        );
+        for (const m of matches) {
           if (m.degree === 1 && m.connected_at) continue; // already correct
-          stampAccepted.run(msToSqlite(c.createdAt), m.id);
+          await dbRun("UPDATE targets SET degree = 1, connected_at = COALESCE(connected_at, ?) WHERE id = ?", [msToSqlite(c.createdAt), m.id]);
           console.log(`[sync-accepted] Accepted: ${m.full_name ?? c.vanity}`);
           stamped++;
         }
@@ -142,21 +130,19 @@ export async function syncAcceptedConnections(accountId: string): Promise<number
     // incremental/incomplete pass — a partial pull must not wipe real accepts.
     let unmarked = 0;
     if (verifiedComplete) {
-      const deg1 = db.prepare(
+      const deg1 = await dbAll<{ id: string; full_name: string | null; linkedin_url: string }>(
         "SELECT id, full_name, linkedin_url FROM targets WHERE degree = 1 AND linkedin_url LIKE '%/in/%'"
-      ).all() as Array<{ id: string; full_name: string | null; linkedin_url: string }>;
-      const unmark = db.prepare("UPDATE targets SET degree = NULL, connected_at = NULL WHERE id = ?");
-      const tx = db.transaction((rows: typeof deg1) => {
-        for (const t of rows) {
+      );
+      await dbTransaction(async (conn) => {
+        for (const t of deg1) {
           const mm = t.linkedin_url.match(/\/in\/([^/?#]+)/);
           const v = mm ? decodeURIComponent(mm[1]).toLowerCase() : null;
           if (!v || !seenVanities.has(v)) {
-            unmark.run(t.id);
+            await conn.execute("UPDATE targets SET degree = NULL, connected_at = NULL WHERE id = ?", [t.id]);
             unmarked++;
           }
         }
       });
-      tx(deg1);
       console.log(`[sync-accepted] Verified full pass (pulled ${uniquePulled} == declared ${declaredTotal}). Un-marked ${unmarked} phantom degree=1.`);
     } else if (isFullPass) {
       console.warn(`[sync-accepted] Full pass NOT verified complete (pulled ${uniquePulled}, declared ${declaredTotal}) — add-only, no un-marking.`);
@@ -164,11 +150,11 @@ export async function syncAcceptedConnections(accountId: string): Promise<number
 
     // Advance the boundary to the newest connection seen this run.
     if (newestSeen !== null) {
-      db.prepare("UPDATE accounts SET connections_synced_through_ms = ? WHERE id = ?").run(newestSeen, accountId);
+      await dbRun("UPDATE accounts SET connections_synced_through_ms = ? WHERE id = ?", [newestSeen, accountId]);
     }
     // Store the declared total for visibility (Settings shows LinkedIn's count).
     if (declaredTotal !== null) {
-      db.prepare("UPDATE accounts SET li_connections = ? WHERE id = ?").run(declaredTotal, accountId);
+      await dbRun("UPDATE accounts SET li_connections = ? WHERE id = ?", [declaredTotal, accountId]);
     }
     console.log(`[sync-accepted] Stamped ${stamped} accepted, un-marked ${unmarked} phantom (boundary=${newestSeen}).`);
   } finally {
@@ -182,7 +168,7 @@ export async function syncAcceptedConnections(accountId: string): Promise<number
     } else {
       try { await saveSessionState(accountId); } catch { /* ignore */ }
     }
-    db.prepare("UPDATE accounts SET accepted_sync_at = datetime('now') WHERE id = ?").run(accountId);
+    await dbRun("UPDATE accounts SET accepted_sync_at = NOW() WHERE id = ?", [accountId]);
   }
 
   return stamped;

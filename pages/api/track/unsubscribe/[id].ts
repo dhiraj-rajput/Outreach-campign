@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 import { verifyUnsubscribeToken, addSuppression } from "@/lib/email/suppression";
 
 // Public route — excluded from the session-auth gate in proxy.ts (this link is clicked by
@@ -23,27 +23,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const db = getDb();
-
     // The unsubscribe link is signed off the raw id with no indication of which table it came
     // from — it's minted both for cold-email/LinkedIn-track targets (unsubscribeUrl(target.id))
     // and for newsletter recipients (unsubscribeUrl(subscriber.id)). Try both.
-    const target = db.prepare("SELECT id, email FROM targets WHERE id = ?").get(targetId) as
-      { id: string; email: string | null } | undefined;
+    const target = await dbGet<{ id: string; email: string | null }>("SELECT id, email FROM targets WHERE id = ?", [targetId]);
 
     if (target?.email) {
-      db.prepare("UPDATE targets SET unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE id = ?").run(target.id);
-      addSuppression(target.email, "unsubscribed", target.id);
+      await dbRun("UPDATE targets SET unsubscribed_at = COALESCE(unsubscribed_at, NOW()) WHERE id = ?", [target.id]);
+      await addSuppression(target.email, "unsubscribed", target.id);
     } else {
-      const subscriber = db.prepare("SELECT id, email FROM newsletter_subscribers WHERE id = ?").get(targetId) as
-        { id: string; email: string } | undefined;
+      const subscriber = await dbGet<{ id: string; email: string }>("SELECT id, email FROM newsletter_subscribers WHERE id = ?", [targetId]);
       if (subscriber?.email) {
-        db.prepare(
-          "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE id = ?"
-        ).run(subscriber.id);
+        await dbRun(
+          "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, NOW()) WHERE id = ?",
+          [subscriber.id]
+        );
         // addSuppression cross-syncs this to every other newsletter and to targets.unsubscribed_at
         // for any target sharing the same email, so this person can't be re-added anywhere.
-        addSuppression(subscriber.email, "newsletter_unsubscribed", null);
+        await addSuppression(subscriber.email, "newsletter_unsubscribed", null);
       }
     }
   } catch (err) {

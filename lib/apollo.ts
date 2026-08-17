@@ -44,7 +44,11 @@ export async function matchPerson(
     body: JSON.stringify({ linkedin_url: linkedinUrl, reveal_personal_emails: false }),
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error(`[apollo] matchPerson failed with status ${res.status}: ${errText}`);
+    return null;
+  }
 
   const data = await res.json();
   const p = data.person;

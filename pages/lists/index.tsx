@@ -2,7 +2,7 @@ import Head from "next/head";
 import { useState, useEffect, useRef } from "react";
 import { GetServerSideProps } from "next";
 import { useRouter } from "next/router";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiAddLine,
@@ -45,21 +45,18 @@ interface ImportJob {
 }
 
 export const getServerSideProps: GetServerSideProps = async () => {
-  const db = getDb();
-  const lists = db
-    .prepare(
-      `SELECT l.*, COUNT(lt.target_id) as target_count,
-              ar.id as active_run_id,
-              ar.status as active_run_status,
-              w.name as active_workflow_name
+  const lists = await dbAll<List>(
+      `SELECT l.*, COUNT(DISTINCT lt.target_id) as target_count,
+              MAX(ar.id) as active_run_id,
+              MAX(ar.status) as active_run_status,
+              MAX(w.name) as active_workflow_name
        FROM lists l
        LEFT JOIN list_targets lt ON lt.list_id = l.id
        LEFT JOIN runs ar ON ar.list_id = l.id AND ar.status IN ('running', 'paused')
        LEFT JOIN workflows w ON w.id = ar.workflow_id
        GROUP BY l.id
        ORDER BY l.created_at DESC`
-    )
-    .all();
+  );
   return { props: { initialLists: lists } };
 };
 
@@ -224,7 +221,7 @@ export default function ListsPage({ initialLists }: { initialLists: List[] }) {
           <input
             type="text"
             placeholder="Search lists..."
-            className="input input-bordered input-sm w-full pl-9 bg-base-200/50"
+            className="input input-sm w-full pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

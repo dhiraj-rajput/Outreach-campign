@@ -1,5 +1,5 @@
 import { randomUUID, createHmac, timingSafeEqual } from "crypto";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 
 // Ported from PPT-Agent's Suppression model + app/core/tracking_helpers.py
 // (unsubscribe_url / verify_unsubscribe_token). Uses NEXTAUTH_SECRET the same way
@@ -34,9 +34,8 @@ export function verifyUnsubscribeToken(targetId: string, token: string): boolean
 }
 
 /** Is this email address on the suppression list? Checked before every send. */
-export function isSuppressed(email: string): boolean {
-  const db = getDb();
-  const row = db.prepare("SELECT 1 FROM suppressions WHERE email = ? COLLATE NOCASE").get(email);
+export async function isSuppressed(email: string): Promise<boolean> {
+  const row = await dbGet("SELECT 1 FROM suppressions WHERE email = ?", [email]);
   return !!row;
 }
 
@@ -51,32 +50,33 @@ export function isSuppressed(email: string): boolean {
  *  - newsletter_subscribers.status (read by the newsletter send endpoint)
  * This is what keeps "unsubscribed once" from meaning "unsubscribed from just this one thing".
  */
-export function addSuppression(email: string, reason: string, targetId?: string | null): void {
-  const db = getDb();
-  const exists = db.prepare("SELECT 1 FROM suppressions WHERE email = ? COLLATE NOCASE").get(email);
+export async function addSuppression(email: string, reason: string, targetId?: string | null): Promise<void> {
+  const exists = await dbGet("SELECT 1 FROM suppressions WHERE email = ?", [email]);
   if (!exists) {
-    db.prepare(
-      "INSERT INTO suppressions (id, email, reason, target_id) VALUES (?, ?, ?, ?)"
-    ).run(randomUUID(), email, reason, targetId ?? null);
+    await dbRun(
+      "INSERT INTO suppressions (id, email, reason, target_id) VALUES (?, ?, ?, ?)",
+      [randomUUID(), email, reason, targetId ?? null]
+    );
   }
 
   // Cross-sync: mark every target with this email as unsubscribed (blocks future cold-email
   // enrollment/sends even for target rows other than the one that triggered this).
-  db.prepare(
-    "UPDATE targets SET unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE email = ? COLLATE NOCASE"
-  ).run(email);
+  await dbRun(
+    "UPDATE targets SET unsubscribed_at = COALESCE(unsubscribed_at, NOW()) WHERE email = ?",
+    [email]
+  );
 
   // Cross-sync: mark every newsletter subscription for this email as unsubscribed (blocks
   // future newsletter sends across every newsletter, not just the one they clicked from).
-  db.prepare(
-    "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE email = ? COLLATE NOCASE AND status != 'unsubscribed'"
-  ).run(email);
+  await dbRun(
+    "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, NOW()) WHERE email = ? AND status != 'unsubscribed'",
+    [email]
+  );
 }
 
 /** Remove an email from the suppression list (re-subscribe / undo an accidental unsubscribe). */
-export function removeSuppression(email: string): void {
-  const db = getDb();
-  db.prepare("DELETE FROM suppressions WHERE email = ? COLLATE NOCASE").run(email);
+export async function removeSuppression(email: string): Promise<void> {
+  await dbRun("DELETE FROM suppressions WHERE email = ?", [email]);
 }
 
 interface SuppressionRow {
@@ -88,18 +88,17 @@ interface SuppressionRow {
 }
 
 /** All suppressed (unsubscribed/bounced) people, newest first — for the Email/LinkedIn history pages. */
-export function listSuppressions(): Array<SuppressionRow & {
+export async function listSuppressions(): Promise<Array<SuppressionRow & {
   full_name: string | null;
   company: string | null;
-}> {
-  const db = getDb();
-  return db.prepare(`
+}>> {
+  return await dbAll<SuppressionRow & { full_name: string | null; company: string | null }>(`
     SELECT s.id, s.email, s.reason, s.target_id, s.created_at,
            t.full_name, t.company
     FROM suppressions s
     LEFT JOIN targets t ON t.id = s.target_id
     ORDER BY s.created_at DESC
-  `).all() as Array<SuppressionRow & { full_name: string | null; company: string | null }>;
+  `);
 }
 
 /** Plain-text footer appended to non-HTML campaign emails. */

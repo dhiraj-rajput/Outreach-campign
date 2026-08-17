@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun, dbTransaction } from "@/lib/db";
 import { randomUUID } from "crypto";
 import { getSessionPage, saveSessionState, getSessionContext } from "@/lib/linkedin/session";
 import { visitProfile } from "@/lib/linkedin/visit";
@@ -210,8 +210,8 @@ interface Template { id: string; body: string; }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function log(db: ReturnType<typeof getDb>, runId: string, targetId: string | null, level: "info" | "warn" | "error", message: string) {
-  db.prepare("INSERT INTO logs (id, run_id, target_id, level, message) VALUES (?, ?, ?, ?, ?)").run(randomUUID(), runId, targetId, level, message);
+async function log(runId: string, targetId: string | null, level: "info" | "warn" | "error", message: string) {
+  await dbRun("INSERT INTO logs (id, run_id, target_id, level, message) VALUES (?, ?, ?, ?, ?)", [randomUUID(), runId, targetId, level, message]);
   console.log(`[runner] [${level}] run=${runId} target=${targetId ?? "-"} ${message}`);
 }
 
@@ -235,68 +235,66 @@ function hoursSince(isoStr: string) { return (Date.now() - new Date(isoStr).getT
 // ─── TrackRun verb layer ─────────────────────────────────────────────────────
 // These are the only functions that write to run_profile_tracks rows.
 
-function trAdvance(db: ReturnType<typeof getDb>, tr: TrackRun, steps: WorkflowStep[]) {
+async function trAdvance(tr: TrackRun, steps: WorkflowStep[]) {
   const nextIndex = tr.current_step + 1;
   if (nextIndex >= steps.length) {
-    db.prepare(
-      "UPDATE run_profile_tracks SET state = 'completed', current_step = ?, last_step_at = datetime('now'), next_step_at = NULL WHERE id = ?"
-    ).run(nextIndex, tr.id);
+    await dbRun(
+      "UPDATE run_profile_tracks SET state = 'completed', current_step = ?, last_step_at = NOW(), next_step_at = NULL WHERE id = ?"
+    , [nextIndex, tr.id]);
   } else {
     const nextStep = steps[nextIndex];
     const nextAt = nextStep.delay_seconds > 0 ? new Date(Date.now() + nextStep.delay_seconds * 1000).toISOString() : null;
-    db.prepare(
-      "UPDATE run_profile_tracks SET current_step = ?, last_step_at = datetime('now'), next_step_at = ? WHERE id = ?"
-    ).run(nextIndex, nextAt, tr.id);
+    await dbRun(
+      "UPDATE run_profile_tracks SET current_step = ?, last_step_at = NOW(), next_step_at = ? WHERE id = ?"
+    , [nextIndex, nextAt, tr.id]);
   }
 }
 
-function trWait(db: ReturnType<typeof getDb>, tr: TrackRun, hours: number) {
-  db.prepare("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?").run(addHours(hours), tr.id);
+async function trWait(tr: TrackRun, hours: number) {
+  await dbRun("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?", [addHours(hours), tr.id]);
 }
 
-function trReschedule(db: ReturnType<typeof getDb>, tr: TrackRun, isoTimestamp: string) {
-  db.prepare("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?").run(isoTimestamp, tr.id);
+async function trReschedule(tr: TrackRun, isoTimestamp: string) {
+  await dbRun("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?", [isoTimestamp, tr.id]);
 }
 
-function trSkip(db: ReturnType<typeof getDb>, tr: TrackRun, reason: string) {
-  db.prepare("UPDATE run_profile_tracks SET state = 'skipped', error_message = ? WHERE id = ?").run(reason, tr.id);
+async function trSkip(tr: TrackRun, reason: string) {
+  await dbRun("UPDATE run_profile_tracks SET state = 'skipped', error_message = ? WHERE id = ?", [reason, tr.id]);
 }
 
-function trFail(db: ReturnType<typeof getDb>, tr: TrackRun, reason: string) {
-  db.prepare("UPDATE run_profile_tracks SET state = 'failed', error_message = ? WHERE id = ?").run(reason, tr.id);
+async function trFail(tr: TrackRun, reason: string) {
+  await dbRun("UPDATE run_profile_tracks SET state = 'failed', error_message = ? WHERE id = ?", [reason, tr.id]);
 }
 
-function trRecordContext(db: ReturnType<typeof getDb>, tr: TrackRun, ctx: { linkedinMessage?: string; emailSubject?: string; emailBody?: string }) {
+async function trRecordContext(tr: TrackRun, ctx: { linkedinMessage?: string; emailSubject?: string; emailBody?: string }) {
   if (ctx.linkedinMessage !== undefined) {
-    db.prepare("UPDATE run_profile_tracks SET last_linkedin_message = ? WHERE id = ?").run(ctx.linkedinMessage, tr.id);
+    await dbRun("UPDATE run_profile_tracks SET last_linkedin_message = ? WHERE id = ?", [ctx.linkedinMessage, tr.id]);
   }
   if (ctx.emailSubject !== undefined || ctx.emailBody !== undefined) {
-    db.prepare("UPDATE run_profile_tracks SET last_email_subject = ?, last_email_body = ? WHERE id = ?")
-      .run(ctx.emailSubject ?? null, ctx.emailBody ?? null, tr.id);
+    await dbRun("UPDATE run_profile_tracks SET last_email_subject = ?, last_email_body = ? WHERE id = ?", [ctx.emailSubject ?? null, ctx.emailBody ?? null, tr.id]);
   }
 }
 
 // ─── enforceSchedule helper ──────────────────────────────────────────────────
 // Returns true if the step may proceed. Returns false and reschedules if outside the window.
 
-function enforceSchedule(
-  db: ReturnType<typeof getDb>,
+async function enforceSchedule(
   tr: TrackRun,
   runId: string,
   targetId: string,
   name: string,
   schedule: ScheduleConfig
-): boolean {
+): Promise<boolean> {
   if (isWithinSchedule(schedule)) return true;
   const nextSlot = nextScheduledSlot(schedule);
-  log(db, runId, targetId, "info", `Outside working schedule — rescheduling ${name} to ${nextSlot}`);
-  trReschedule(db, tr, nextSlot);
+  await log(runId, targetId, "info", `Outside working schedule — rescheduling ${name} to ${nextSlot}`);
+  await trReschedule(tr, nextSlot);
   return false;
 }
 
 // ─── URL resolution ──────────────────────────────────────────────────────────
 
-async function resolveLinkedinUrl(db: ReturnType<typeof getDb>, target: Target, accountId: string): Promise<string> {
+async function resolveLinkedinUrl(target: Target, accountId: string): Promise<string> {
   if (target.linkedin_url?.includes("/in/")) return target.linkedin_url;
   const salesNavUrl = target.sales_nav_url ?? target.linkedin_url;
   if (!salesNavUrl) throw new Error(`${target.full_name ?? target.id} has no Sales Nav URL to resolve from`);
@@ -336,7 +334,7 @@ async function resolveLinkedinUrl(db: ReturnType<typeof getDb>, target: Target, 
   const rawSkills = Array.isArray(p?.skills) ? (p.skills as RawSkill[]) : [];
   const skills = rawSkills.map((s) => (typeof s.name === "string" ? s.name : "")).filter(Boolean);
 
-  db.prepare(`
+  await dbRun(`
     UPDATE targets SET
       linkedin_url         = ?,
       linkedin_member_urn  = COALESCE(linkedin_member_urn, ?),
@@ -344,30 +342,28 @@ async function resolveLinkedinUrl(db: ReturnType<typeof getDb>, target: Target, 
       summary              = COALESCE(summary, ?),
       positions_json       = COALESCE(positions_json, ?),
       skills_json          = CASE WHEN skills_json IS NULL AND ? IS NOT NULL THEN ? ELSE skills_json END,
-      enriched_profile_at  = COALESCE(enriched_profile_at, datetime('now'))
+      enriched_profile_at  = COALESCE(enriched_profile_at, NOW())
     WHERE id = ?
-  `).run(
-    linkedinUrl,
+  `, [linkedinUrl,
     typeof p?.objectUrn === "string" ? p.objectUrn : null,
     typeof p?.headline === "string" ? p.headline : null,
     typeof p?.summary === "string" ? p.summary : null,
     positions.length > 0 ? JSON.stringify(positions) : null,
     skills.length > 0 ? "1" : null,
     skills.length > 0 ? JSON.stringify(skills) : null,
-    target.id
-  );
+    target.id]);
   return linkedinUrl;
 }
 
-async function getLinkedinUrl(db: ReturnType<typeof getDb>, target: Target, accountId: string): Promise<string> {
+async function getLinkedinUrl(target: Target, accountId: string): Promise<string> {
   if (target.linkedin_url?.includes("/in/")) return target.linkedin_url;
-  return resolveLinkedinUrl(db, target, accountId);
+  return resolveLinkedinUrl(target, accountId);
 }
 
 // ─── pre-action enrichment ───────────────────────────────────────────────────
 
-async function ensureSalesNavEnriched(db: ReturnType<typeof getDb>, target: Target, accountId: string): Promise<void> {
-  const fresh = db.prepare("SELECT enriched_profile_at, apollo_enriched_at, sales_nav_url, full_name FROM targets WHERE id = ?").get(target.id) as { enriched_profile_at: string | null; apollo_enriched_at: string | null; sales_nav_url: string | null; full_name: string | null } | undefined;
+async function ensureSalesNavEnriched(target: Target, accountId: string): Promise<void> {
+  const fresh = await dbGet("SELECT enriched_profile_at, apollo_enriched_at, sales_nav_url, full_name FROM targets WHERE id = ?", [target.id]) as { enriched_profile_at: string | null; apollo_enriched_at: string | null; sales_nav_url: string | null; full_name: string | null } | undefined;
   if (!fresh || fresh.enriched_profile_at || fresh.apollo_enriched_at || !fresh.sales_nav_url) return;
   const last = lastSalesNavEnrichAt[accountId] ?? 0;
   if (Date.now() - last < SALES_NAV_ENRICH_MIN_GAP_MS) return;
@@ -380,30 +376,30 @@ async function ensureSalesNavEnriched(db: ReturnType<typeof getDb>, target: Targ
   }
 }
 
-async function ensureApolloEnriched(db: ReturnType<typeof getDb>, target: Target, runId: string): Promise<void> {
-  const fresh = db.prepare("SELECT apollo_enriched_at, email, linkedin_url, sales_nav_url FROM targets WHERE id = ?").get(target.id) as { apollo_enriched_at: string | null; email: string | null; linkedin_url: string | null; sales_nav_url: string | null } | undefined;
+async function ensureApolloEnriched(target: Target, runId: string): Promise<void> {
+  const fresh = await dbGet("SELECT apollo_enriched_at, email, linkedin_url, sales_nav_url FROM targets WHERE id = ?", [target.id]) as { apollo_enriched_at: string | null; email: string | null; linkedin_url: string | null; sales_nav_url: string | null } | undefined;
   if (!fresh || fresh.apollo_enriched_at || fresh.email) return;
   const apolloUrl = fresh.linkedin_url?.includes("/in/") ? fresh.linkedin_url : fresh.sales_nav_url;
   if (!apolloUrl) return;
 
-  const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'apollo'").get() as { api_key: string } | undefined;
+  const integration = await dbGet("SELECT api_key FROM integrations WHERE `key` = 'apollo'") as { api_key: string } | undefined;
   if (!integration?.api_key) return;
 
   try {
     const result = await matchPerson(apolloUrl, decryptSecret(integration.api_key)!);
     if (!result) {
-      db.prepare("UPDATE targets SET apollo_enriched_at = datetime('now') WHERE id = ?").run(target.id);
+      await dbRun("UPDATE targets SET apollo_enriched_at = NOW() WHERE id = ?", [target.id]);
       return;
     }
 
     let companyId: string | null = null;
     if (result.organization?.domain) {
       const domain = result.organization.domain.replace(/^www\./, "").toLowerCase();
-      const existing = db.prepare("SELECT id FROM companies WHERE domain = ?").get(domain) as { id: string } | undefined;
+      const existing = await dbGet("SELECT id FROM companies WHERE domain = ?", [domain]) as { id: string } | undefined;
       const org = result.organization;
       if (existing) {
         companyId = existing.id;
-        db.prepare(`
+        await dbRun(`
           UPDATE companies SET
             industry = COALESCE(industry, ?), location = COALESCE(location, ?),
             linkedin_url = COALESCE(linkedin_url, ?), website = COALESCE(website, ?),
@@ -413,35 +409,31 @@ async function ensureApolloEnriched(db: ReturnType<typeof getDb>, target: Target
             city = COALESCE(city, ?), country = COALESCE(country, ?),
             description = COALESCE(description, ?), employee_count = COALESCE(employee_count, ?)
           WHERE id = ?
-        `).run(
-          org.industry ?? null, org.location ?? null, org.linkedin_url ?? null,
+        `, [org.industry ?? null, org.location ?? null, org.linkedin_url ?? null,
           org.website_url ?? null, org.founded_year ?? null, org.logo_url ?? null,
           org.phone ?? null, org.annual_revenue_printed ?? null,
           org.technology_names ? JSON.stringify(org.technology_names) : null,
           org.keywords ? JSON.stringify(org.keywords) : null,
           org.city ?? null, org.country ?? null,
           org.short_description ?? null, org.estimated_num_employees ?? null,
-          existing.id
-        );
+          existing.id]);
       } else {
         companyId = randomUUID();
-        db.prepare(`
+        await dbRun(`
           INSERT INTO companies (id, name, domain, industry, location, linkedin_url, website, founded_year, logo_url, phone, annual_revenue, technology_names, keywords, city, country, description, employee_count)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          companyId, org.name ?? "", domain,
+        `, [companyId, org.name ?? "", domain,
           org.industry ?? null, org.location ?? null, org.linkedin_url ?? null,
           org.website_url ?? null, org.founded_year ?? null, org.logo_url ?? null,
           org.phone ?? null, org.annual_revenue_printed ?? null,
           org.technology_names ? JSON.stringify(org.technology_names) : null,
           org.keywords ? JSON.stringify(org.keywords) : null,
           org.city ?? null, org.country ?? null,
-          org.short_description ?? null, org.estimated_num_employees ?? null
-        );
+          org.short_description ?? null, org.estimated_num_employees ?? null]);
       }
     }
 
-    db.prepare(`
+    await dbRun(`
       UPDATE targets SET
         apollo_id = ?, seniority = ?, apollo_functions = ?, apollo_departments = ?,
         email = COALESCE(email, ?), email_status = COALESCE(email_status, ?),
@@ -452,10 +444,9 @@ async function ensureApolloEnriched(db: ReturnType<typeof getDb>, target: Target
         positions_json = COALESCE(positions_json, ?),
         company_id = COALESCE(company_id, ?),
         linkedin_url = COALESCE(linkedin_url, ?),
-        apollo_enriched_at = datetime('now')
+        apollo_enriched_at = NOW()
       WHERE id = ?
-    `).run(
-      result.apollo_id,
+    `, [result.apollo_id,
       result.seniority ?? null,
       result.functions ? JSON.stringify(result.functions) : null,
       result.departments ? JSON.stringify(result.departments) : null,
@@ -469,8 +460,7 @@ async function ensureApolloEnriched(db: ReturnType<typeof getDb>, target: Target
       result.positions_json ?? null,
       companyId,
       result.linkedin_url ?? null,
-      target.id
-    );
+      target.id]);
     console.log(`[runner] Apollo enriched ${target.full_name ?? target.id} — email: ${result.email ?? "not found"}`);
   } catch (e) {
     console.warn(`[runner] Apollo enrichment failed for ${target.full_name ?? target.id}:`, e instanceof Error ? e.message : e);
@@ -480,7 +470,6 @@ async function ensureApolloEnriched(db: ReturnType<typeof getDb>, target: Target
 // ─── step execution ──────────────────────────────────────────────────────────
 
 async function executeStep(
-  db: ReturnType<typeof getDb>,
   runId: string,
   tr: TrackRun,
   target: Target,
@@ -493,18 +482,18 @@ async function executeStep(
 ): Promise<void> {
   const stepIndex = tr.current_step;
   if (stepIndex >= steps.length) {
-    db.prepare("UPDATE run_profile_tracks SET state = 'completed', last_step_at = datetime('now') WHERE id = ?").run(tr.id);
+    await dbRun("UPDATE run_profile_tracks SET state = 'completed', last_step_at = NOW() WHERE id = ?", [tr.id]);
     return;
   }
 
   // Auto-unenroll if lead has replied on either channel — mark ALL track-runs for this profile skipped
-  const replyCheck = db.prepare("SELECT last_replied_at, email_replied_at FROM targets WHERE id = ?").get(target.id) as { last_replied_at: string | null; email_replied_at: string | null };
+  const replyCheck = await dbGet("SELECT last_replied_at, email_replied_at FROM targets WHERE id = ?", [target.id]) as { last_replied_at: string | null; email_replied_at: string | null };
   if (replyCheck?.last_replied_at || replyCheck?.email_replied_at) {
     const channel = replyCheck.email_replied_at ? "email" : "LinkedIn";
-    log(db, runId, target.id, "info", `${target.full_name ?? target.linkedin_url} replied via ${channel} — unenrolling from workflow`);
-    db.prepare(
+    await log(runId, target.id, "info", `${target.full_name ?? target.linkedin_url} replied via ${channel} — unenrolling from workflow`);
+    await dbRun(
       "UPDATE run_profile_tracks SET state = 'skipped', error_message = 'Lead replied' WHERE run_profile_id = ? AND state NOT IN ('completed', 'failed', 'skipped')"
-    ).run(tr.run_profile_id);
+    , [tr.run_profile_id]);
     return;
   }
 
@@ -513,74 +502,74 @@ async function executeStep(
 
   try {
     if (step.step_type === "delay") {
-      trAdvance(db, tr, steps);
-      log(db, runId, target.id, "info", `Delay step passed for ${name}`);
+      await trAdvance(tr, steps);
+      await log(runId, target.id, "info", `Delay step passed for ${name}`);
       return;
     }
 
     if (step.step_type === "visit") {
-      db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
-      log(db, runId, target.id, "info", `Visiting ${name}`);
-      const linkedinUrl = await getLinkedinUrl(db, target, accountId);
+      await dbRun("UPDATE run_profile_tracks SET last_step_at = NOW() WHERE id = ?", [tr.id]);
+      await log(runId, target.id, "info", `Visiting ${name}`);
+      const linkedinUrl = await getLinkedinUrl(target, accountId);
       const page = await getSessionPage(accountId);
       let visitResult: { isFirstDegree: boolean; messagingUrn: string | null };
       try { visitResult = await visitProfile(page, linkedinUrl); } finally { await page.close(); }
       await saveSessionState(accountId);
       if (visitResult.isFirstDegree && target.degree !== 1) {
-        db.prepare("UPDATE targets SET degree = 1, connected_at = COALESCE(connected_at, ?) WHERE id = ?").run(nowIso(), target.id);
-        log(db, runId, target.id, "info", `${name} already 1st-degree — backfilled connection status`);
+        await dbRun("UPDATE targets SET degree = 1, connected_at = COALESCE(connected_at, ?) WHERE id = ?", [nowIso(), target.id]);
+        await log(runId, target.id, "info", `${name} already 1st-degree — backfilled connection status`);
       }
       if (visitResult.messagingUrn) {
-        db.prepare("UPDATE targets SET messaging_urn = COALESCE(messaging_urn, ?) WHERE id = ?").run(visitResult.messagingUrn, target.id);
+        await dbRun("UPDATE targets SET messaging_urn = COALESCE(messaging_urn, ?) WHERE id = ?", [visitResult.messagingUrn, target.id]);
       }
-      trAdvance(db, tr, steps);
-      log(db, runId, target.id, "info", `Visited ${name}`);
+      await trAdvance(tr, steps);
+      await log(runId, target.id, "info", `Visited ${name}`);
 
     } else if (step.step_type === "connect") {
-      if (!enforceSchedule(db, tr, runId, target.id, name, accountLimits)) return;
+      if (!await enforceSchedule(tr, runId, target.id, name, accountLimits)) return;
 
-      const freshTarget = db.prepare("SELECT * FROM targets WHERE id = ?").get(target.id) as Target;
+      const freshTarget = await dbGet("SELECT * FROM targets WHERE id = ?", [target.id]) as Target;
       if (freshTarget.degree === 1) {
-        if (!freshTarget.connected_at) db.prepare("UPDATE targets SET connected_at = ? WHERE id = ?").run(nowIso(), target.id);
-        log(db, runId, target.id, "info", `${name} already connected — skipping connect step`);
-        trAdvance(db, tr, steps);
+        if (!freshTarget.connected_at) await dbRun("UPDATE targets SET connected_at = ? WHERE id = ?", [nowIso(), target.id]);
+        await log(runId, target.id, "info", `${name} already connected — skipping connect step`);
+        await trAdvance(tr, steps);
         return;
       }
 
       if (freshTarget.connection_requested_at) {
         const hoursSinceRequest = hoursSince(freshTarget.connection_requested_at);
         if (hoursSinceRequest / 24 > CONNECTION_MAX_WAIT_DAYS) {
-          log(db, runId, target.id, "warn", `${name} did not accept after ${CONNECTION_MAX_WAIT_DAYS} days — skipping`);
-          trSkip(db, tr, `Did not accept connection after ${CONNECTION_MAX_WAIT_DAYS} days`);
+          await log(runId, target.id, "warn", `${name} did not accept after ${CONNECTION_MAX_WAIT_DAYS} days — skipping`);
+          await trSkip(tr, `Did not accept connection after ${CONNECTION_MAX_WAIT_DAYS} days`);
           return;
         }
         // Acceptance is detected by the daily sync-accepted job (scrolls invitation manager).
         // Runner just re-checks degree from DB — no per-profile page visits needed.
-        log(db, runId, target.id, "info", `${name} not yet accepted — rechecking in ${CONNECTION_RECHECK_HOURS}h`);
-        trWait(db, tr, CONNECTION_RECHECK_HOURS);
+        await log(runId, target.id, "info", `${name} not yet accepted — rechecking in ${CONNECTION_RECHECK_HOURS}h`);
+        await trWait(tr, CONNECTION_RECHECK_HOURS);
         return;
       }
 
-      db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
+      await dbRun("UPDATE run_profile_tracks SET last_step_at = NOW() WHERE id = ?", [tr.id]);
 
       // Resolve optional connection note (template or AI). LinkedIn caps notes at 300 chars
       // and free accounts have a very low monthly quota for personalised invites (~5).
       let connectNote: string | null = null;
       if (step.ai_enabled) {
         if (!premium?.ai) {
-          log(db, runId, target.id, "warn", `AI writer is a premium feature — sending connect without note for ${name}`);
+          await log(runId, target.id, "warn", `AI writer is a premium feature — sending connect without note for ${name}`);
         } else {
-          const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as { api_key: string } | undefined;
+          const integration = await dbGet("SELECT api_key FROM integrations WHERE `key` = 'openrouter'") as { api_key: string } | undefined;
           const agentCfg = premium.ai.getAgentConfig();
           const resolvedModel = step.ai_model || agentCfg.default_model;
           if (!integration?.api_key || !resolvedModel) {
-            log(db, runId, target.id, "warn", `AI enabled on connect step but OpenRouter key or model missing — sending without note for ${name}`);
+            await log(runId, target.id, "warn", `AI enabled on connect step but OpenRouter key or model missing — sending without note for ${name}`);
           } else {
             const contactData = premium.ai.getContactWithCompany(target.id);
             if (!contactData) {
-              log(db, runId, target.id, "warn", `Could not load contact data for AI connect note — sending without note for ${name}`);
+              await log(runId, target.id, "warn", `Could not load contact data for AI connect note — sending without note for ${name}`);
             } else {
-              log(db, runId, target.id, "info", `Generating AI connection note for ${name} with ${resolvedModel}`);
+              await log(runId, target.id, "info", `Generating AI connection note for ${name} with ${resolvedModel}`);
               try {
                 const result = await premium.ai.writeLinkedInMessage({
                   apiKey: decryptSecret(integration.api_key)!,
@@ -599,7 +588,7 @@ async function executeStep(
                 });
                 connectNote = (result.body || "").trim().slice(0, LINKEDIN_NOTE_MAX_CHARS);
               } catch (aiErr) {
-                log(db, runId, target.id, "warn", `AI connect-note generation failed for ${name}: ${aiErr instanceof Error ? aiErr.message : aiErr} — sending without note`);
+                await log(runId, target.id, "warn", `AI connect-note generation failed for ${name}: ${aiErr instanceof Error ? aiErr.message : aiErr} — sending without note`);
               }
             }
           }
@@ -617,10 +606,10 @@ async function executeStep(
         if (!connectNote) connectNote = null;
       }
 
-      log(db, runId, target.id, "info", connectNote
+      await log(runId, target.id, "info", connectNote
         ? `Sending connection request with note to ${name} (${connectNote.length} chars)`
         : `Sending connection request to ${name}`);
-      const linkedinUrl = await getLinkedinUrl(db, target, accountId);
+      const linkedinUrl = await getLinkedinUrl(target, accountId);
       const page = await getSessionPage(accountId);
       try {
         await sendConnectionRequest(page, linkedinUrl, connectNote);
@@ -628,7 +617,7 @@ async function executeStep(
         if (e instanceof NoteLimitError) {
           // Monthly personalised-note quota exhausted — retry once without note so the
           // invite still lands rather than failing the whole step.
-          log(db, runId, target.id, "warn", `${name}: ${e.message} — retrying without note`);
+          await log(runId, target.id, "warn", `${name}: ${e.message} — retrying without note`);
           await sendConnectionRequest(page, linkedinUrl, null);
         } else {
           throw e;
@@ -637,52 +626,52 @@ async function executeStep(
         await page.close();
       }
       await saveSessionState(accountId);
-      db.prepare("UPDATE targets SET connection_requested_at = ? WHERE id = ?").run(nowIso(), target.id);
+      await dbRun("UPDATE targets SET connection_requested_at = ? WHERE id = ?", [nowIso(), target.id]);
       if (connectNote) {
-        trRecordContext(db, tr, { linkedinMessage: connectNote });
+        await trRecordContext(tr, { linkedinMessage: connectNote });
       }
-      trWait(db, tr, CONNECTION_RECHECK_HOURS);
-      log(db, runId, target.id, "info", `Connection request sent to ${name} — will recheck in ${CONNECTION_RECHECK_HOURS}h`);
+      await trWait(tr, CONNECTION_RECHECK_HOURS);
+      await log(runId, target.id, "info", `Connection request sent to ${name} — will recheck in ${CONNECTION_RECHECK_HOURS}h`);
 
     } else if (step.step_type === "message") {
-      await ensureSalesNavEnriched(db, target, accountId);
-      if (!enforceSchedule(db, tr, runId, target.id, name, accountLimits)) return;
+      await ensureSalesNavEnriched(target, accountId);
+      if (!await enforceSchedule(tr, runId, target.id, name, accountLimits)) return;
 
-      const freshTarget = db.prepare("SELECT * FROM targets WHERE id = ?").get(target.id) as Target;
+      const freshTarget = await dbGet("SELECT * FROM targets WHERE id = ?", [target.id]) as Target;
       if (freshTarget.degree !== 1) {
         const requested = freshTarget.connection_requested_at;
         if (requested && hoursSince(requested) / 24 > CONNECTION_MAX_WAIT_DAYS) {
-          log(db, runId, target.id, "warn", `${name} never accepted — skipping message step`);
-          trSkip(db, tr, "Never accepted connection");
+          await log(runId, target.id, "warn", `${name} never accepted — skipping message step`);
+          await trSkip(tr, "Never accepted connection");
           return;
         }
-        log(db, runId, target.id, "info", `${name} not yet connected — rescheduling message in ${CONNECTION_RECHECK_HOURS}h`);
-        trWait(db, tr, CONNECTION_RECHECK_HOURS);
+        await log(runId, target.id, "info", `${name} not yet connected — rescheduling message in ${CONNECTION_RECHECK_HOURS}h`);
+        await trWait(tr, CONNECTION_RECHECK_HOURS);
         return;
       }
 
       let messageText = "";
       if (step.ai_enabled) {
         if (!premium?.ai) {
-          log(db, runId, target.id, "warn", `AI writer is a premium feature — not available in this build. Skipping ${name}`);
-          trAdvance(db, tr, steps);
+          await log(runId, target.id, "warn", `AI writer is a premium feature — not available in this build. Skipping ${name}`);
+          await trAdvance(tr, steps);
           return;
         }
-        const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as { api_key: string } | undefined;
+        const integration = await dbGet("SELECT api_key FROM integrations WHERE `key` = 'openrouter'") as { api_key: string } | undefined;
         const agentCfgForMsg = premium.ai.getAgentConfig();
         const resolvedMsgModel = step.ai_model || agentCfgForMsg.default_model;
         if (!integration?.api_key || !resolvedMsgModel) {
-          log(db, runId, target.id, "warn", `AI enabled on message step but OpenRouter key or model missing — skipping ${name}`);
-          trAdvance(db, tr, steps);
+          await log(runId, target.id, "warn", `AI enabled on message step but OpenRouter key or model missing — skipping ${name}`);
+          await trAdvance(tr, steps);
           return;
         }
         const contactData = premium.ai.getContactWithCompany(target.id);
         if (!contactData) {
-          log(db, runId, target.id, "warn", `Could not load contact data for AI message — skipping ${name}`);
-          trAdvance(db, tr, steps);
+          await log(runId, target.id, "warn", `Could not load contact data for AI message — skipping ${name}`);
+          await trAdvance(tr, steps);
           return;
         }
-        log(db, runId, target.id, "info", `Generating AI message for ${name} with ${resolvedMsgModel}`);
+        await log(runId, target.id, "info", `Generating AI message for ${name} with ${resolvedMsgModel}`);
         const msgPosition = step.message_position ?? 1;
         let previousMessageContext: { followupNumber: number; previousMessage: string } | undefined;
         if (msgPosition > 1 && tr.last_linkedin_message) {
@@ -706,39 +695,39 @@ async function executeStep(
         });
         messageText = result.body;
       } else {
-        const multiTemplateIds = (db.prepare("SELECT template_id FROM workflow_step_templates WHERE step_id = ?").all(step.id) as Array<{ template_id: string }>).map(r => r.template_id);
+        const multiTemplateIds = (await dbAll("SELECT template_id FROM workflow_step_templates WHERE step_id = ?", [step.id]) as Array<{ template_id: string }>).map(r => r.template_id);
         if (multiTemplateIds.length > 0) {
           const randomId = multiTemplateIds[Math.floor(Math.random() * multiTemplateIds.length)];
-          const tmpl = db.prepare("SELECT * FROM templates WHERE id = ?").get(randomId) as Template | undefined;
+          const tmpl = await dbGet("SELECT * FROM templates WHERE id = ?", [randomId]) as Template | undefined;
           if (tmpl) messageText = renderTemplate(tmpl.body, freshTarget);
         } else if (step.template_id) {
-          const tmpl = db.prepare("SELECT * FROM templates WHERE id = ?").get(step.template_id) as Template | undefined;
+          const tmpl = await dbGet("SELECT * FROM templates WHERE id = ?", [step.template_id]) as Template | undefined;
           if (tmpl) messageText = renderTemplate(tmpl.body, freshTarget);
         }
         if (!messageText && step.message_body) messageText = renderTemplate(step.message_body, freshTarget);
       }
       if (!messageText) {
-        log(db, runId, target.id, "warn", `No message body for message step — skipping ${name}`);
-        trAdvance(db, tr, steps);
+        await log(runId, target.id, "warn", `No message body for message step — skipping ${name}`);
+        await trAdvance(tr, steps);
         return;
       }
 
-      db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
-      log(db, runId, target.id, "info", `Sending message to ${name}`);
-      const messageLinkedinUrl = await getLinkedinUrl(db, target, accountId);
+      await dbRun("UPDATE run_profile_tracks SET last_step_at = NOW() WHERE id = ?", [tr.id]);
+      await log(runId, target.id, "info", `Sending message to ${name}`);
+      const messageLinkedinUrl = await getLinkedinUrl(target, accountId);
       const page = await getSessionPage(accountId);
       try {
         if (!target.full_name) throw new Error(`Target ${target.id} has no full_name — cannot search messaging`);
         const result = await sendMessage(page, target.full_name, messageText, messageLinkedinUrl, freshTarget.messaging_urn);
         if (result.messagingUrn) {
-          db.prepare("UPDATE targets SET messaging_urn = COALESCE(messaging_urn, ?) WHERE id = ?").run(result.messagingUrn, target.id);
+          await dbRun("UPDATE targets SET messaging_urn = COALESCE(messaging_urn, ?) WHERE id = ?", [result.messagingUrn, target.id]);
         }
       } catch (err) {
         if (err instanceof NotConnectedError) {
           await saveSessionState(accountId);
-          db.prepare("UPDATE targets SET degree = NULL, connected_at = NULL WHERE id = ?").run(target.id);
-          log(db, runId, target.id, "warn", `${name} no longer appears 1st-degree — resetting connection status and rescheduling`);
-          trWait(db, tr, CONNECTION_RECHECK_HOURS);
+          await dbRun("UPDATE targets SET degree = NULL, connected_at = NULL WHERE id = ?", [target.id]);
+          await log(runId, target.id, "warn", `${name} no longer appears 1st-degree — resetting connection status and rescheduling`);
+          await trWait(tr, CONNECTION_RECHECK_HOURS);
           return;
         }
         throw err;
@@ -746,29 +735,29 @@ async function executeStep(
         await page.close();
       }
       await saveSessionState(accountId);
-      db.prepare("UPDATE targets SET message_sent_at = ? WHERE id = ?").run(nowIso(), target.id);
+      await dbRun("UPDATE targets SET message_sent_at = ? WHERE id = ?", [nowIso(), target.id]);
       // Store last sent message for intent-classification context
-      db.prepare("UPDATE targets SET li_last_message_sent = ? WHERE id = ?").run(messageText, target.id);
-      trRecordContext(db, tr, { linkedinMessage: messageText });
-      trAdvance(db, tr, steps);
-      log(db, runId, target.id, "info", `Message sent to ${name}`);
+      await dbRun("UPDATE targets SET li_last_message_sent = ? WHERE id = ?", [messageText, target.id]);
+      await trRecordContext(tr, { linkedinMessage: messageText });
+      await trAdvance(tr, steps);
+      await log(runId, target.id, "info", `Message sent to ${name}`);
 
     } else if (step.step_type === "sales_inmail") {
       // Sales Navigator InMail — reaches NON-connections (no degree gate), needs a
       // subject + body, costs one InMail credit. Body config mirrors the message
       // step (AI writer OR templates OR raw body); subject comes from email_subject.
       if (!premium?.inmail) {
-        log(db, runId, target.id, "warn", `Sales Nav InMail is a premium feature — not available in this build. Skipping ${name}`);
-        trAdvance(db, tr, steps);
+        await log(runId, target.id, "warn", `Sales Nav InMail is a premium feature — not available in this build. Skipping ${name}`);
+        await trAdvance(tr, steps);
         return;
       }
-      await ensureSalesNavEnriched(db, target, accountId);
-      if (!enforceSchedule(db, tr, runId, target.id, name, accountLimits)) return;
+      await ensureSalesNavEnriched(target, accountId);
+      if (!await enforceSchedule(tr, runId, target.id, name, accountLimits)) return;
 
-      const freshTarget = db.prepare("SELECT * FROM targets WHERE id = ?").get(target.id) as Target;
+      const freshTarget = await dbGet("SELECT * FROM targets WHERE id = ?", [target.id]) as Target;
       if (!freshTarget.sales_nav_url) {
-        log(db, runId, target.id, "warn", `${name} has no Sales Nav URL — cannot send InMail, skipping`);
-        trSkip(db, tr, "No Sales Nav URL for InMail");
+        await log(runId, target.id, "warn", `${name} has no Sales Nav URL — cannot send InMail, skipping`);
+        await trSkip(tr, "No Sales Nav URL for InMail");
         return;
       }
 
@@ -776,25 +765,25 @@ async function executeStep(
       let inmailSubject = "";
       if (step.ai_enabled) {
         if (!premium?.ai) {
-          log(db, runId, target.id, "warn", `AI writer is a premium feature — not available in this build. Skipping ${name}`);
-          trAdvance(db, tr, steps);
+          await log(runId, target.id, "warn", `AI writer is a premium feature — not available in this build. Skipping ${name}`);
+          await trAdvance(tr, steps);
           return;
         }
-        const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as { api_key: string } | undefined;
+        const integration = await dbGet("SELECT api_key FROM integrations WHERE `key` = 'openrouter'") as { api_key: string } | undefined;
         const agentCfgForMsg = premium.ai.getAgentConfig();
         const resolvedMsgModel = step.ai_model || agentCfgForMsg.default_model;
         if (!integration?.api_key || !resolvedMsgModel) {
-          log(db, runId, target.id, "warn", `AI enabled on InMail step but OpenRouter key or model missing — skipping ${name}`);
-          trAdvance(db, tr, steps);
+          await log(runId, target.id, "warn", `AI enabled on InMail step but OpenRouter key or model missing — skipping ${name}`);
+          await trAdvance(tr, steps);
           return;
         }
         const contactData = premium.ai.getContactWithCompany(target.id);
         if (!contactData) {
-          log(db, runId, target.id, "warn", `Could not load contact data for AI InMail — skipping ${name}`);
-          trAdvance(db, tr, steps);
+          await log(runId, target.id, "warn", `Could not load contact data for AI InMail — skipping ${name}`);
+          await trAdvance(tr, steps);
           return;
         }
-        log(db, runId, target.id, "info", `Generating AI InMail for ${name} with ${resolvedMsgModel}`);
+        await log(runId, target.id, "info", `Generating AI InMail for ${name} with ${resolvedMsgModel}`);
         const msgPosition = step.message_position ?? 1;
         let previousMessageContext: { followupNumber: number; previousMessage: string } | undefined;
         if (msgPosition > 1 && tr.last_linkedin_message) {
@@ -819,31 +808,31 @@ async function executeStep(
         inmailBody = result.body;
         inmailSubject = result.subject;
       } else {
-        const multiTemplateIds = (db.prepare("SELECT template_id FROM workflow_step_templates WHERE step_id = ?").all(step.id) as Array<{ template_id: string }>).map(r => r.template_id);
+        const multiTemplateIds = (await dbAll("SELECT template_id FROM workflow_step_templates WHERE step_id = ?", [step.id]) as Array<{ template_id: string }>).map(r => r.template_id);
         if (multiTemplateIds.length > 0) {
           const randomId = multiTemplateIds[Math.floor(Math.random() * multiTemplateIds.length)];
-          const tmpl = db.prepare("SELECT * FROM templates WHERE id = ?").get(randomId) as Template | undefined;
+          const tmpl = await dbGet("SELECT * FROM templates WHERE id = ?", [randomId]) as Template | undefined;
           if (tmpl) inmailBody = renderTemplate(tmpl.body, freshTarget);
         } else if (step.template_id) {
-          const tmpl = db.prepare("SELECT * FROM templates WHERE id = ?").get(step.template_id) as Template | undefined;
+          const tmpl = await dbGet("SELECT * FROM templates WHERE id = ?", [step.template_id]) as Template | undefined;
           if (tmpl) inmailBody = renderTemplate(tmpl.body, freshTarget);
         }
         if (!inmailBody && step.message_body) inmailBody = renderTemplate(step.message_body, freshTarget);
         inmailSubject = renderTemplate(step.email_subject ?? "", freshTarget).trim();
       }
       if (!inmailBody) {
-        log(db, runId, target.id, "warn", `No body for InMail step — skipping ${name}`);
-        trAdvance(db, tr, steps);
+        await log(runId, target.id, "warn", `No body for InMail step — skipping ${name}`);
+        await trAdvance(tr, steps);
         return;
       }
       if (!inmailSubject) {
-        log(db, runId, target.id, "warn", `No subject for InMail step (required) — skipping ${name}`);
-        trAdvance(db, tr, steps);
+        await log(runId, target.id, "warn", `No subject for InMail step (required) — skipping ${name}`);
+        await trAdvance(tr, steps);
         return;
       }
 
-      db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
-      log(db, runId, target.id, "info", `Sending InMail to ${name}`);
+      await dbRun("UPDATE run_profile_tracks SET last_step_at = NOW() WHERE id = ?", [tr.id]);
+      await log(runId, target.id, "info", `Sending InMail to ${name}`);
       const page = await getSessionPage(accountId);
       try {
         await premium.inmail.sendInMail(page, freshTarget.sales_nav_url, inmailSubject, inmailBody);
@@ -851,40 +840,40 @@ async function executeStep(
         await page.close();
       }
       await saveSessionState(accountId);
-      db.prepare("UPDATE targets SET inmail_sent_at = ?, message_sent_at = COALESCE(message_sent_at, ?) WHERE id = ?").run(nowIso(), nowIso(), target.id);
-      db.prepare("UPDATE targets SET li_last_message_sent = ? WHERE id = ?").run(inmailBody, target.id);
-      trRecordContext(db, tr, { linkedinMessage: inmailBody });
-      trAdvance(db, tr, steps);
-      log(db, runId, target.id, "info", `InMail sent to ${name}`);
+      await dbRun("UPDATE targets SET inmail_sent_at = ?, message_sent_at = COALESCE(message_sent_at, ?) WHERE id = ?", [nowIso(), nowIso(), target.id]);
+      await dbRun("UPDATE targets SET li_last_message_sent = ? WHERE id = ?", [inmailBody, target.id]);
+      await trRecordContext(tr, { linkedinMessage: inmailBody });
+      await trAdvance(tr, steps);
+      await log(runId, target.id, "info", `InMail sent to ${name}`);
 
     } else if (step.step_type === "email") {
-      await ensureApolloEnriched(db, target, runId);
+      await ensureApolloEnriched(target, runId);
 
       if (!emailAccountId || !emailAccountLimits) {
-        log(db, runId, target.id, "warn", `Email step skipped — no email account configured on this run`);
-        trAdvance(db, tr, steps);
+        await log(runId, target.id, "warn", `Email step skipped — no email account configured on this run`);
+        await trAdvance(tr, steps);
         return;
       }
 
-      if (!enforceSchedule(db, tr, runId, target.id, name, emailAccountLimits)) return;
+      if (!await enforceSchedule(tr, runId, target.id, name, emailAccountLimits)) return;
 
-      const freshTarget = db.prepare("SELECT * FROM targets WHERE id = ?").get(target.id) as Target;
+      const freshTarget = await dbGet("SELECT * FROM targets WHERE id = ?", [target.id]) as Target;
       if (!freshTarget.email) {
         // No email even after Apollo enrichment — skip only this email track
-        log(db, runId, target.id, "warn", `${name} has no email address — skipping email track`);
-        trSkip(db, tr, "No email address found");
+        await log(runId, target.id, "warn", `${name} has no email address — skipping email track`);
+        await trSkip(tr, "No email address found");
         return;
       }
       if (freshTarget.email_status === "invalid") {
-        log(db, runId, target.id, "warn", `${name} has an invalid email address — unenrolling email track`);
-        trSkip(db, tr, "Email bounced — invalid address");
+        await log(runId, target.id, "warn", `${name} has an invalid email address — unenrolling email track`);
+        await trSkip(tr, "Email bounced — invalid address");
         return;
       }
       if (freshTarget.company_id) {
-        const company = db.prepare("SELECT email_domain_invalid FROM companies WHERE id = ?").get(freshTarget.company_id) as { email_domain_invalid: number } | undefined;
+        const company = await dbGet("SELECT email_domain_invalid FROM companies WHERE id = ?", [freshTarget.company_id]) as { email_domain_invalid: number } | undefined;
         if (company?.email_domain_invalid) {
-          log(db, runId, target.id, "warn", `${name}'s company email domain is flagged invalid — unenrolling email track`);
-          trSkip(db, tr, "Email domain invalid — company flagged");
+          await log(runId, target.id, "warn", `${name}'s company email domain is flagged invalid — unenrolling email track`);
+          await trSkip(tr, "Email domain invalid — company flagged");
           return;
         }
       }
@@ -895,17 +884,17 @@ async function executeStep(
       // 1) Premium AI writer (ee/) when available
       if (step.ai_enabled && premium?.ai) {
         try {
-          const integration = db.prepare("SELECT api_key FROM integrations WHERE key = 'openrouter'").get() as { api_key: string } | undefined;
+          const integration = await dbGet("SELECT api_key FROM integrations WHERE `key` = 'openrouter'") as { api_key: string } | undefined;
           const agentCfgForEmail = premium.ai.getAgentConfig();
           const resolvedEmailModel = step.ai_model || agentCfgForEmail.default_model;
           if (!integration?.api_key || !resolvedEmailModel) {
-            log(db, runId, target.id, "warn", `AI enabled but OpenRouter key/model missing — will try open-core AI / template for ${name}`);
+            await log(runId, target.id, "warn", `AI enabled but OpenRouter key/model missing — will try open-core AI / template for ${name}`);
           } else {
             const contactData = premium.ai.getContactWithCompany(target.id);
             if (!contactData) {
-              log(db, runId, target.id, "warn", `Could not load contact data for AI — will try open-core AI / template for ${name}`);
+              await log(runId, target.id, "warn", `Could not load contact data for AI — will try open-core AI / template for ${name}`);
             } else {
-              log(db, runId, target.id, "info", `Generating AI email for ${name} with ${resolvedEmailModel}`);
+              await log(runId, target.id, "info", `Generating AI email for ${name} with ${resolvedEmailModel}`);
               const emailPosition = step.email_position ?? 1;
               let followupContext: { followupNumber: number; previousSubject: string; previousBody: string } | undefined;
               if (emailPosition > 1 && (tr.last_email_subject || tr.last_email_body)) {
@@ -935,13 +924,13 @@ async function executeStep(
               emailSubject = result.subject;
               emailBody = result.body;
               if (tr.pending_reply_context) {
-                db.prepare("UPDATE run_profile_tracks SET pending_reply_context = NULL WHERE id = ?").run(tr.id);
+                await dbRun("UPDATE run_profile_tracks SET pending_reply_context = NULL WHERE id = ?", [tr.id]);
               }
             }
           }
         } catch (aiErr) {
           console.warn("[runner] Premium AI email failed, trying open-core:", aiErr);
-          log(db, runId, target.id, "warn", `Premium AI failed for ${name} — trying open-core AI`);
+          await log(runId, target.id, "warn", `Premium AI failed for ${name} — trying open-core AI`);
         }
       }
 
@@ -964,7 +953,7 @@ async function executeStep(
             "a light opening that skips the word 'noticed' entirely",
           ];
           const openCoreAngle = openCoreAngles[Math.floor(Math.random() * openCoreAngles.length)];
-          log(db, runId, target.id, "info", `Generating open-core AI email for ${name}`);
+          await log(runId, target.id, "info", `Generating open-core AI email for ${name}`);
           const completion = await runAICompletion({
             messages: [
               {
@@ -1025,7 +1014,7 @@ trace back to the fields given below.`,
             .trim();
         } catch (ocErr) {
           console.warn("[runner] Open-core AI email failed:", ocErr);
-          log(db, runId, target.id, "warn", `Open-core AI failed for ${name} — using step template`);
+          await log(runId, target.id, "warn", `Open-core AI failed for ${name} — using step template`);
         }
       }
 
@@ -1036,50 +1025,50 @@ trace back to the fields given below.`,
       }
 
       if (!emailBody) {
-        log(db, runId, target.id, "warn", `No email body for email step — skipping ${name}`);
-        trAdvance(db, tr, steps);
+        await log(runId, target.id, "warn", `No email body for email step — skipping ${name}`);
+        await trAdvance(tr, steps);
         return;
       }
 
-      const emailAccount = db.prepare("SELECT * FROM email_accounts WHERE id = ?").get(emailAccountId) as {
+      const emailAccount = await dbGet("SELECT * FROM email_accounts WHERE id = ?", [emailAccountId]) as {
         id: string; from_email: string; from_name: string | null; reply_to: string | null;
         smtp_host: string; smtp_port: number; smtp_secure: number;
         username: string; password: string; signature: string | null;
       } | undefined;
 
       if (!emailAccount) {
-        log(db, runId, target.id, "error", `Email account ${emailAccountId} not found`);
-        trFail(db, tr, "Email account missing");
+        await log(runId, target.id, "error", `Email account ${emailAccountId} not found`);
+        await trFail(tr, "Email account missing");
         return;
       }
 
       // Last-line-of-defense: re-check the daily limit for this email account against ground-truth
       // (matched by run_profiles.email_account_id, the actual sender). If any prior gate is buggy,
       // this catches the overshoot and reschedules instead of sending.
-      const sentTodayActual = (db.prepare(
+      const sentTodayActual = (await dbGet(
         `SELECT COUNT(*) as c FROM logs l
          WHERE l.message LIKE 'Email sent%'
-         AND date(l.created_at) = date('now')
+         AND date(l.created_at) = CURDATE()
          AND EXISTS (
            SELECT 1 FROM run_profiles rp
            WHERE rp.run_id = l.run_id AND rp.target_id = l.target_id
            AND rp.email_account_id = ?
          )`
-      ).get(emailAccountId) as { c: number }).c;
+      , [emailAccountId]) as { c: number }).c;
       const hardLimit = effectiveEmailLimit(emailAccountLimits);
       if (sentTodayActual >= hardLimit) {
-        log(db, runId, target.id, "warn", `Daily limit guard tripped for ${emailAccountId} (${sentTodayActual}/${hardLimit}) — rescheduling ${name} to tomorrow`);
-        trReschedule(db, tr, rescheduleToTomorrow(emailAccountLimits));
+        await log(runId, target.id, "warn", `Daily limit guard tripped for ${emailAccountId} (${sentTodayActual}/${hardLimit}) — rescheduling ${name} to tomorrow`);
+        await trReschedule(tr, rescheduleToTomorrow(emailAccountLimits));
         return;
       }
 
       // Suppression check — never send to an unsubscribed/bounced address, no matter what
       // triggered this step. Checked as late as possible (right before send) since a target
       // could unsubscribe from an earlier email in this same run.
-      if (isSuppressed(freshTarget.email)) {
+      if (await isSuppressed(freshTarget.email)) {
         // Unsubscribed — stop the whole email track so no further follow-ups are scheduled.
-        log(db, runId, target.id, "info", `${name} <${freshTarget.email}> is suppressed (unsubscribed) — skipping remaining email follow-ups`);
-        trSkip(db, tr, "Unsubscribed — email track stopped");
+        await log(runId, target.id, "info", `${name} <${freshTarget.email}> is suppressed (unsubscribed) — skipping remaining email follow-ups`);
+        await trSkip(tr, "Unsubscribed — email track stopped");
         return;
       }
 
@@ -1100,17 +1089,17 @@ trace back to the fields given below.`,
         } else {
           // Auto-beautify plain / AI body → consistent card HTML (mood varies by default professional)
           const { beautifyEmail } = await import("@/lib/ai/beautify-email");
-          log(db, runId, target.id, "info", `Beautifying email HTML for ${name}`);
+          await log(runId, target.id, "info", `Beautifying email HTML for ${name}`);
           const beautified = await beautifyEmail(emailSubject, finalEmailBody, "professional");
           htmlSource = beautified.html;
         }
         if (htmlSource) {
-          const pixel = openPixelTag(target.id, runId);
+          const pixel = await openPixelTag(target.id, runId);
           // Click-track every real link EXCEPT the unsubscribe placeholder — it isn't a real
           // URL yet (still "{{unsubscribe_url}}"), and even once filled in we don't want an
           // unsubscribe click routed through the click tracker (skews click stats, adds a
           // pointless redirect hop before it hits our own endpoint anyway).
-          const trackedHtml = rewriteLinksForTracking(htmlSource, target.id, runId);
+          const trackedHtml = await rewriteLinksForTracking(htmlSource, target.id, runId);
           // Fill the placeholder with the real, working, per-recipient unsubscribe link.
           // beautifyEmail() already guarantees the template contains exactly one
           // {{unsubscribe_url}} footer — don't also append unsubscribeFooterHtml() here, or
@@ -1126,11 +1115,11 @@ trace back to the fields given below.`,
         }
       } catch (htmlErr) {
         console.warn("[runner] HTML beautify/personalize failed — sending plain text only:", htmlErr);
-        log(db, runId, target.id, "warn", `HTML email build failed for ${name} — sending plain text`);
+        await log(runId, target.id, "warn", `HTML email build failed for ${name} — sending plain text`);
       }
 
-      db.prepare("UPDATE run_profile_tracks SET last_step_at = datetime('now') WHERE id = ?").run(tr.id);
-      log(db, runId, target.id, "info", `Sending email to ${name} <${freshTarget.email}>${finalHtml ? " (HTML)" : " (plain)"}`);
+      await dbRun("UPDATE run_profile_tracks SET last_step_at = NOW() WHERE id = ?", [tr.id]);
+      await log(runId, target.id, "info", `Sending email to ${name} <${freshTarget.email}>${finalHtml ? " (HTML)" : " (plain)"}`);
       await sendEmail(
         { ...emailAccount, password: decryptSecret(emailAccount.password)! },
         freshTarget.email,
@@ -1141,55 +1130,55 @@ trace back to the fields given below.`,
         // chip next to the sender, in addition to the link in the footer.
         unsubscribeHeaders(target.id)
       );
-      scoreEmailSent(target.id);
-      trRecordContext(db, tr, { emailSubject, emailBody });
-      trAdvance(db, tr, steps);
-      log(db, runId, target.id, "info", `Email sent to ${name}`);
+      await scoreEmailSent(target.id);
+      await trRecordContext(tr, { emailSubject, emailBody });
+      await trAdvance(tr, steps);
+      await log(runId, target.id, "info", `Email sent to ${name}`);
     }
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (err instanceof WeeklyLimitError) {
-      log(db, runId, target.id, "error", `Weekly connection limit reached — pausing run`);
-      db.prepare("UPDATE runs SET status = 'paused' WHERE id = ?").run(runId);
+      await log(runId, target.id, "error", `Weekly connection limit reached — pausing run`);
+      await dbRun("UPDATE runs SET status = 'paused' WHERE id = ?", [runId]);
       return;
     }
     if (err instanceof AlreadyConnectedError) {
-      log(db, runId, target.id, "info", `${name} already connected — advancing`);
-      db.prepare("UPDATE targets SET degree = 1, connected_at = COALESCE(connected_at, ?) WHERE id = ?").run(nowIso(), target.id);
-      trAdvance(db, tr, steps);
+      await log(runId, target.id, "info", `${name} already connected — advancing`);
+      await dbRun("UPDATE targets SET degree = 1, connected_at = COALESCE(connected_at, ?) WHERE id = ?", [nowIso(), target.id]);
+      await trAdvance(tr, steps);
       return;
     }
     if (err instanceof PendingInviteError) {
-      log(db, runId, target.id, "info", `${name} invite already pending — will recheck`);
-      if (!target.connection_requested_at) db.prepare("UPDATE targets SET connection_requested_at = ? WHERE id = ?").run(nowIso(), target.id);
-      trWait(db, tr, CONNECTION_RECHECK_HOURS);
+      await log(runId, target.id, "info", `${name} invite already pending — will recheck`);
+      if (!target.connection_requested_at) await dbRun("UPDATE targets SET connection_requested_at = ? WHERE id = ?", [nowIso(), target.id]);
+      await trWait(tr, CONNECTION_RECHECK_HOURS);
       return;
     }
     if (msg.includes("No InMail credits left")) {
       inmailCreditsExhaustedOn[accountId] = todayLocalDate();
       const slot = rescheduleToTomorrow(accountLimits);
-      log(db, runId, target.id, "warn", `No InMail credits left on this account — pausing InMail sends until tomorrow, rescheduled ${name} to ${slot}`);
-      trReschedule(db, tr, slot);
+      await log(runId, target.id, "warn", `No InMail credits left on this account — pausing InMail sends until tomorrow, rescheduled ${name} to ${slot}`);
+      await trReschedule(tr, slot);
       return;
     }
-    log(db, runId, target.id, "error", `Error on ${name}: ${msg}`);
-    trFail(db, tr, msg);
+    await log(runId, target.id, "error", `Error on ${name}: ${msg}`);
+    await trFail(tr, msg);
   }
 }
 
 // ─── scheduled LinkedIn posts ────────────────────────────────────────────────
 
-async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void> {
+async function processScheduledPosts(): Promise<void> {
   const now = new Date().toISOString();
   // Due posts: scheduled_at <= now, or scheduled with null scheduled_at treated as immediate
-  const due = db.prepare(`
+  const due = await dbAll(`
     SELECT * FROM linkedin_posts
     WHERE status = 'scheduled'
       AND (scheduled_at IS NULL OR scheduled_at <= ?)
     ORDER BY COALESCE(scheduled_at, created_at) ASC
     LIMIT 5
-  `).all(now) as Array<{
+  `, [now]) as Array<{
     id: string;
     account_id: string;
     content: string | null;
@@ -1208,21 +1197,21 @@ async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void
 
   for (const post of due) {
     // Claim
-    const claimed = db.prepare(`
+    const claimed = await dbRun(`
       UPDATE linkedin_posts SET status = 'posting', updated_at = ? WHERE id = ? AND status = 'scheduled'
-    `).run(now, post.id);
-    if (claimed.changes === 0) continue;
+    `, [now, post.id]);
+    if (claimed.affectedRows === 0) continue;
 
-    const account = db.prepare(
+    const account = await dbGet(
       "SELECT id, is_authenticated, active_hours_start, active_hours_end, timezone, working_days FROM accounts WHERE id = ?"
-    ).get(post.account_id) as
+    , [post.account_id]) as
       | { id: string; is_authenticated: number; active_hours_start: number; active_hours_end: number; timezone: string; working_days: string }
       | undefined;
 
     if (!account || !account.is_authenticated) {
-      db.prepare(
+      await dbRun(
         "UPDATE linkedin_posts SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?"
-      ).run("LinkedIn account not authenticated", new Date().toISOString(), post.id);
+      , ["LinkedIn account not authenticated", new Date().toISOString(), post.id]);
       continue;
     }
 
@@ -1235,9 +1224,9 @@ async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void
     };
     if (!isWithinSchedule(scheduleCfg)) {
       const next = nextScheduledSlot(scheduleCfg);
-      db.prepare(
+      await dbRun(
         "UPDATE linkedin_posts SET status = 'scheduled', scheduled_at = ?, updated_at = ? WHERE id = ?"
-      ).run(next, new Date().toISOString(), post.id);
+      , [next, new Date().toISOString(), post.id]);
       console.log(`[runner] Post ${post.id} outside active hours — rescheduled to ${next}`);
       continue;
     }
@@ -1263,19 +1252,19 @@ async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void
       await saveSessionState(post.account_id).catch(() => {});
 
       if (result.success) {
-        db.prepare(`
+        await dbRun(`
           UPDATE linkedin_posts
           SET status = 'posted', posted_at = ?, linkedin_post_urn = ?, error_message = NULL, updated_at = ?
           WHERE id = ?
-        `).run(new Date().toISOString(), result.postUrn || null, new Date().toISOString(), post.id);
+        `, [new Date().toISOString(), result.postUrn || null, new Date().toISOString(), post.id]);
         console.log(`[runner] Posted ${post.id} successfully`);
       } else {
         const errMsg = result.error || "Unknown post error";
-        db.prepare(`
+        await dbRun(`
           UPDATE linkedin_posts
           SET status = 'failed', error_message = ?, updated_at = ?
           WHERE id = ?
-        `).run(errMsg, new Date().toISOString(), post.id);
+        `, [errMsg, new Date().toISOString(), post.id]);
         console.warn(`[runner] Post ${post.id} failed: ${errMsg}`);
 
         // Dead session → flag account so UI prompts re-login and runner stops retrying
@@ -1290,11 +1279,11 @@ async function processScheduledPosts(db: ReturnType<typeof getDb>): Promise<void
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      db.prepare(`
+      await dbRun(`
         UPDATE linkedin_posts
         SET status = 'failed', error_message = ?, updated_at = ?
         WHERE id = ?
-      `).run(msg, new Date().toISOString(), post.id);
+      `, [msg, new Date().toISOString(), post.id]);
       console.error(`[runner] Post ${post.id} exception:`, msg);
       if (/session not authenticated|re-login the account/i.test(msg)) {
         try {
@@ -1331,22 +1320,21 @@ export function ensureGlobalRunnerStarted(): void {
 
 async function globalLoop(): Promise<void> {
   console.log("[runner] Global loop started");
-  const db = getDb();
 
   while (true) {
     try {
-      await tick(db);
+      await tick();
     } catch (err) {
       console.error("[runner] Tick error:", err instanceof Error ? err.message : err);
     }
     try {
       const { processScheduledImports } = await import("@/lib/import-jobs");
-      await processScheduledImports(db);
+      await processScheduledImports();
     } catch (err) {
       console.error("[runner] Import scheduler error:", err instanceof Error ? err.message : err);
     }
     try {
-      await processScheduledPosts(db);
+      await processScheduledPosts();
     } catch (err) {
       console.error("[runner] Scheduled posts error:", err instanceof Error ? err.message : err);
     }
@@ -1354,11 +1342,11 @@ async function globalLoop(): Promise<void> {
   }
 }
 
-async function tick(db: ReturnType<typeof getDb>): Promise<void> {
+async function tick(): Promise<void> {
   // LEFT JOIN — email-only runs have no LinkedIn account attached (account_id may be
   // null/empty), and must still be picked up here so their email tracks get processed.
   // A run IS excluded if it has a LinkedIn account that isn't authenticated.
-  const activeRuns = db.prepare(`
+  const activeRuns = await dbAll(`
     SELECT r.id as run_id, r.workflow_id, r.account_id, r.email_account_id,
            a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
            a.ramp_up_enabled, a.ramp_start_date,
@@ -1366,7 +1354,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
     FROM runs r
     LEFT JOIN accounts a ON a.id = r.account_id
     WHERE r.status = 'running' AND (r.account_id IS NULL OR r.account_id = '' OR a.is_authenticated = 1)
-  `).all() as Array<{ run_id: string; workflow_id: string; account_id: string | null; email_account_id: string | null } & Partial<AccountLimits>>;
+  `) as Array<{ run_id: string; workflow_id: string; account_id: string | null; email_account_id: string | null } & Partial<AccountLimits>>;
 
   if (activeRuns.length === 0) return;
 
@@ -1381,13 +1369,13 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
 
   // Daily sync: stamp accepted connections from invitation manager (once per 23h per account)
   for (const accountId of seenAccounts) {
-    if (shouldSyncAccepted(accountId)) {
+    if (await shouldSyncAccepted(accountId)) {
       try {
         console.log(`[runner] Starting accepted-connections sync for account ${accountId}`);
         const stamped = await syncAcceptedConnections(accountId);
         if (stamped > 0) {
           for (const r of activeRuns.filter(x => x.account_id === accountId)) {
-            log(db, r.run_id, null, "info", `Accepted-connections sync: ${stamped} contact${stamped === 1 ? "" : "s"} marked as connected`);
+            await log(r.run_id, null, "info", `Accepted-connections sync: ${stamped} contact${stamped === 1 ? "" : "s"} marked as connected`);
           }
         }
         console.log(`[runner] Accepted-connections sync complete — ${stamped} stamped`);
@@ -1408,7 +1396,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
         console.log(`[runner] LinkedIn inbox sync complete — ${replies} new repl${replies === 1 ? "y" : "ies"}`);
         if (replies > 0) {
           for (const r of activeRuns.filter(x => x.account_id === accountId)) {
-            log(db, r.run_id, null, "info", `LinkedIn inbox sync: ${replies} new repl${replies === 1 ? "y" : "ies"} detected`);
+            await log(r.run_id, null, "info", `LinkedIn inbox sync: ${replies} new repl${replies === 1 ? "y" : "ies"} detected`);
           }
         }
       } catch (e) {
@@ -1421,13 +1409,13 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   const activeRunIds = activeRuns.map(r => r.run_id);
   const activeEmailAccountIds: string[] = activeRunIds.length > 0
     ? [...new Set(
-        (db.prepare(
+        (await dbAll(
           `SELECT DISTINCT rp.email_account_id FROM run_profiles rp
            JOIN run_profile_tracks rt ON rt.run_profile_id = rp.id
            WHERE rp.run_id IN (${activeRunIds.map(() => "?").join(",")})
            AND rp.email_account_id IS NOT NULL
            AND rt.state NOT IN ('completed', 'failed', 'skipped')`
-        ).all(...activeRunIds) as { email_account_id: string }[]).map(r => r.email_account_id)
+        , activeRunIds) as { email_account_id: string }[]).map(r => r.email_account_id)
       )]
     : [];
 
@@ -1435,14 +1423,14 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   for (const emailAccId of activeEmailAccountIds) {
     if (seenEmailAccounts.has(emailAccId)) continue;
     seenEmailAccounts.add(emailAccId);
-    if (shouldSyncEmailInbox(emailAccId)) {
+    if (await shouldSyncEmailInbox(emailAccId)) {
       try {
         console.log(`[runner] Starting IMAP sync for email account ${emailAccId}`);
         const { replies, bounces } = await syncEmailInbox(emailAccId);
         console.log(`[runner] IMAP sync complete — ${replies} replies, ${bounces} bounces`);
         for (const runId of activeRunIds) {
-          if (replies > 0) log(db, runId, null, "info", `Email inbox sync: ${replies} new repl${replies === 1 ? "y" : "ies"} detected`);
-          if (bounces > 0) log(db, runId, null, "warn", `Email inbox sync: ${bounces} bounce${bounces === 1 ? "" : "s"} detected — contacts marked invalid and unenrolled`);
+          if (replies > 0) await log(runId, null, "info", `Email inbox sync: ${replies} new repl${replies === 1 ? "y" : "ies"} detected`);
+          if (bounces > 0) await log(runId, null, "warn", `Email inbox sync: ${bounces} bounce${bounces === 1 ? "" : "s"} detected — contacts marked invalid and unenrolled`);
         }
       } catch (e) {
         console.warn("[runner] Email inbox sync error:", e instanceof Error ? e.message : e);
@@ -1455,19 +1443,19 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
 
   // Auto-complete runs where ALL track-runs across all profiles are terminal
   for (const run of activeRuns) {
-    const remaining = (db.prepare(
+    const remaining = (await dbGet(
       `SELECT COUNT(*) as c FROM run_profile_tracks rt
        JOIN run_profiles rp ON rp.id = rt.run_profile_id
        WHERE rp.run_id = ? AND rt.state NOT IN ('completed', 'failed', 'skipped')`
-    ).get(run.run_id) as { c: number }).c;
+    , [run.run_id]) as { c: number }).c;
     if (remaining === 0) {
-      db.prepare("UPDATE runs SET status = 'completed', completed_at = datetime('now') WHERE id = ?").run(run.run_id);
-      log(db, run.run_id, null, "info", "All profiles processed — run completed");
+      await dbRun("UPDATE runs SET status = 'completed', completed_at = NOW() WHERE id = ?", [run.run_id]);
+      await log(run.run_id, null, "info", "All profiles processed — run completed");
     }
   }
 
   // Re-load active runs after potential completions
-  const stillActive = db.prepare(`
+  const stillActive = await dbAll(`
     SELECT r.id as run_id, r.workflow_id, r.account_id, r.email_account_id,
            a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
            a.ramp_up_enabled, a.ramp_start_date,
@@ -1475,7 +1463,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
     FROM runs r
     LEFT JOIN accounts a ON a.id = r.account_id
     WHERE r.status = 'running'
-  `).all() as Array<{ run_id: string; workflow_id: string; account_id: string | null; email_account_id: string | null } & Partial<AccountLimits>>;
+  `) as Array<{ run_id: string; workflow_id: string; account_id: string | null; email_account_id: string | null } & Partial<AccountLimits>>;
 
   if (stillActive.length === 0) return;
 
@@ -1489,16 +1477,16 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   const stillActiveRunIds = stillActive.map(r => r.run_id);
   const emailAccountIds: string[] = stillActiveRunIds.length > 0
     ? [...new Set(
-        (db.prepare(
+        (await dbAll(
           `SELECT DISTINCT rp.email_account_id FROM run_profiles rp
            WHERE rp.run_id IN (${stillActiveRunIds.map(() => "?").join(",")})
            AND rp.email_account_id IS NOT NULL`
-        ).all(...stillActiveRunIds) as { email_account_id: string }[]).map(r => r.email_account_id)
+        , stillActiveRunIds) as { email_account_id: string }[]).map(r => r.email_account_id)
       )]
     : [];
   const emailAccountLimitsMap = new Map<string, EmailAccountLimits>();
   for (const emailAccountId of emailAccountIds) {
-    const ea = db.prepare("SELECT daily_email_limit, active_hours_start, active_hours_end, timezone, working_days, ramp_up_enabled, ramp_start_date FROM email_accounts WHERE id = ?").get(emailAccountId) as EmailAccountLimits | undefined;
+    const ea = await dbGet("SELECT daily_email_limit, active_hours_start, active_hours_end, timezone, working_days, ramp_up_enabled, ramp_start_date FROM email_accounts WHERE id = ?", [emailAccountId]) as EmailAccountLimits | undefined;
     if (ea) emailAccountLimitsMap.set(emailAccountId, ea);
   }
 
@@ -1508,18 +1496,18 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   const messagesSentToday = new Map<string, number>();
   const inmailsSentToday = new Map<string, number>();
   for (const [accountId] of accountLimitsMap) {
-    const c = (db.prepare(
+    const c = (await dbGet(
       `SELECT COUNT(*) as c FROM logs WHERE run_id IN (SELECT id FROM runs WHERE account_id = ?)
-       AND message LIKE 'Connection request sent%' AND date(created_at) = date('now')`
-    ).get(accountId) as { c: number }).c;
-    const m = (db.prepare(
+       AND message LIKE 'Connection request sent%' AND date(created_at) = CURDATE()`
+    , [accountId]) as { c: number }).c;
+    const m = (await dbGet(
       `SELECT COUNT(*) as c FROM logs WHERE run_id IN (SELECT id FROM runs WHERE account_id = ?)
-       AND message LIKE 'Message sent%' AND date(created_at) = date('now')`
-    ).get(accountId) as { c: number }).c;
-    const im = (db.prepare(
+       AND message LIKE 'Message sent%' AND date(created_at) = CURDATE()`
+    , [accountId]) as { c: number }).c;
+    const im = (await dbGet(
       `SELECT COUNT(*) as c FROM logs WHERE run_id IN (SELECT id FROM runs WHERE account_id = ?)
-       AND message LIKE 'InMail sent%' AND date(created_at) = date('now')`
-    ).get(accountId) as { c: number }).c;
+       AND message LIKE 'InMail sent%' AND date(created_at) = CURDATE()`
+    , [accountId]) as { c: number }).c;
     connectsSentToday.set(accountId, c);
     messagesSentToday.set(accountId, m);
     inmailsSentToday.set(accountId, im);
@@ -1529,16 +1517,16 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   // (the actual sending account), not runs.email_account_id (which may differ when accounts rotate)
   const emailsSentToday = new Map<string, number>();
   for (const emailAccountId of emailAccountIds) {
-    const e = (db.prepare(
+    const e = (await dbGet(
       `SELECT COUNT(*) as c FROM logs l
        WHERE l.message LIKE 'Email sent%'
-       AND date(l.created_at) = date('now')
+       AND date(l.created_at) = CURDATE()
        AND EXISTS (
          SELECT 1 FROM run_profiles rp
          WHERE rp.run_id = l.run_id AND rp.target_id = l.target_id
          AND rp.email_account_id = ?
        )`
-    ).get(emailAccountId) as { c: number }).c;
+    , [emailAccountId]) as { c: number }).c;
     emailsSentToday.set(emailAccountId, e);
   }
 
@@ -1549,13 +1537,13 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   // in this instance is currently paid, every step's ai_enabled is treated as off no
   // matter what's stored in the DB — closes the gap for rows written before
   // lib/access.ts's coerceAiEnabled() existed, or written directly against the DB.
-  const paidAccessExists = hasAnyPaidAccess();
-  const getSteps = (workflowId: string, track: string): WorkflowStep[] => {
+  const paidAccessExists = await hasAnyPaidAccess();
+  const getSteps = async (workflowId: string, track: string): Promise<WorkflowStep[]> => {
     const key = `${workflowId}|${track}`;
     if (!stepsCache.has(key)) {
-      const rows = db.prepare(
+      const rows = await dbAll(
         "SELECT * FROM workflow_steps WHERE workflow_id = ? AND track = ? ORDER BY step_order"
-      ).all(workflowId, track) as WorkflowStep[];
+      , [workflowId, track]) as WorkflowStep[];
       if (!paidAccessExists) {
         for (const row of rows) row.ai_enabled = 0;
       }
@@ -1566,9 +1554,9 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
 
   // Workflow prompt cache: workflow_id → campaign prompt string (or null)
   const workflowPromptCache = new Map<string, string | null>();
-  const getWorkflowPrompt = (workflowId: string): string | null => {
+  const getWorkflowPrompt = async (workflowId: string): Promise<string | null> => {
     if (!workflowPromptCache.has(workflowId)) {
-      const row = db.prepare("SELECT prompt FROM workflows WHERE id = ?").get(workflowId) as { prompt: string | null } | undefined;
+      const row = await dbGet("SELECT prompt FROM workflows WHERE id = ?", [workflowId]) as { prompt: string | null } | undefined;
       workflowPromptCache.set(workflowId, row?.prompt ?? null);
     }
     return workflowPromptCache.get(workflowId) ?? null;
@@ -1577,7 +1565,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   // Collect ALL due track-runs across all active runs, oldest-due first
   const runIds = stillActive.map(r => r.run_id);
   const placeholders = runIds.map(() => "?").join(",");
-  const dueTrackRuns = db.prepare(
+  const dueTrackRuns = await dbAll(
     `SELECT rt.id, rt.run_profile_id, rt.track, rt.state, rt.current_step, rt.next_step_at,
             rt.error_message, rt.last_email_subject, rt.last_email_body, rt.last_linkedin_message,
             rt.pending_reply_context,
@@ -1590,9 +1578,9 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
      JOIN targets t ON t.id = rp.target_id
      WHERE rp.run_id IN (${placeholders})
        AND rt.state = 'in_progress'
-       AND (rt.next_step_at IS NULL OR datetime(rt.next_step_at) <= datetime('now'))
+       AND (rt.next_step_at IS NULL OR rt.next_step_at <= NOW())
      ORDER BY rt.next_step_at ASC`
-  ).all(...runIds) as TrackRun[];
+  , runIds) as TrackRun[];
 
   // Enroll new pending track-runs — track remaining slots per account across runs.
   // Enrollment (pending -> in_progress) happens exactly once per track-run, on its
@@ -1602,11 +1590,11 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   const connectSlotsRemaining = new Map<string, number>();
   const inmailSlotsRemaining = new Map<string, number>();
   const firstLinkedinStepCache = new Map<string, string | undefined>();
-  const getFirstLinkedinStepType = (workflowId: string): string | undefined => {
+  const getFirstLinkedinStepType = async (workflowId: string): Promise<string | undefined> => {
     if (!firstLinkedinStepCache.has(workflowId)) {
-      const row = db.prepare(
+      const row = await dbGet(
         "SELECT step_type FROM workflow_steps WHERE workflow_id = ? AND track = 'linkedin' ORDER BY step_order LIMIT 1"
-      ).get(workflowId) as { step_type: string } | undefined;
+      , [workflowId]) as { step_type: string } | undefined;
       firstLinkedinStepCache.set(workflowId, row?.step_type);
     }
     return firstLinkedinStepCache.get(workflowId);
@@ -1616,7 +1604,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
     // Email-only runs have no LinkedIn account — skip LinkedIn-track slot enrollment entirely.
     if (run.account_id) {
       const limits = accountLimitsMap.get(run.account_id)!;
-      const firstStepType = getFirstLinkedinStepType(run.workflow_id);
+      const firstStepType = await getFirstLinkedinStepType(run.workflow_id);
       const isInmailFirst = firstStepType === "sales_inmail";
       const slotsRemaining = isInmailFirst ? inmailSlotsRemaining : connectSlotsRemaining;
 
@@ -1629,37 +1617,37 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
           : (connectsSentToday.get(run.account_id) ?? 0);
         const actionsLeft = Math.max(0, dailyLimit - sentToday);
         const firstStepTypeSql = isInmailFirst ? "'sales_inmail'" : "'connect'";
-        const scheduledToday = (db.prepare(
+        const scheduledToday = (await dbGet(
           `SELECT COUNT(*) as c FROM run_profile_tracks rt
            JOIN run_profiles rp ON rp.id = rt.run_profile_id
            JOIN runs r ON r.id = rp.run_id
            JOIN workflow_steps ws ON ws.workflow_id = r.workflow_id AND ws.track = 'linkedin' AND ws.step_order = 1
            WHERE r.account_id = ? AND rt.track = 'linkedin' AND rt.state = 'in_progress'
            AND ws.step_type = ${firstStepTypeSql}
-           AND date(datetime(rt.next_step_at)) = date('now')`
-        ).get(run.account_id) as { c: number }).c;
+           AND DATE(rt.next_step_at) = CURDATE()`
+        , [run.account_id]) as { c: number }).c;
         slotsRemaining.set(run.account_id, Math.max(0, actionsLeft - scheduledToday));
       }
       const slotsLeft = slotsRemaining.get(run.account_id)!;
       if (slotsLeft > 0) {
         const toEnroll = Math.min(slotsLeft, 5);
-        const pending = db.prepare(
+        const pending = await dbAll(
           `SELECT rt.id, rt.run_profile_id, rt.track FROM run_profile_tracks rt
            JOIN run_profiles rp ON rp.id = rt.run_profile_id
            WHERE rp.run_id = ? AND rt.track = 'linkedin' AND rt.state = 'pending'
            ORDER BY rt.id LIMIT ?`
-        ).all(run.run_id, toEnroll) as Array<{ id: string; run_profile_id: string; track: string }>;
-        spreadEnrollBatch(db, run.run_id, pending, limits, "linkedin");
+        , [run.run_id, toEnroll]) as Array<{ id: string; run_profile_id: string; track: string }>;
+        await spreadEnrollBatch(run.run_id, pending, limits, "linkedin");
         slotsRemaining.set(run.account_id, slotsLeft - pending.length);
       }
     }
 
     // Email track enrollment — iterate per actual sending account used by this run's profiles
     // (run_profiles.email_account_id may differ from runs.email_account_id when accounts are rotated)
-    const runEmailAccountIds = (db.prepare(
+    const runEmailAccountIds = (await dbAll(
       `SELECT DISTINCT rp.email_account_id FROM run_profiles rp
        WHERE rp.run_id = ? AND rp.email_account_id IS NOT NULL`
-    ).all(run.run_id) as { email_account_id: string }[]).map(r => r.email_account_id);
+    , [run.run_id]) as { email_account_id: string }[]).map(r => r.email_account_id);
 
     for (const emailAccId of runEmailAccountIds) {
       const emailKey = `${run.run_id}|${emailAccId}|email`;
@@ -1669,21 +1657,21 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
         if (emailLimits) {
           const effectiveLimit = effectiveEmailLimit(emailLimits);
           const emailsLeft = Math.max(0, effectiveLimit - (emailsSentToday.get(emailAccId) ?? 0));
-          const emailScheduledToday = (db.prepare(
+          const emailScheduledToday = (await dbGet(
             `SELECT COUNT(*) as c FROM run_profile_tracks rt
              JOIN run_profiles rp ON rp.id = rt.run_profile_id
              WHERE rp.email_account_id = ? AND rt.track = 'email' AND rt.state = 'in_progress'
-             AND date(datetime(rt.next_step_at)) = date('now')`
-          ).get(emailAccId) as { c: number }).c;
+             AND DATE(rt.next_step_at) = CURDATE()`
+          , [emailAccId]) as { c: number }).c;
           const emailSlotsLeft = Math.max(0, emailsLeft - emailScheduledToday);
           if (emailSlotsLeft > 0) {
-            const pendingEmail = db.prepare(
+            const pendingEmail = await dbAll(
               `SELECT rt.id, rt.run_profile_id, rt.track FROM run_profile_tracks rt
                JOIN run_profiles rp ON rp.id = rt.run_profile_id
                WHERE rp.run_id = ? AND rp.email_account_id = ? AND rt.track = 'email' AND rt.state = 'pending'
                ORDER BY rt.id LIMIT ?`
-            ).all(run.run_id, emailAccId, Math.min(emailSlotsLeft, 5)) as Array<{ id: string; run_profile_id: string; track: string }>;
-            spreadEnrollBatch(db, run.run_id, pendingEmail, emailLimits, "email");
+            , [run.run_id, emailAccId, Math.min(emailSlotsLeft, 5)]) as Array<{ id: string; run_profile_id: string; track: string }>;
+            await spreadEnrollBatch(run.run_id, pendingEmail, emailLimits, "email");
           }
         }
       }
@@ -1702,7 +1690,7 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
   const emailsPlanned = new Map<string, number>(emailAccountIds.map(id => [id, 0]));
 
   for (const tr of dueTrackRuns) {
-    const steps = getSteps(tr.workflow_id, tr.track);
+    const steps = await getSteps(tr.workflow_id, tr.track);
     const stepIndex = tr.current_step;
     if (stepIndex >= steps.length) { toExecute.push(tr); continue; }
     const step = steps[stepIndex];
@@ -1774,33 +1762,33 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
       ?? (tr.email_account_id ? emailAccountLimitsMap.get(tr.email_account_id) : undefined);
     if (!limits) continue; // no schedule info available — leave next_step_at as-is, picked up next tick
     const slot = rescheduleToTomorrow(limits);
-    db.prepare("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?").run(slot, tr.id);
-    log(db, tr.run_id, tr.target_id, "info", `Daily limit reached — rescheduled to ${slot}`);
+    await dbRun("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?", [slot, tr.id]);
+    await log(tr.run_id, tr.target_id, "info", `Daily limit reached — rescheduled to ${slot}`);
   }
 
   // Execute what's left
   for (const tr of toExecute) {
-    const steps = getSteps(tr.workflow_id, tr.track);
+    const steps = await getSteps(tr.workflow_id, tr.track);
     const limits = accountLimitsMap.get(tr.account_id)!;
     const emailAccountId = tr.email_account_id ?? null;
     const emailLimits = emailAccountId ? (emailAccountLimitsMap.get(emailAccountId) ?? null) : null;
 
-    const runStatus = db.prepare("SELECT status FROM runs WHERE id = ?").get(tr.run_id) as { status: string } | undefined;
+    const runStatus = await dbGet("SELECT status FROM runs WHERE id = ?", [tr.run_id]) as { status: string } | undefined;
     if (!runStatus || runStatus.status !== "running") continue;
 
-    const target = db.prepare("SELECT * FROM targets WHERE id = ?").get(tr.target_id) as Target;
-    await executeStep(db, tr.run_id, tr, target, steps, tr.account_id, limits, emailAccountId, emailLimits, getWorkflowPrompt(tr.workflow_id));
+    const target = await dbGet("SELECT * FROM targets WHERE id = ?", [tr.target_id]) as Target;
+    const campaignPrompt = await getWorkflowPrompt(tr.workflow_id);
+    await executeStep(tr.run_id, tr, target, steps, tr.account_id, limits, emailAccountId, emailLimits, campaignPrompt);
     await randomDelay(PROFILE_DELAY_MIN, PROFILE_DELAY_MAX);
   }
 }
 
-function spreadEnrollBatch(
-  db: ReturnType<typeof getDb>,
+async function spreadEnrollBatch(
   runId: string,
   pending: Array<{ id: string; run_profile_id: string; track: string }>,
   limits: ScheduleConfig,
   track: string
-) {
+): Promise<void> {
   const batchSize = pending.length;
   if (batchSize === 0) return;
   const start = limits.active_hours_start ?? 9;
@@ -1814,10 +1802,10 @@ function spreadEnrollBatch(
 
   for (let i = 0; i < pending.length; i++) {
     const row = pending[i];
-    const claimed = db.prepare(
+    const claimed = await dbRun(
       "UPDATE run_profile_tracks SET state = 'in_progress' WHERE id = ? AND state = 'pending'"
-    ).run(row.id);
-    if (claimed.changes === 0) continue;
+    , [row.id]);
+    if (claimed.affectedRows === 0) continue;
 
     let slot: string;
     if (outsideHours) {
@@ -1833,25 +1821,26 @@ function spreadEnrollBatch(
       slot = new Date(Date.now() + delaySec * 1000).toISOString();
     }
 
-    db.prepare("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?").run(slot, row.id);
-    const tgt = db.prepare(
+    await dbRun("UPDATE run_profile_tracks SET next_step_at = ? WHERE id = ?", [slot, row.id]);
+    const tgt = await dbGet(
       "SELECT full_name, linkedin_url FROM targets WHERE id = (SELECT target_id FROM run_profiles WHERE id = ?)"
-    ).get(row.run_profile_id) as { full_name: string | null; linkedin_url: string } | undefined;
+    , [row.run_profile_id]) as { full_name: string | null; linkedin_url: string } | undefined;
     const label = tgt?.full_name ?? tgt?.linkedin_url ?? row.run_profile_id;
     if (outsideHours) {
-      log(db, runId, null, "info", `[${track}] Outside active hours — scheduled ${label} for next window`);
+      await log(runId, null, "info", `[${track}] Outside active hours — scheduled ${label} for next window`);
     } else if (track === "email") {
-      log(db, runId, null, "info", `[${track}] First email for ${label} queued immediately`);
+      await log(runId, null, "info", `[${track}] First email for ${label} queued immediately`);
     } else {
-      log(db, runId, null, "info", `[${track}] First action for ${label} queued in ~${Math.round((new Date(slot).getTime() - Date.now()) / 1000)}s`);
+      await log(runId, null, "info", `[${track}] First action for ${label} queued in ~${Math.round((new Date(slot).getTime() - Date.now()) / 1000)}s`);
     }
   }
 }
 
+
 // ─── public API ──────────────────────────────────────────────────────────────
 
-export function startRun(runId: string): void {
-  const db = getDb();
-  db.prepare("UPDATE runs SET status = 'running', started_at = COALESCE(started_at, datetime('now')) WHERE id = ?").run(runId);
+export async function startRun(runId: string): Promise<void> {
+  await dbRun("UPDATE runs SET status = 'running', started_at = COALESCE(started_at, NOW()) WHERE id = ?", [runId]);
   console.log(`[runner] Run ${runId} marked running — global loop will pick it up`);
 }
+

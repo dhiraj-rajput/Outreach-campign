@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { dbGet, dbRun } from "@/lib/db";
 
 // Ported from PPT-Agent's backend/app/core/email_worker.py (SCORE_RULES / classify_score /
 // add_score). Purely additive metadata on `targets` — never gates or changes send behavior,
@@ -22,35 +22,34 @@ export function classifyScore(score: number): LeadGrade {
 }
 
 /** Add `delta` to a target's score and recompute its grade. Best-effort — never throws. */
-export function addScore(targetId: string, delta: number): void {
+export async function addScore(targetId: string, delta: number): Promise<void> {
   try {
-    const db = getDb();
-    const row = db.prepare("SELECT score FROM targets WHERE id = ?").get(targetId) as { score: number } | undefined;
+    const row = await dbGet<{ score: number }>("SELECT score FROM targets WHERE id = ?", [targetId]);
     if (!row) return;
     const newScore = (row.score ?? 0) + delta;
     const newGrade = classifyScore(newScore);
-    db.prepare("UPDATE targets SET score = ?, grade = ? WHERE id = ?").run(newScore, newGrade, targetId);
+    await dbRun("UPDATE targets SET score = ?, grade = ? WHERE id = ?", [newScore, newGrade, targetId]);
   } catch (err) {
     console.error("[lead-score] failed to update score for", targetId, err);
   }
 }
 
-export function scoreEmailSent(targetId: string): void {
-  addScore(targetId, SCORE_RULES.emailSent);
+export async function scoreEmailSent(targetId: string): Promise<void> {
+  await addScore(targetId, SCORE_RULES.emailSent);
 }
 
-export function scoreEmailOpened(targetId: string): void {
-  addScore(targetId, SCORE_RULES.emailOpened);
+export async function scoreEmailOpened(targetId: string): Promise<void> {
+  await addScore(targetId, SCORE_RULES.emailOpened);
 }
 
-export function scoreLinkClicked(targetId: string): void {
-  addScore(targetId, SCORE_RULES.linkClicked);
+export async function scoreLinkClicked(targetId: string): Promise<void> {
+  await addScore(targetId, SCORE_RULES.linkClicked);
 }
 
-export function scoreReplied(targetId: string): void {
-  addScore(targetId, SCORE_RULES.replied);
+export async function scoreReplied(targetId: string): Promise<void> {
+  await addScore(targetId, SCORE_RULES.replied);
 }
 
-export function scoreMeetingBooked(targetId: string): void {
-  addScore(targetId, SCORE_RULES.meetingBooked);
+export async function scoreMeetingBooked(targetId: string): Promise<void> {
+  await addScore(targetId, SCORE_RULES.meetingBooked);
 }

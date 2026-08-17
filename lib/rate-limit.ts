@@ -43,11 +43,15 @@ function sweepIfDue(now: number, windowMs: number) {
 }
 
 function clientIp(req: IpSource): string {
-  const xRealIp = req.headers?.["x-real-ip"];
-  if (typeof xRealIp === "string" && xRealIp) return xRealIp;
+  const trustProxy = process.env.TRUST_PROXY === 'true';
 
-  const xForwardedFor = req.headers?.["x-forwarded-for"];
-  if (typeof xForwardedFor === "string" && xForwardedFor) return xForwardedFor.split(",")[0].trim();
+  if (trustProxy) {
+    const xRealIp = req.headers?.["x-real-ip"];
+    if (typeof xRealIp === "string" && xRealIp) return xRealIp;
+
+    const xForwardedFor = req.headers?.["x-forwarded-for"];
+    if (typeof xForwardedFor === "string" && xForwardedFor) return xForwardedFor.split(",")[0].trim();
+  }
 
   return req.socket?.remoteAddress || "unknown";
 }

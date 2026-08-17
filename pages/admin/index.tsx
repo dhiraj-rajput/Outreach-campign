@@ -14,11 +14,8 @@ type AdminOrg = {
   id: string; name: string; plan: string; owner_email: string; member_count: number; created_at: string;
 };
 
-export const getServerSideProps: GetServerSideProps = async (ctx) => {
-  const access = await getAccessContext(ctx);
-  if (!access) return { redirect: { destination: "/login", permanent: false } };
-  if (!access.isSuperAdmin) return { redirect: { destination: "/", permanent: false } };
-  return { props: {} };
+export const getServerSideProps: GetServerSideProps = async () => {
+  return { notFound: true };
 };
 
 export default function AdminPage() {

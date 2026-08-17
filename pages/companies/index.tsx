@@ -2,7 +2,7 @@ import Head from "next/head";
 import { useState } from "react";
 import { GetServerSideProps } from "next";
 import Link from "next/link";
-import { getDb } from "@/lib/db";
+import { dbAll } from "@/lib/db";
 import { toast } from "sonner";
 import {
   RiAddLine,
@@ -53,23 +53,20 @@ function emptyProject(): ProjectDraft {
 }
 
 export const getServerSideProps: GetServerSideProps = async () => {
-  const db = getDb();
-  const companies = db
-    .prepare(
+  const companies = await dbAll<Company>(
       `
     SELECT c.*,
            COUNT(DISTINCT t.id) as contact_count,
            COUNT(DISTINCT p.id) as project_count,
-           parent.name as parent_name
+           MAX(parent.name) as parent_name
     FROM companies c
     LEFT JOIN targets t ON t.company_id = c.id
     LEFT JOIN projects p ON p.company_id = c.id
     LEFT JOIN companies parent ON parent.id = c.parent_company_id
     GROUP BY c.id
-    ORDER BY c.name COLLATE NOCASE
+    ORDER BY c.name
   `
-    )
-    .all();
+  );
   return { props: { initialCompanies: companies } };
 };
 
@@ -213,7 +210,7 @@ export default function CompaniesPage({
 
         <div className="mb-4 w-full sm:w-auto">
           <input
-            className="input input-bordered input-sm w-full sm:w-72 bg-base-300/50"
+            className="input input-bordered input-sm w-full sm:w-72 bg-base-100 text-base-content placeholder:text-base-content/50 border-base-300 focus:border-primary"
             placeholder="Search companies..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -407,7 +404,7 @@ export default function CompaniesPage({
                       </p>
                     ) : (
                       <div className="flex flex-col gap-2">
-                        {projectDrafts.map((p, idx) => (
+                        {projectDrafts.map((p) => (
                           <div
                             key={p.key}
                             className="rounded-lg border border-base-300/50 bg-base-300/20 p-2 space-y-1.5"

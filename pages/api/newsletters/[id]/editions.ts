@@ -1,19 +1,15 @@
-/**
- * API route for newsletter editions: GET (list) and POST (create)
- */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { id } = req.query as { id: string };
 
-  const newsletter = db.prepare("SELECT * FROM newsletters WHERE id = ?").get(id);
+  const newsletter = await dbGet("SELECT * FROM newsletters WHERE id = ?", [id]);
   if (!newsletter) return res.status(404).json({ error: "Newsletter not found" });
 
   if (req.method === "GET") {
-    const editions = db.prepare(`
+    const editions = await dbAll(`
       SELECT 
         e.*,
         (SELECT COUNT(*) FROM newsletter_sends ns WHERE ns.edition_id = e.id) AS total_sends,
@@ -22,7 +18,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       FROM newsletter_editions e
       WHERE e.newsletter_id = ?
       ORDER BY e.created_at DESC
-    `).all(id);
+    `, [id]);
     return res.json({ editions });
   }
 
@@ -38,12 +34,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     }
 
     const editionId = randomUUID();
-    db.prepare(`
+    await dbRun(`
       INSERT INTO newsletter_editions (id, newsletter_id, title, subject, content_html, status)
       VALUES (?, ?, ?, ?, ?, 'draft')
-    `).run(editionId, id, title.trim(), subject.trim(), content_html);
+    `, [editionId, id, title.trim(), subject.trim(), content_html]);
 
-    const created = db.prepare("SELECT * FROM newsletter_editions WHERE id = ?").get(editionId);
+    const created = await dbGet("SELECT * FROM newsletter_editions WHERE id = ?", [editionId]);
     return res.status(201).json({ edition: created });
   }
 

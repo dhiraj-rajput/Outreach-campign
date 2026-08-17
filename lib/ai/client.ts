@@ -7,7 +7,7 @@
  */
 
 import OpenAI from "openai";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 
 export interface AIProviderConfig {
@@ -16,15 +16,14 @@ export interface AIProviderConfig {
   model: string;
 }
 
-export function getAllAIProviders(preferredModel?: string): AIProviderConfig[] {
-  const db = getDb();
+export async function getAllAIProviders(preferredModel?: string): Promise<AIProviderConfig[]> {
   const providers: AIProviderConfig[] = [];
 
   // 1. Google AI Studio (Gemini)
   try {
-    const geminiRow = db
-      .prepare("SELECT api_key, model FROM integrations WHERE key IN ('gemini', 'google') AND api_key IS NOT NULL")
-      .get() as { api_key: string; model: string | null } | undefined;
+    const geminiRow = await dbGet<{ api_key: string; model: string | null }>(
+      "SELECT api_key, model FROM integrations WHERE `key` IN ('gemini', 'google') AND api_key IS NOT NULL"
+    );
 
     const geminiKey = geminiRow?.api_key ? (decryptSecret(geminiRow.api_key) ?? geminiRow.api_key) : undefined;
 
@@ -69,9 +68,9 @@ export function getAllAIProviders(preferredModel?: string): AIProviderConfig[] {
 
   // 2. OpenRouter
   try {
-    const openrouterRow = db
-      .prepare("SELECT api_key, model FROM integrations WHERE key = 'openrouter' AND api_key IS NOT NULL")
-      .get() as { api_key: string; model: string | null } | undefined;
+    const openrouterRow = await dbGet<{ api_key: string; model: string | null }>(
+      "SELECT api_key, model FROM integrations WHERE `key` = 'openrouter' AND api_key IS NOT NULL"
+    );
 
     const openrouterKey = openrouterRow?.api_key ? (decryptSecret(openrouterRow.api_key) ?? openrouterRow.api_key) : undefined;
 
@@ -101,8 +100,8 @@ export function getAllAIProviders(preferredModel?: string): AIProviderConfig[] {
   return providers;
 }
 
-export function getAIClient(preferredModel?: string): AIProviderConfig | null {
-  const providers = getAllAIProviders(preferredModel);
+export async function getAIClient(preferredModel?: string): Promise<AIProviderConfig | null> {
+  const providers = await getAllAIProviders(preferredModel);
   return providers[0] ?? null;
 }
 
@@ -124,7 +123,7 @@ export async function runAICompletion(params: ChatCompletionParams): Promise<{
   prompt_tokens?: number;
   completion_tokens?: number;
 }> {
-  const providers = getAllAIProviders(params.preferredModel);
+  const providers = await getAllAIProviders(params.preferredModel);
   if (providers.length === 0) {
     throw new Error("No AI integration configured. Please add a Google AI Studio or OpenRouter API key in Settings → Integrations.");
   }

@@ -12,6 +12,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     || "";
   const userAgent = (req.headers["user-agent"] as string) || "";
 
-  const destination = id ? recordClick(id, userAgent, ip) : null;
+  const destination = id ? await recordClick(id, userAgent, ip) : null;
   return res.redirect(302, destination || "/");
 }

@@ -15,9 +15,22 @@ const MIN_LENGTH = 8;
 const MAX_LENGTH = 128;
 
 const COMMON = new Set([
-  "password", "password1", "password123", "12345678", "123456789",
-  "qwerty123", "letmein", "welcome", "admin123", "iloveyou",
-  "monkey123", "abc12345",
+  // Top common passwords
+  "password", "password1", "password123", "password1234", "password12345",
+  "12345678", "123456789", "1234567890", "0987654321",
+  "qwerty123", "qwerty1", "qwerty", "qwertyuiop",
+  "letmein", "welcome", "welcome1", "welcome123",
+  "admin", "admin123", "admin1234", "admin@123",
+  "iloveyou", "monkey123", "abc12345", "abc123456",
+  "passw0rd", "p@ssword", "p@ssw0rd", "pass1234",
+  "sunshine", "princess", "dragon", "master",
+  "football", "baseball", "basketball", "soccer",
+  "superman", "batman", "spiderman",
+  "123qwerty", "qwerty12", "1q2w3e4r",
+  "test1234", "guest1234", "user1234",
+  "login123", "access123", "hello123", "hello1234",
+  "123456a", "a123456", "111111", "222222", "654321",
+  "changeme", "changeit", "newpassword", "temp1234",
 ]);
 
 export function validatePassword(password: string, email?: string): PasswordCheck {

@@ -8,26 +8,24 @@
  * clicked an unsubscribe link themselves.
  */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbGet } from "@/lib/db";
 import { addSuppression } from "@/lib/email/suppression";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     return res.status(405).end();
   }
 
-  const db = getDb();
   const id = req.query.id as string;
 
-  const target = db.prepare("SELECT id, email FROM targets WHERE id = ?").get(id) as
-    { id: string; email: string | null } | undefined;
+  const target = await dbGet<{ id: string; email: string | null }>("SELECT id, email FROM targets WHERE id = ?", [id]);
 
   if (!target) return res.status(404).json({ error: "Contact not found" });
   if (!target.email) return res.status(400).json({ error: "This contact has no email address to unsubscribe" });
 
-  addSuppression(target.email, "manual", target.id);
+  await addSuppression(target.email, "manual", target.id);
 
-  const updated = db.prepare("SELECT id, email, unsubscribed_at FROM targets WHERE id = ?").get(target.id);
+  const updated = await dbGet("SELECT id, email, unsubscribed_at FROM targets WHERE id = ?", [target.id]);
   return res.json({ ok: true, target: updated });
 }

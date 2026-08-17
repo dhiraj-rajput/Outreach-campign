@@ -3,7 +3,7 @@
  * POST /api/linkedin/posts — create draft / scheduled post
  */
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 
 type PostRow = {
@@ -40,9 +40,7 @@ function serializePost(r: PostRow) {
   };
 }
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
-
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
     const { status, account_id, limit = "50" } = req.query;
     let sql = `
@@ -60,10 +58,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       sql += " AND p.account_id = ?";
       params.push(account_id);
     }
-    sql += " ORDER BY COALESCE(p.scheduled_at, p.created_at) DESC LIMIT ?";
-    params.push(Math.min(Number(limit) || 50, 200));
+    const limitNum = Math.min(Math.max(1, Number(limit) || 50), 200);
+    sql += ` ORDER BY COALESCE(p.scheduled_at, p.created_at) DESC LIMIT ${limitNum}`;
 
-    const rows = db.prepare(sql).all(...params) as PostRow[];
+    const rows = await dbAll<PostRow>(sql, params);
     return res.json(rows.map(serializePost));
   }
 
@@ -84,7 +82,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
     if (!account_id) return res.status(400).json({ error: "account_id is required" });
 
-    const account = db.prepare("SELECT id FROM accounts WHERE id = ?").get(account_id);
+    const account = await dbGet<{ id: string }>("SELECT id FROM accounts WHERE id = ?", [account_id]);
     if (!account) return res.status(404).json({ error: "Account not found" });
 
     if (visibility !== "anyone" && visibility !== "connections") {
@@ -126,13 +124,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     const id = randomUUID();
     const now = new Date().toISOString();
 
-    db.prepare(`
+    await dbRun(`
       INSERT INTO linkedin_posts (
         id, account_id, content, visibility, comment_control, brand_partnership,
         post_type, media_json, poll_json, event_json, document_json,
         scheduled_at, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
       id,
       account_id,
       content || null,
@@ -148,19 +146,15 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       status,
       now,
       now
-    );
+    ]);
 
-    const row = db
-      .prepare(
-        `
+    const row = await dbGet<PostRow>(`
       SELECT p.*, a.name AS account_name
       FROM linkedin_posts p LEFT JOIN accounts a ON a.id = p.account_id
       WHERE p.id = ?
-    `
-      )
-      .get(id) as PostRow;
+    `, [id]);
 
-    return res.status(201).json(serializePost(row));
+    return res.status(201).json(serializePost(row!));
   }
 
   res.setHeader("Allow", ["GET", "POST"]);

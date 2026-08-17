@@ -56,8 +56,19 @@ if (port) {
   console.log(`[with-configured-port] NEXTAUTH_URL points at port ${port} — starting Next on the same port.`);
 }
 
+const isWin = process.platform === "win32";
 const rootDir = path.join(__dirname, "..");
-const bin = path.join(rootDir, "node_modules", ".bin", process.platform === "win32" ? "next.cmd" : "next");
+const bin = path.join(rootDir, "node_modules", ".bin", isWin ? "next.cmd" : "next");
+const cmd = fs.existsSync(bin) ? (isWin ? `"${bin}"` : bin) : (isWin ? "next.cmd" : "next");
 
-const result = spawnSync(fs.existsSync(bin) ? bin : "next", args, { stdio: "inherit", env });
-process.exit(result.status ?? 0);
+const result = spawnSync(cmd, args, {
+  stdio: "inherit",
+  env,
+  shell: true,
+});
+
+if (result.error) {
+  console.error("[with-configured-port] Error running Next:", result.error);
+}
+
+process.exit(result.status ?? (result.error ? 1 : 0));

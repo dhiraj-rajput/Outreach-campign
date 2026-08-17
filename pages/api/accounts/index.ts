@@ -1,10 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { randomUUID } from "crypto";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const db = getDb();
-
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Excludes cookies_json — the frontend never uses the raw session blob, only
   // is_authenticated, so there's no reason to ship it (even encrypted) to the client.
   const ACCOUNT_COLUMNS = `a.id, a.name, a.email, a.is_authenticated, a.daily_connection_limit, a.daily_message_limit, a.daily_inmail_limit,
@@ -13,11 +11,11 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     a.li_stats_synced_at, a.connections_synced_through_ms`;
 
   if (req.method === "GET") {
-    const accounts = db.prepare(`
+    const accounts = await dbAll(`
       SELECT ${ACCOUNT_COLUMNS},
         (SELECT COUNT(*) FROM runs r WHERE r.account_id = a.id AND r.status IN ('running', 'paused')) AS active_run_count
       FROM accounts a ORDER BY a.created_at DESC
-    `).all();
+    `);
     return res.json(accounts);
   }
 
@@ -26,12 +24,11 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (!name || !email) return res.status(400).json({ error: "name and email required" });
     try {
       const id = randomUUID();
-      db
-        .prepare(
-          "INSERT INTO accounts (id, name, email, daily_connection_limit, daily_message_limit, daily_inmail_limit) VALUES (?, ?, ?, ?, ?, ?)"
-        )
-        .run(id, name, email, daily_connection_limit, daily_message_limit, daily_inmail_limit);
-      const account = db.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM accounts a WHERE a.id = ?`).get(id);
+      await dbRun(
+          "INSERT INTO accounts (id, name, email, daily_connection_limit, daily_message_limit, daily_inmail_limit) VALUES (?, ?, ?, ?, ?, ?)",
+          [id, name, email, daily_connection_limit, daily_message_limit, daily_inmail_limit]
+        );
+      const account = await dbGet(`SELECT ${ACCOUNT_COLUMNS} FROM accounts a WHERE a.id = ?`, [id]);
       return res.status(201).json(account);
     } catch {
       return res.status(409).json({ error: "Email already exists" });
