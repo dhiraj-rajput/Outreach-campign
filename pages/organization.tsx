@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   RiBuildingLine, RiUserAddLine, RiDeleteBinLine, RiVipCrownLine,
   RiShieldStarLine, RiKeyLine, RiFileCopyLine, RiRefreshLine,
-  RiEditLine, RiDoorOpenLine, RiUserLine, RiArrowRightLine,
+  RiEditLine, RiDoorOpenLine, RiUserLine, RiArrowRightLine, RiSparklingLine,
 } from "react-icons/ri";
 import { useBillingStatus } from "@/components/billing/useBillingStatus";
 
@@ -16,12 +16,18 @@ export default function OrganizationPage() {
   const { status, refresh: refreshBilling } = useBillingStatus();
   const [org, setOrg] = useState<OrgDetails | null>(null);
   const [members, setMembers] = useState<OrgMember[]>([]);
+  const [allOrgs, setAllOrgs] = useState<{ id: string; name: string; plan: string }[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
   // Edit org name
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
   const [savingName, setSavingName] = useState(false);
+
+  // Creation form
+  const [newOrgName, setNewOrgName] = useState("");
+  const [creating, setCreating] = useState(false);
 
   // Invite member
   const [inviteEmail, setInviteEmail] = useState("");
@@ -34,15 +40,20 @@ export default function OrganizationPage() {
   const canManage = isSuperAdmin || currentUserRole === "owner" || currentUserRole === "admin";
   const isOwner = isSuperAdmin || currentUserRole === "owner";
 
-  function load() {
+  function load(targetId?: string) {
     setLoading(true);
-    fetch("/api/organizations")
+    const url = targetId ? `/api/organizations?orgId=${targetId}` : "/api/organizations";
+    fetch(url)
       .then((r) => r.json())
       .then((d) => {
         setOrg(d.organization ?? null);
         setMembers(d.members ?? []);
+        if (d.allOrganizations) {
+          setAllOrgs(d.allOrganizations);
+        }
         if (d.organization) {
           setEditName(d.organization.name);
+          setSelectedOrgId(d.organization.id);
         }
       })
       .catch(() => {})
@@ -53,22 +64,46 @@ export default function OrganizationPage() {
     load();
   }, []);
 
+  // CRUD: Create Org
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newOrgName.trim()) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/organizations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newOrgName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to create organization");
+      toast.success("Organization initialized successfully!");
+      setNewOrgName("");
+      load(data.id);
+      refreshBilling();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create organization");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   // CRUD: Update Org Name
   async function handleUpdateName(e: React.FormEvent) {
     e.preventDefault();
-    if (!editName.trim()) return;
+    if (!editName.trim() || !org) return;
     setSavingName(true);
     try {
       const res = await fetch("/api/organizations", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim() }),
+        body: JSON.stringify({ name: editName.trim(), orgId: org.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to update organization");
       toast.success("Organization name updated");
       setIsEditingName(false);
-      load();
+      load(org.id);
       refreshBilling();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update organization");
@@ -79,18 +114,19 @@ export default function OrganizationPage() {
 
   // CRUD: Regenerate Invite Code
   async function handleRegenerateCode() {
+    if (!org) return;
     if (!confirm("Regenerate invite code? The previous code will no longer work for new signups.")) return;
     setRegenerating(true);
     try {
       const res = await fetch("/api/organizations", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ regenerateInviteCode: true }),
+        body: JSON.stringify({ regenerateInviteCode: true, orgId: org.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to regenerate invite code");
       toast.success("New invite code generated!");
-      load();
+      load(org.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to regenerate invite code");
     } finally {
@@ -101,19 +137,19 @@ export default function OrganizationPage() {
   // CRUD: Add Member
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
-    if (!inviteEmail.trim()) return;
+    if (!inviteEmail.trim() || !org) return;
     setInviting(true);
     try {
       const res = await fetch("/api/organizations/members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail.trim() }),
+        body: JSON.stringify({ email: inviteEmail.trim(), orgId: org.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to add member");
       toast.success("Member added successfully!");
       setInviteEmail("");
-      load();
+      load(org.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to add member");
     } finally {
@@ -123,16 +159,17 @@ export default function OrganizationPage() {
 
   // CRUD: Change Member Role
   async function handleChangeRole(userId: string, targetRole: "admin" | "member") {
+    if (!org) return;
     try {
       const res = await fetch("/api/organizations/members", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, role: targetRole }),
+        body: JSON.stringify({ userId, role: targetRole, orgId: org.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to update member role");
       toast.success(`Role updated to ${targetRole}`);
-      load();
+      load(org.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update member role");
     }
@@ -140,17 +177,18 @@ export default function OrganizationPage() {
 
   // CRUD: Remove Member
   async function handleRemoveMember(userId: string) {
+    if (!org) return;
     if (!confirm("Remove this member from the organization?")) return;
     try {
       const res = await fetch("/api/organizations/members", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ userId, orgId: org.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to remove member");
       toast.success("Member removed");
-      load();
+      load(org.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to remove member");
     }
@@ -158,6 +196,7 @@ export default function OrganizationPage() {
 
   // CRUD: Delete or Leave Org
   async function handleDeleteOrLeave() {
+    if (!org) return;
     const actionLabel = isOwner ? "Delete Organization" : "Leave Organization";
     const confirmMsg = isOwner
       ? "Are you sure you want to permanently delete this organization? All members will be unlinked."
@@ -165,7 +204,11 @@ export default function OrganizationPage() {
     if (!confirm(confirmMsg)) return;
 
     try {
-      const res = await fetch("/api/organizations", { method: "DELETE" });
+      const res = await fetch("/api/organizations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orgId: org.id }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `${actionLabel} failed`);
       toast.success(isOwner ? "Organization deleted" : "You have left the organization");
@@ -191,19 +234,34 @@ export default function OrganizationPage() {
           <title>Organization Workspace — Linki</title>
         </Head>
         <div className="max-w-3xl mx-auto py-8 px-4">
-          <div className="surface rounded-2xl p-8 border border-base-300 text-center space-y-4 shadow-sm">
+          <div className="surface rounded-2xl p-8 border border-base-300 text-center space-y-5 shadow-sm">
             <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto">
               <RiBuildingLine size={28} />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-base-content">Organization Not Initialized Yet</h2>
+              <h2 className="text-lg font-bold text-base-content">
+                {isSuperAdmin ? "Initialize Platform Organization" : "Organization Not Initialized Yet"}
+              </h2>
               <p className="text-xs sm:text-sm text-base-content/60 max-w-md mx-auto mt-1">
-                Initialize your organization workspace in Settings to start adding teammates, managing roles, and generating invite codes.
+                {isSuperAdmin
+                  ? "As Super Admin, create a company workspace to manage team members, invite codes, and permissions."
+                  : "Initialize your organization workspace to start adding teammates, managing roles, and generating invite codes."}
               </p>
             </div>
-            <Link href="/settings?tab=organization" className="btn btn-sm btn-primary gap-1.5 inline-flex">
-              Initialize in Settings <RiArrowRightLine size={14} />
-            </Link>
+
+            <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-2 max-w-md mx-auto pt-2">
+              <input
+                type="text"
+                placeholder="e.g. Acme Sales Team"
+                className="input input-sm flex-1"
+                value={newOrgName}
+                onChange={(e) => setNewOrgName(e.target.value)}
+                required
+              />
+              <button type="submit" disabled={creating} className="btn btn-sm btn-primary">
+                {creating ? "Initializing…" : "Initialize Workspace"}
+              </button>
+            </form>
           </div>
         </div>
       </>
@@ -241,10 +299,30 @@ export default function OrganizationPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Super Admin Org Switcher Dropdown */}
+            {isSuperAdmin && allOrgs.length > 1 && (
+              <select
+                value={selectedOrgId}
+                onChange={(e) => {
+                  setSelectedOrgId(e.target.value);
+                  load(e.target.value);
+                }}
+                className="select select-sm bg-base-100 border-base-300 text-xs font-semibold"
+                title="Switch Organization"
+              >
+                {allOrgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    🏢 {o.name} ({o.plan === "paid" ? "Paid" : "Free"})
+                  </option>
+                ))}
+              </select>
+            )}
+
             <span className={`badge ${org.plan === "paid" ? "badge-primary" : "badge-ghost"}`}>
               {org.plan === "paid" ? "Paid Team Plan" : "Free Plan"}
             </span>
+
             {org.plan !== "paid" && (
               <Link href="/pricing" className="btn btn-xs btn-outline btn-primary">
                 Upgrade Workspace

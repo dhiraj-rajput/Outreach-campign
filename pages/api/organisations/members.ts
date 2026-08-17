@@ -20,8 +20,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   const caller = await getCallerMembership(userId);
-  if (!caller.org_id) return res.status(400).json({ error: "You're not part of an organization" });
   const isSuperAdmin = session?.user?.role === "super_admin";
+  let targetOrgId = (req.body?.orgId || req.query?.orgId) as string | undefined;
+  if (!targetOrgId) {
+    targetOrgId = caller.org_id ?? undefined;
+  }
+  if (!targetOrgId && isSuperAdmin) {
+    const defaultOrg = await dbGet<{ id: string }>("SELECT id FROM organizations ORDER BY created_at DESC LIMIT 1");
+    targetOrgId = defaultOrg?.id;
+  }
+
+  if (!targetOrgId) return res.status(400).json({ error: "You're not part of an organization and no organization was found" });
   if (caller.role !== "owner" && caller.role !== "admin" && !isSuperAdmin) {
     return res.status(403).json({ error: "Only the organization owner or an admin can manage members" });
   }
@@ -35,8 +44,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (target.org_id) return res.status(400).json({ error: "That user already belongs to an organization" });
 
     await dbTransaction(async (conn) => {
-      await conn.execute("INSERT INTO organization_members (org_id, user_id, role) VALUES (?, ?, 'member')", [caller.org_id, target.id]);
-      await conn.execute("UPDATE users SET org_id = ? WHERE id = ?", [caller.org_id, target.id]);
+      await conn.execute("INSERT INTO organization_members (org_id, user_id, role) VALUES (?, ?, 'member')", [targetOrgId, target.id]);
+      await conn.execute("UPDATE users SET org_id = ? WHERE id = ?", [targetOrgId, target.id]);
     });
 
     return res.status(201).json({ ok: true });
@@ -47,13 +56,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!targetUserId) return res.status(400).json({ error: "userId is required" });
 
     const target = await dbGet<{ role: string }>(
-      "SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?", [caller.org_id, targetUserId]
+      "SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?", [targetOrgId, targetUserId]
     );
-    if (!target) return res.status(404).json({ error: "That user isn't a member of your organization" });
-    if (target.role === "owner") return res.status(400).json({ error: "The org owner can't be removed" });
+    if (!target) return res.status(404).json({ error: "That user isn't a member of this organization" });
+    if (target.role === "owner" && !isSuperAdmin) return res.status(400).json({ error: "The org owner can't be removed" });
 
     await dbTransaction(async (conn) => {
-      await conn.execute("DELETE FROM organization_members WHERE org_id = ? AND user_id = ?", [caller.org_id, targetUserId]);
+      await conn.execute("DELETE FROM organization_members WHERE org_id = ? AND user_id = ?", [targetOrgId, targetUserId]);
       await conn.execute("UPDATE users SET org_id = NULL WHERE id = ?", [targetUserId]);
     });
 
@@ -69,14 +78,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const target = await dbGet<{ role: string }>(
       "SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?",
-      [caller.org_id, targetUserId]
+      [targetOrgId, targetUserId]
     );
     if (!target) return res.status(404).json({ error: "Member not found" });
-    if (target.role === "owner") return res.status(400).json({ error: "Cannot change the owner's role" });
+    if (target.role === "owner" && !isSuperAdmin) return res.status(400).json({ error: "Cannot change the owner's role" });
 
     await dbRun(
       "UPDATE organization_members SET role = ? WHERE org_id = ? AND user_id = ?",
-      [newRole, caller.org_id, targetUserId]
+      [newRole, targetOrgId, targetUserId]
     );
 
     return res.status(200).json({ ok: true, role: newRole });
