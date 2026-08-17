@@ -162,3 +162,46 @@ export async function requireSuperAdmin(
 
   return access;
 }
+
+/**
+ * Coerces a step-save payload's `ai_enabled` flag down to false unless the CURRENT
+ * session (the person saving the step) has paid access. This is the write-time half of
+ * the AI paywall for workflow steps — the read-time half is hasAnyPaidAccess() below,
+ * used by the send runner as defense-in-depth for rows written before this existed.
+ *
+ * Workflows in this app aren't owned by a single user (no owner column — any signed-in
+ * teammate can edit any workflow), so "is this workflow's owner paid?" isn't a
+ * meaningful question; what matters is whether the person doing the save right now is
+ * authorized to turn AI on at all.
+ */
+export async function coerceAiEnabled(
+  req: NextApiRequest,
+  res: NextApiResponse,
+  requestedAiEnabled: unknown
+): Promise<boolean> {
+  const wants = Boolean(requestedAiEnabled) && requestedAiEnabled !== 0;
+  if (!wants) return false;
+
+  const session = await getServerSession(req, res, authOptions);
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) return false;
+
+  const access = getAccessContextForUser(userId);
+  return Boolean(access?.isPaid);
+}
+
+/**
+ * True if ANY user or organization in this instance currently has paid access (paid
+ * plan or super admin). Used by the send runner as a defense-in-depth check before
+ * honoring a step's stored `ai_enabled` flag, since workflow_steps rows have no owner to
+ * check individually — this catches rows that were written before coerceAiEnabled()
+ * existed, or written directly against the DB, from ever running AI generation once
+ * nobody paid anymore.
+ */
+export function hasAnyPaidAccess(): boolean {
+  const db = getDb();
+  const paidUser = db.prepare("SELECT 1 FROM users WHERE plan = 'paid' OR role = 'super_admin' LIMIT 1").get();
+  if (paidUser) return true;
+  const paidOrg = db.prepare("SELECT 1 FROM organizations WHERE plan = 'paid' LIMIT 1").get();
+  return Boolean(paidOrg);
+}

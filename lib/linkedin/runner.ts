@@ -13,6 +13,7 @@ import { scoreEmailSent } from "@/lib/scoring/lead-score";
 import { shouldSyncEmailInbox, syncEmailInbox } from "@/lib/email/inbox";
 import { enrichProfile } from "@/lib/linkedin/enrich";
 import { matchPerson } from "@/lib/apollo";
+import { hasAnyPaidAccess } from "@/lib/access";
 import { premium } from "@/lib/premium";
 import { decryptSecret } from "@/lib/crypto";
 
@@ -1543,12 +1544,22 @@ async function tick(db: ReturnType<typeof getDb>): Promise<void> {
 
   // Steps cache: (workflow_id, track) → steps filtered by that track
   const stepsCache = new Map<string, WorkflowStep[]>();
+  // Defense-in-depth for the AI paywall: computed once per run rather than per step
+  // (cheap query, but no need to re-run it hundreds of times in a big send). If nobody
+  // in this instance is currently paid, every step's ai_enabled is treated as off no
+  // matter what's stored in the DB — closes the gap for rows written before
+  // lib/access.ts's coerceAiEnabled() existed, or written directly against the DB.
+  const paidAccessExists = hasAnyPaidAccess();
   const getSteps = (workflowId: string, track: string): WorkflowStep[] => {
     const key = `${workflowId}|${track}`;
     if (!stepsCache.has(key)) {
-      stepsCache.set(key, db.prepare(
+      const rows = db.prepare(
         "SELECT * FROM workflow_steps WHERE workflow_id = ? AND track = ? ORDER BY step_order"
-      ).all(workflowId, track) as WorkflowStep[]);
+      ).all(workflowId, track) as WorkflowStep[];
+      if (!paidAccessExists) {
+        for (const row of rows) row.ai_enabled = 0;
+      }
+      stepsCache.set(key, rows);
     }
     return stepsCache.get(key)!;
   };

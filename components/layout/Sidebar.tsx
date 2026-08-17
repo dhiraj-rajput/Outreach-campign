@@ -8,7 +8,7 @@ import {
   RiUserSettingsLine, RiBuildingLine, RiContactsLine,
   RiInboxLine, RiCheckboxCircleLine,
   RiNewspaperLine, RiLinkedinBoxLine, RiMailSendLine,
-  RiSunLine, RiMoonLine, RiCloseLine, RiKanbanView, RiShieldStarLine, RiLockLine,
+  RiSunLine, RiMoonLine, RiCloseLine, RiKanbanView, RiShieldStarLine, RiLockLine, RiVipCrownLine,
 } from "react-icons/ri";
 import { getStoredTheme, setTheme, type ThemePreference } from "@/lib/theme";
 
@@ -32,6 +32,7 @@ const premiumNav = [
 ];
 
 const pipelineNav = { href: "/pipeline", label: "Pipeline", icon: RiKanbanView, tour: "nav-pipeline" };
+const pricingNav = { href: "/pricing", label: "Pricing", icon: RiVipCrownLine, tour: "nav-pricing" };
 const adminNav = { href: "/admin", label: "Admin", icon: RiShieldStarLine };
 
 type Props = {
@@ -81,7 +82,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const ThemeIcon = themePref === "light" ? RiSunLine : RiMoonLine;
   const themeLabel = themePref === "light" ? "Light" : "Dark";
 
-  function renderNavLink(item: { href: string; label: string; icon: React.ComponentType<{ size?: number }>; tour?: string }, labels: boolean, locked?: boolean) {
+  function renderNavLink(item: { href: string; label: string; icon: React.ComponentType<{ size?: number }>; tour?: string }, labels: boolean, locked?: boolean, badge?: string) {
     const active = isActive(item.href);
     const Icon = item.icon;
     return (
@@ -98,6 +99,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
         </span>
         {labels && <span className="text-sm font-medium truncate flex-1">{item.label}</span>}
         {labels && locked && <RiLockLine size={12} className="text-base-content/35 shrink-0" />}
+        {labels && badge && (
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-base-content/40 bg-base-300/60 rounded px-1.5 py-0.5 shrink-0">
+            {badge}
+          </span>
+        )}
       </Link>
     );
   }
@@ -184,6 +190,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             {renderNavLink(pipelineNav, labels, !isPaid)}
           </div>
 
+          {labels && <div className="nav-group-label">Billing</div>}
+          <div className="flex flex-col gap-0.5 px-1.5 mt-1">
+            {renderNavLink(pricingNav, labels, false, isPaid ? "Paid" : "Free")}
+          </div>
+
           {isSuperAdmin && (
             <>
               {labels && <div className="nav-group-label">Admin</div>}
@@ -195,20 +206,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
         </nav>
 
         <div className="pb-2 border-t border-base-300/40 pt-2 flex flex-col gap-0.5 px-1.5">
-          {!isPaid && (
-            <Link
-              href="/pricing"
-              onClick={onMobileClose}
-              title={!labels ? "Upgrade" : undefined}
-              className={`nav-item ${labels ? "px-2.5" : "justify-center"} !text-primary`}
-            >
-              <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0">
-                <RiShieldStarLine size={15} />
-              </span>
-              {labels && <span className="text-sm font-medium">Upgrade</span>}
-            </Link>
-          )}
-
           <button
             type="button"
             onClick={cycleTheme}

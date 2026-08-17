@@ -12,6 +12,12 @@ export default function PricingPage() {
   const [upgrading, setUpgrading] = useState<"self" | "org" | null>(null);
 
   async function handleUpgrade(scope: "self" | "org") {
+    const target = scope === "org" ? (status?.orgName ?? "your organization") : "your account";
+    const confirmed = window.confirm(
+      `Activate the Paid plan for ${target}?\n\nNo payment gateway is connected yet, so this won't charge a card — it just flips the plan flag so paid features unlock immediately. An admin can revert this any time from the Admin panel.`
+    );
+    if (!confirmed) return;
+
     setUpgrading(scope);
     try {
       const r = await fetch("/api/billing/upgrade", {
